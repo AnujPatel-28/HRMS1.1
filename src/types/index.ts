@@ -1,0 +1,167 @@
+export type EmployeeRole = "hr" | "employee";
+
+export interface Employee {
+  id: string;
+  user_id: string | null;
+  full_name: string;
+  email: string;
+  phone: string | null;
+  date_of_birth: string | null;
+  gender: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  department: "sales" | "dev" | "marketing" | "operations" | "design" | "other" | null;
+  designation: string | null;
+  employee_code: string | null;
+  date_of_joining: string | null;
+  employment_type: "full_time" | "part_time" | "contract" | "intern" | null;
+  status: "active" | "inactive" | "terminated";
+  aadhaar_number: string | null;
+  pan_number: string | null;
+  bank_name: string | null;
+  account_number: string | null;
+  ifsc_code: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  emergency_contact_relation: string | null;
+  profile_photo_url: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Attendance {
+  id: string;
+  employee_id: string;
+  date: string;
+  punch_in: string | null;
+  punch_out: string | null;
+  punch_out_allowed: boolean;
+  punch_in_ip: string | null;
+  punch_out_ip: string | null;
+  work_hours: number | null;
+  status: "present" | "absent" | "half_day" | "on_leave";
+  notes: string | null;
+  created_at: string;
+}
+
+export interface Leave {
+  id: string;
+  employee_id: string;
+  leave_type: "casual" | "sick" | "earned" | "unpaid" | "maternity" | "paternity" | "other" | null;
+  start_date: string;
+  end_date: string;
+  total_days: number | null;
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  rejection_reason: string | null;
+  applied_at: string;
+}
+
+export interface Holiday {
+  id: string;
+  name: string;
+  date: string;
+  type: "national" | "company" | "optional" | null;
+  description: string | null;
+  created_at: string;
+}
+
+export interface HRPolicy {
+  id: string;
+  title: string;
+  description: string | null;
+  file_url: string;
+  file_name: string | null;
+  uploaded_by: string | null;
+  visible_to: "all" | "hr_only" | "department-specific";
+  department_filter: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Task {
+  id: string;
+  title: string;
+  description: string | null;
+  assigned_to: string;
+  assigned_by: string;
+  department_filter: string | null;
+  priority: "low" | "medium" | "high" | "urgent";
+  due_date: string | null;
+  due_time: string | null;
+  status: "assigned" | "in_progress" | "submitted" | "approved" | "rejected";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskSubmission {
+  id: string;
+  task_id: string;
+  employee_id: string;
+  notes: string | null;
+  attachment_url: string | null;
+  attachment_name: string | null;
+  submitted_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_notes: string | null;
+  status: "pending" | "approved" | "rejected";
+}
+
+export interface CalendarEvent {
+  id: string;
+  employee_id: string;
+  date: string;
+  type: "green" | "red" | "absent" | "leave" | "holiday" | null;
+  task_id: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface ChatChannel {
+  id: string;
+  name: string;
+  description: string | null;
+  type: "global" | "department" | "custom";
+  target_departments: string[];
+  created_by: string | null;
+  created_at: string;
+  is_announcement: boolean;
+}
+
+export interface ChatMessage {
+  id: string;
+  sender_id: string;
+  channel: string;
+  channel_id: string | null;
+  content: string;
+  attachment_url: string | null;
+  attachment_name: string | null;
+  is_deleted: boolean;
+  created_at: string;
+}
+
+export interface Notification {
+  id: string;
+  employee_id: string;
+  title: string;
+  body: string;
+  type:
+    | "task_assigned"
+    | "task_approved"
+    | "task_rejected"
+    | "leave_approved"
+    | "leave_rejected"
+    | "punch_unlock"
+    | "new_policy"
+    | "general"
+    | null;
+  reference_id: string | null;
+  is_read: boolean;
+  created_at: string;
+}
