@@ -19,17 +19,34 @@ import HolidayList from "./hr/HolidayList";
 import HRLayout from "./hr/HRLayout";
 import LeaveManagement from "./hr/LeaveManagement";
 import PolicyUpload from "./hr/PolicyUpload";
+import HRSettings from "./hr/Settings";
 import TaskManagement from "./hr/TaskManagement";
+import PayrollLayout from "./payroll/PayrollLayout";
+import SalaryStructures from "./payroll/hr/SalaryStructures";
+import RunPayroll from "./payroll/hr/RunPayroll";
+import Payslips from "./payroll/hr/Payslips";
+import EmployeePayrollLayout from "./payroll/employee/EmployeePayrollLayout";
+import MyPayslips from "./payroll/employee/MyPayslips";
+import { AuthProvider } from "./contexts/AuthContext";
+import { TenantProvider } from "./contexts/TenantContext";
 import { useAuth } from "./hooks/useAuth";
 import Login from "./shared/Login";
+import ProductSelector from "./shared/ProductSelector";
+import { ToastProvider } from "./shared/ToastContext";
+import AdminLayout from "./admin/AdminLayout";
+import AdminDashboard from "./admin/AdminDashboard";
+import AllCompanies from "./admin/AllCompanies";
+import AddCompany from "./admin/AddCompany";
 import type { EmployeeRole } from "./types";
+
+function LoadingScreen() {
+  return <div className="grid min-h-screen place-items-center text-slate-500">Loading...</div>;
+}
 
 function RequireRole({ role, children }: { role: EmployeeRole; children: ReactElement }) {
   const { user, loading, role: currentRole } = useAuth();
 
-  if (loading) {
-    return <div className="grid min-h-screen place-items-center text-slate-500">Loading...</div>;
-  }
+  if (loading) return <LoadingScreen />;
 
   if (!user || currentRole !== role) {
     return <Navigate to="/" replace />;
@@ -38,52 +55,160 @@ function RequireRole({ role, children }: { role: EmployeeRole; children: ReactEl
   return children;
 }
 
+function RequireSuperAdmin({ children }: { children: ReactElement }) {
+  const { user, loading, role } = useAuth();
+
+  if (loading) {
+    return (
+      <div style={{ display: "grid", minHeight: "100vh", placeItems: "center", background: "#0f172a", color: "#64748b" }}>
+        Loading...
+      </div>
+    );
+  }
+
+  if (!user || role !== "superadmin") {
+    return <Navigate to="/" replace />;
+  }
+
+  return children;
+}
+
+function RequireAuthTenant({ children }: { children: ReactElement }) {
+  const { user, loading, role } = useAuth();
+
+  if (loading) return <LoadingScreen />;
+
+  if (!user || !role) {
+    return <Navigate to="/" replace />;
+  }
+
+  if (role === "superadmin") {
+    return <Navigate to="/admin/dashboard" replace />;
+  }
+
+  return <TenantProvider>{children}</TenantProvider>;
+}
+
+function AdminRoutes() {
+  return (
+    <AuthProvider>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <RequireSuperAdmin>
+              <AdminLayout />
+            </RequireSuperAdmin>
+          }
+        >
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<AdminDashboard />} />
+          <Route path="companies" element={<AllCompanies />} />
+          <Route path="add-company" element={<AddCompany />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
+      </Routes>
+    </AuthProvider>
+  );
+}
+
+function TenantRoutes() {
+  return (
+    <RequireAuthTenant>
+      <Routes>
+        <Route path="/select" element={<ProductSelector />} />
+
+        <Route
+          path="/hr"
+          element={
+            <RequireRole role="hr">
+              <HRLayout />
+            </RequireRole>
+          }
+        >
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<HRDashboard />} />
+          <Route path="employees" element={<EmployeeList />} />
+          <Route path="employees/create" element={<EmployeeCreate />} />
+          <Route path="employees/:employeeId" element={<EmployeeDetail />} />
+          <Route path="attendance" element={<HRAttendance />} />
+          <Route path="leaves" element={<LeaveManagement />} />
+          <Route path="tasks" element={<TaskManagement />} />
+          <Route path="policies" element={<PolicyUpload />} />
+          <Route path="holidays" element={<HolidayList />} />
+          <Route path="calendar" element={<HRCalendar />} />
+          <Route path="chat" element={<HRChat />} />
+          <Route path="settings" element={<HRSettings />} />
+        </Route>
+
+        <Route
+          path="/payroll"
+          element={
+            <RequireRole role="hr">
+              <PayrollLayout />
+            </RequireRole>
+          }
+        >
+          <Route index element={<Navigate to="hr/salaries" replace />} />
+          <Route path="hr/salaries" element={<SalaryStructures />} />
+          <Route path="hr/run" element={<RunPayroll />} />
+          <Route path="hr/payslips" element={<Payslips />} />
+        </Route>
+
+        <Route
+          path="/payroll/employee"
+          element={
+            <RequireRole role="employee">
+              <EmployeePayrollLayout />
+            </RequireRole>
+          }
+        >
+          <Route index element={<Navigate to="payslips" replace />} />
+          <Route path="payslips" element={<MyPayslips />} />
+        </Route>
+
+        <Route
+          path="/employee"
+          element={
+            <RequireRole role="employee">
+              <EmployeeLayout />
+            </RequireRole>
+          }
+        >
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<EmployeeDashboard />} />
+          <Route path="profile" element={<MyProfile />} />
+          <Route path="punch" element={<PunchInOut />} />
+          <Route path="leaves" element={<MyLeaves />} />
+          <Route path="tasks" element={<MyTasks />} />
+          <Route path="policies" element={<Policies />} />
+          <Route path="chat" element={<EmployeeChat />} />
+        </Route>
+
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </RequireAuthTenant>
+  );
+}
+
+function MainRoutes() {
+  return (
+    <AuthProvider>
+      <ToastProvider>
+        <Routes>
+          <Route path="/" element={<Login />} />
+          <Route path="/*" element={<TenantRoutes />} />
+        </Routes>
+      </ToastProvider>
+    </AuthProvider>
+  );
+}
+
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Login />} />
-
-      <Route
-        path="/hr"
-        element={
-          <RequireRole role="hr">
-            <HRLayout />
-          </RequireRole>
-        }
-      >
-        <Route index element={<Navigate to="dashboard" replace />} />
-        <Route path="dashboard" element={<HRDashboard />} />
-        <Route path="employees" element={<EmployeeList />} />
-        <Route path="employees/create" element={<EmployeeCreate />} />
-        <Route path="employees/:employeeId" element={<EmployeeDetail />} />
-        <Route path="attendance" element={<HRAttendance />} />
-        <Route path="leaves" element={<LeaveManagement />} />
-        <Route path="tasks" element={<TaskManagement />} />
-        <Route path="policies" element={<PolicyUpload />} />
-        <Route path="holidays" element={<HolidayList />} />
-        <Route path="calendar" element={<HRCalendar />} />
-        <Route path="chat" element={<HRChat />} />
-      </Route>
-
-      <Route
-        path="/employee"
-        element={
-          <RequireRole role="employee">
-            <EmployeeLayout />
-          </RequireRole>
-        }
-      >
-        <Route index element={<Navigate to="dashboard" replace />} />
-        <Route path="dashboard" element={<EmployeeDashboard />} />
-        <Route path="profile" element={<MyProfile />} />
-        <Route path="punch" element={<PunchInOut />} />
-        <Route path="leaves" element={<MyLeaves />} />
-        <Route path="tasks" element={<MyTasks />} />
-        <Route path="policies" element={<Policies />} />
-        <Route path="chat" element={<EmployeeChat />} />
-      </Route>
-
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="/admin/*" element={<AdminRoutes />} />
+      <Route path="/*" element={<MainRoutes />} />
     </Routes>
   );
 }

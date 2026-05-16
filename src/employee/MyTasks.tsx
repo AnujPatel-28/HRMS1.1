@@ -1,11 +1,48 @@
+
 import { useEffect, useRef, useState } from "react";
 import { Paperclip, X, CheckCircle, Clock, AlertCircle, XCircle, CheckSquare } from "lucide-react";
 import type { Task, TaskSubmission } from "../types";
-import { db, storage } from "../insforge/client";
+import { db } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
+import { useTenant } from "../contexts/TenantContext";
 import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
+
+const INSFORGE_URL = import.meta.env.VITE_INSFORGE_URL as string;
+const INSFORGE_KEY = import.meta.env.VITE_INSFORGE_KEY as string;
+
+/** Direct multipart upload using the deprecated PUT endpoint.
+ *  Bypasses the broken two-step SDK upload flow (upload-strategy → confirm-upload).
+ *  The task-attachments bucket is public so the anon key is sufficient. */
+async function uploadFileDirect(bucket: string, file: File): Promise<string> {
+  const ext = file.name.split(".").pop();
+  // Flat key — no slashes — avoids URL path routing issues
+  const key = `task-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(
+    `${INSFORGE_URL}/api/storage/buckets/${bucket}/objects/${key}`,
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${INSFORGE_KEY}` },
+      body: formData,
+    }
+  );
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Upload failed (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json() as { url?: string };
+  // Prefer the URL from the response; fall back to constructing it
+  return data.url
+    ? (data.url.startsWith("http") ? data.url : `${INSFORGE_URL}${data.url}`)
+    : `${INSFORGE_URL}/api/storage/buckets/${bucket}/objects/${key}`;
+}
+
 
 const PRIORITY_BADGE: Record<Task["priority"], string> = {
   low: "bg-slate-100 text-slate-600",
@@ -24,6 +61,7 @@ const STATUS_CONFIG: Record<Task["status"], { label: string; color: string; icon
 
 export default function MyTasks() {
   const { employee } = useEmployee();
+  const { tenantId } = useTenant();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [submissions, setSubmissions] = useState<Record<string, TaskSubmission>>({});
   const [loading, setLoading] = useState(true);
@@ -36,16 +74,16 @@ export default function MyTasks() {
   const { success, error } = useToast();
 
   const fetchTasks = async () => {
-    if (!employee?.id) return;
+    if (!employee?.id || !tenantId) return;
     try {
-      const { data: taskData, error: taskErr } = await db.from("tasks").select("*").eq("assigned_to", employee.id).order("created_at", { ascending: false });
+      const { data: taskData, error: taskErr } = await db.from("tasks").select("*").eq("tenant_id", tenantId).eq("assigned_to", employee.id).order("created_at", { ascending: false });
       if (taskErr) throw taskErr;
       const tList = (taskData ?? []) as Task[];
       setTasks(tList);
 
       const ids = tList.map(t => t.id);
       if (ids.length > 0) {
-        const { data: subData, error: subErr } = await db.from("task_submissions").select("*").in("task_id", ids);
+        const { data: subData, error: subErr } = await db.from("task_submissions").select("*").eq("tenant_id", tenantId).in("task_id", ids);
         if (subErr) throw subErr;
         const map: Record<string, TaskSubmission> = {};
         (subData ?? []).forEach((s: TaskSubmission) => { map[s.task_id] = s; });
@@ -58,27 +96,24 @@ export default function MyTasks() {
     }
   };
 
-  useEffect(() => { void fetchTasks(); }, [employee?.id]);
+  useEffect(() => { void fetchTasks(); }, [employee?.id, tenantId]);
 
   async function submitTask(task: Task) {
-    if (!employee?.id || submitting) return;
+    if (!employee?.id || !tenantId || submitting) return;
     setSubmitting(true);
     let attachment_url = null;
     let attachment_name = null;
 
     try {
       if (file) {
-        const ext = file.name.split(".").pop();
-        const path = `tasks/${employee.id}/${Date.now()}.${ext}`;
-        const { data: upData, error: upErr } = await storage.from("task-attachments").upload(path, file);
-        if (upErr) throw upErr;
-        attachment_url = upData?.url ?? null;
+        attachment_url = await uploadFileDirect("task-attachments", file);
         attachment_name = file.name;
       }
 
       const { error: subErr } = await db.from("task_submissions").insert([{
         task_id: task.id,
         employee_id: employee.id,
+        tenant_id: tenantId,
         notes: notes || null,
         attachment_url,
         attachment_name,
@@ -86,15 +121,16 @@ export default function MyTasks() {
       }]);
       if (subErr) throw subErr;
       
-      const { error: updErr } = await db.from("tasks").update({ status: "submitted" }).eq("id", task.id);
+      const { error: updErr } = await db.from("tasks").update({ status: "submitted" }).eq("tenant_id", tenantId).eq("id", task.id);
       if (updErr) throw updErr;
 
       // Notify HR
-      const { data: hrEmps } = await db.from("employees").select("id").eq("department", "operations");
+      const { data: hrEmps } = await db.from("employees").select("id").eq("tenant_id", tenantId).eq("department", "operations");
       if (hrEmps && hrEmps.length > 0) {
         await db.from("notifications").insert(
           hrEmps.map((h: { id: string }) => ({
             employee_id: h.id,
+            tenant_id: tenantId,
             title: "Task Submitted",
             body: `${employee.full_name} submitted: "${task.title}"`,
             type: "general",

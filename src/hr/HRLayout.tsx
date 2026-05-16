@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { LogOut, Menu, X } from "lucide-react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
 
@@ -16,6 +16,7 @@ const links = [
   ["Holidays", "/hr/holidays"],
   ["Calendar", "/hr/calendar"],
   ["Chat", "/hr/chat"],
+  ["Settings", "/hr/settings"],
 ] as const;
 
 export default function HRLayout() {
@@ -43,6 +44,9 @@ export default function HRLayout() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <Link to="/select" className="hidden text-xs font-medium text-slate-500 hover:text-brand-700 sm:inline">
+              ⟵ Switch product
+            </Link>
             <NotificationBell />
             <div className="hidden text-right sm:block">
               <p className="text-xs text-slate-500">Logged in as</p>

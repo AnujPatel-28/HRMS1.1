@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LogOut, LayoutDashboard, User, Clock, Calendar, ClipboardList, FileText, MessageSquare, Menu, X } from "lucide-react";
+import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { LogOut, LayoutDashboard, User, Clock, Calendar, ClipboardList, FileText, MessageSquare, Menu, X, Wallet } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
 import { NotificationBell } from "../shared/NotificationBell";
@@ -13,6 +13,7 @@ const links = [
   { label: "My Tasks", href: "/employee/tasks", icon: ClipboardList },
   { label: "Policies", href: "/employee/policies", icon: FileText },
   { label: "Chat", href: "/employee/chat", icon: MessageSquare },
+  { label: "Payslips", href: "/payroll/employee/payslips", icon: Wallet },
 ] as const;
 
 const DEPT_COLORS: Record<string, string> = {
@@ -51,6 +52,9 @@ export default function EmployeeLayout() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <Link to="/select" className="hidden text-xs font-medium text-slate-500 hover:text-brand-700 sm:inline">
+              ⟵ Switch product
+            </Link>
             <NotificationBell />
             <div className="hidden items-center gap-3 sm:flex">
               {employee?.profile_photo_url ? (

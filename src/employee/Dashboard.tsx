@@ -4,6 +4,7 @@ import { Clock, Calendar, ClipboardList, TrendingUp } from "lucide-react";
 import type { Attendance, Leave, Task } from "../types";
 import { db } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
+import { useTenant } from "../contexts/TenantContext";
 import { Skeleton } from "../shared/Skeleton";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -11,6 +12,7 @@ const MONTH_START = TODAY.slice(0, 7) + "-01";
 
 export default function EmployeeDashboard() {
   const { employee } = useEmployee();
+  const { tenantId } = useTenant();
   const [todayAtt, setTodayAtt] = useState<Attendance | null>(null);
   const [monthAtt, setMonthAtt] = useState<Attendance[]>([]);
   const [leaves, setLeaves] = useState<Leave[]>([]);
@@ -18,14 +20,14 @@ export default function EmployeeDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!employee?.id) return;
+    if (!employee?.id || !tenantId) return;
     const fetch = async () => {
       setLoading(true);
       const [attTodayRes, attMonthRes, leavesRes, tasksRes] = await Promise.all([
-        db.from("attendance").select("*").eq("employee_id", employee.id).eq("date", TODAY).maybeSingle(),
-        db.from("attendance").select("*").eq("employee_id", employee.id).gte("date", MONTH_START).lte("date", TODAY),
-        db.from("leaves").select("*").eq("employee_id", employee.id).order("applied_at", { ascending: false }).limit(5),
-        db.from("tasks").select("*").eq("assigned_to", employee.id).order("created_at", { ascending: false }).limit(5),
+        db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("date", TODAY).maybeSingle(),
+        db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).gte("date", MONTH_START).lte("date", TODAY),
+        db.from("leaves").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).order("applied_at", { ascending: false }).limit(5),
+        db.from("tasks").select("*").eq("tenant_id", tenantId).eq("assigned_to", employee.id).order("created_at", { ascending: false }).limit(5),
       ]);
       setTodayAtt(attTodayRes.data as Attendance | null);
       setMonthAtt((attMonthRes.data ?? []) as Attendance[]);
@@ -34,7 +36,7 @@ export default function EmployeeDashboard() {
       setLoading(false);
     };
     void fetch();
-  }, [employee?.id]);
+  }, [employee?.id, tenantId]);
 
   const daysPresent = monthAtt.filter(a => a.status === "present" || a.status === "half_day").length;
   const daysLeave = monthAtt.filter(a => a.status === "on_leave").length;

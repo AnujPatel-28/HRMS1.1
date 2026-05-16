@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, X, Eye, Paperclip, ChevronDown, ChevronUp, Trash2, ClipboardList } from "lucide-react";
 import type { Employee, Task, TaskSubmission } from "../types";
+import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
+import { useAuditLog } from "../hooks/useAuditLog";
 import { useEmployee } from "../hooks/useEmployee";
 import { useToast } from "../shared/ToastContext";
 import { ConfirmModal } from "../shared/ConfirmModal";
@@ -36,6 +38,8 @@ const EMPTY_FORM = {
 
 export default function TaskManagement() {
   const { employee: hrEmployee } = useEmployee();
+  const { tenantId } = useTenant();
+  const { logAction } = useAuditLog();
   const [tab, setTab] = useState<Tab>("active");
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [tasks, setTasks] = useState<TaskWithEmployee[]>([]);
@@ -56,14 +60,14 @@ export default function TaskManagement() {
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; taskId: string | null }>({ isOpen: false, taskId: null });
 
   useEffect(() => {
-    db.from("employees").select("*").eq("status","active").order("full_name")
+    db.from("employees").select("*").eq("tenant_id", tenantId).eq("status","active").order("full_name")
       .then(({ data }) => { if (data) setEmployees(data as Employee[]); });
-  }, []);
+  }, [tenantId]);
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
     try {
-      let q = db.from("tasks").select("*").order("created_at", { ascending: false });
+      let q = db.from("tasks").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false });
       if (tab === "active") q = q.in("status", ["assigned","in_progress","submitted"]);
       if (tab === "inbox") q = q.eq("status","submitted");
       if (statusFilter !== "all" && tab === "all") q = q.eq("status", statusFilter);
@@ -77,7 +81,7 @@ export default function TaskManagement() {
       const subIds = taskList.filter(t => ["submitted","approved","rejected"].includes(t.status)).map(t => t.id);
       let subMap: Record<string,TaskSubmission> = {};
       if (subIds.length > 0) {
-        const { data: subs } = await db.from("task_submissions").select("*").in("task_id", subIds);
+        const { data: subs } = await db.from("task_submissions").select("*").eq("tenant_id", tenantId).in("task_id", subIds);
         (subs ?? []).forEach((s: TaskSubmission) => { subMap[s.task_id] = s; });
       }
       const empMap: Record<string,Employee> = {};
@@ -88,7 +92,7 @@ export default function TaskManagement() {
     } finally {
       setLoading(false);
     }
-  }, [tab, statusFilter, priorityFilter, empFilter, deptFilter, employees, toastError]);
+  }, [tab, statusFilter, priorityFilter, empFilter, deptFilter, employees, tenantId, toastError]);
 
   useEffect(() => { if (employees.length >= 0) void fetchTasks(); }, [fetchTasks, employees]);
 
@@ -104,12 +108,14 @@ export default function TaskManagement() {
       for (const emp of targets) {
         await db.from("tasks").insert([{
           title: form.title, description: form.description || null,
+          tenant_id: tenantId,
           assigned_to: emp.id, assigned_by: hrEmployee.id,
           department_filter: form.assign_mode === "department" ? form.department : null,
           priority: form.priority, due_date: form.due_date || null, due_time: form.due_time || null,
           status: "assigned",
         }]);
         await db.from("notifications").insert([{
+          tenant_id: tenantId,
           employee_id: emp.id, title: "New Task Assigned",
           body: `You have been assigned: "${form.title}"${form.due_date ? ` — due ${form.due_date}` : ""}`,
           type: "task_assigned",
@@ -131,21 +137,24 @@ export default function TaskManagement() {
     setSavingReview(true);
     try {
       const today = new Date().toISOString().slice(0,10);
-      await db.from("tasks").update({ status: "approved" }).eq("id", task.id);
+      await db.from("tasks").update({ status: "approved" }).eq("tenant_id", tenantId).eq("id", task.id);
       await db.from("task_submissions").update({
         status: "approved", reviewed_by: hrEmployee.id, reviewed_at: new Date().toISOString(),
-      }).eq("id", task.submission.id);
+      }).eq("tenant_id", tenantId).eq("id", task.submission.id);
       await db.from("attendance").update({ punch_out_allowed: true })
-        .eq("employee_id", task.assigned_to).eq("date", today);
+        .eq("tenant_id", tenantId).eq("employee_id", task.assigned_to).eq("date", today);
       await db.from("calendar_events").insert([{
+        tenant_id: tenantId,
         employee_id: task.assigned_to, date: today, type: "green", task_id: task.id,
         notes: `Task approved: ${task.title}`,
       }]);
       await db.from("notifications").insert([{
+        tenant_id: tenantId,
         employee_id: task.assigned_to, title: "Task Approved ✅",
         body: `Your task "${task.title}" was approved — you can now punch out.`,
         type: "task_approved", reference_id: task.id,
       }]);
+      void logAction("task.approved", "task", task.id);
       success("Task approved.");
     } catch (err) {
       toastError("Failed to approve task.");
@@ -159,16 +168,18 @@ export default function TaskManagement() {
     if (!hrEmployee?.id || !task.submission) return;
     setSavingReview(true);
     try {
-      await db.from("tasks").update({ status: "assigned" }).eq("id", task.id);
+      await db.from("tasks").update({ status: "assigned" }).eq("tenant_id", tenantId).eq("id", task.id);
       await db.from("task_submissions").update({
         status: "rejected", reviewed_by: hrEmployee.id, reviewed_at: new Date().toISOString(),
         review_notes: rejectNotes || null,
-      }).eq("id", task.submission.id);
+      }).eq("tenant_id", tenantId).eq("id", task.submission.id);
       await db.from("notifications").insert([{
+        tenant_id: tenantId,
         employee_id: task.assigned_to, title: "Task Rejected",
         body: `Your task "${task.title}" was rejected.${rejectNotes ? ` Reason: ${rejectNotes}` : ""} Please resubmit.`,
         type: "task_rejected", reference_id: task.id,
       }]);
+      void logAction("task.rejected", "task", task.id, { reason: rejectNotes });
       success("Task rejected.");
       setRejectId(null); setRejectNotes("");
     } catch (err) {
@@ -182,7 +193,7 @@ export default function TaskManagement() {
   async function handleDeleteTask() {
     if (!deleteModal.taskId) return;
     try {
-      await db.from("tasks").delete().eq("id", deleteModal.taskId);
+      await db.from("tasks").delete().eq("tenant_id", tenantId).eq("id", deleteModal.taskId);
       success("Task deleted.");
       setDeleteModal({ isOpen: false, taskId: null });
       void fetchTasks();

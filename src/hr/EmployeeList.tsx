@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Users } from "lucide-react";
 import type { Employee } from "../types";
+import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
 import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
@@ -9,6 +10,7 @@ import { EmptyState } from "../shared/EmptyState";
 
 export default function EmployeeList() {
   const navigate = useNavigate();
+  const { tenantId } = useTenant();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -22,7 +24,11 @@ export default function EmployeeList() {
 
     const fetchEmployees = async () => {
       try {
-        const { data, error } = await db.from("employees").select("*").order("created_at", { ascending: false });
+        const { data, error } = await db
+          .from("employees")
+          .select("*")
+          .eq("tenant_id", tenantId)
+          .order("created_at", { ascending: false });
 
         if (error) throw error;
 
@@ -40,7 +46,7 @@ export default function EmployeeList() {
     return () => {
       active = false;
     };
-  }, [toastError]);
+  }, [tenantId, toastError]);
 
   const filteredEmployees = useMemo(() => {
     const normalizedQuery = search.trim().toLowerCase();

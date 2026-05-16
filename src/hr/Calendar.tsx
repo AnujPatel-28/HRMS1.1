@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { Attendance, CalendarEvent, Employee, Holiday, Leave, Task } from "../types";
+import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -20,6 +21,7 @@ type DayPopup = {
 };
 
 export default function HRCalendar() {
+  const { tenantId } = useTenant();
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth());
   const [deptFilter, setDeptFilter] = useState("all");
@@ -39,18 +41,18 @@ export default function HRCalendar() {
   }, [year,month]);
 
   useEffect(() => {
-    db.from("employees").select("*").eq("status","active").order("full_name")
+    db.from("employees").select("*").eq("tenant_id", tenantId).eq("status","active").order("full_name")
       .then(({ data }) => { if (data) setEmployees(data as Employee[]); });
-  }, []);
+  }, [tenantId]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     const [attQ, leaveQ, evtQ, holQ, taskQ] = await Promise.all([
-      db.from("attendance").select("*").gte("date",startDate).lte("date",endDate),
-      db.from("leaves").select("*").eq("status","approved").gte("start_date",startDate).lte("end_date",endDate),
-      db.from("calendar_events").select("*").gte("date",startDate).lte("date",endDate),
-      db.from("holidays").select("*").gte("date",startDate).lte("date",endDate),
-      db.from("tasks").select("*").gte("due_date",startDate).lte("due_date",endDate),
+      db.from("attendance").select("*").eq("tenant_id", tenantId).gte("date",startDate).lte("date",endDate),
+      db.from("leaves").select("*").eq("tenant_id", tenantId).eq("status","approved").gte("start_date",startDate).lte("end_date",endDate),
+      db.from("calendar_events").select("*").eq("tenant_id", tenantId).gte("date",startDate).lte("date",endDate),
+      db.from("holidays").select("*").eq("tenant_id", tenantId).gte("date",startDate).lte("date",endDate),
+      db.from("tasks").select("*").eq("tenant_id", tenantId).gte("due_date",startDate).lte("due_date",endDate),
     ]);
     setAttendance((attQ.data??[]) as Attendance[]);
     setLeaves((leaveQ.data??[]) as Leave[]);
@@ -58,7 +60,7 @@ export default function HRCalendar() {
     setHolidays((holQ.data??[]) as Holiday[]);
     setTasks((taskQ.data??[]) as Task[]);
     setLoading(false);
-  }, [startDate, endDate]);
+  }, [startDate, endDate, tenantId]);
 
   useEffect(() => { void fetchData(); }, [fetchData]);
 

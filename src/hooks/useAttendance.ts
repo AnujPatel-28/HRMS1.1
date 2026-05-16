@@ -1,8 +1,10 @@
 import { useCallback, useState } from "react";
+import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
 import type { Attendance } from "../types";
 
 export function useAttendance(employeeId?: string) {
+  const { tenantId } = useTenant();
   const [items, setItems] = useState<Attendance[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -12,11 +14,12 @@ export function useAttendance(employeeId?: string) {
     const { data } = await db
       .from("attendance")
       .select("*")
+      .eq("tenant_id", tenantId)
       .eq("employee_id", employeeId)
       .order("date", { ascending: false });
     setItems((data as Attendance[]) ?? []);
     setLoading(false);
-  }, [employeeId]);
+  }, [employeeId, tenantId]);
 
   const punchIn = useCallback(
     async (ipAddress?: string) => {
@@ -25,6 +28,7 @@ export function useAttendance(employeeId?: string) {
       await db.from("attendance").insert([
         {
           employee_id: employeeId,
+          tenant_id: tenantId,
           date: today,
           punch_in: new Date().toISOString(),
           punch_in_ip: ipAddress ?? null,
@@ -33,7 +37,7 @@ export function useAttendance(employeeId?: string) {
       ]);
       await fetchAttendance();
     },
-    [employeeId, fetchAttendance],
+    [employeeId, fetchAttendance, tenantId],
   );
 
   const punchOut = useCallback(
@@ -42,10 +46,11 @@ export function useAttendance(employeeId?: string) {
       await db
         .from("attendance")
         .update({ punch_out: now, punch_out_ip: ipAddress ?? null, punch_out_allowed: false })
+        .eq("tenant_id", tenantId)
         .eq("id", attendanceId);
       await fetchAttendance();
     },
-    [fetchAttendance],
+    [fetchAttendance, tenantId],
   );
 
   return { items, loading, fetchAttendance, punchIn, punchOut };

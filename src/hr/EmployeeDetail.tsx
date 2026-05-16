@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { Attendance, Employee, Leave, Task } from "../types";
-import { db, storage } from "../insforge/client";
+import { useTenant } from "../contexts/TenantContext";
+import { db, storage, insforge } from "../insforge/client";
+import { useAuditLog } from "../hooks/useAuditLog";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { File, Calendar, ClipboardList } from "lucide-react";
@@ -36,6 +38,8 @@ const maskValue = (value: string | null, visible: boolean, minVisible = 4) => {
 export default function EmployeeDetail() {
   const { employeeId } = useParams<{ employeeId: string }>();
   const navigate = useNavigate();
+  const { tenantId } = useTenant();
+  const { logAction } = useAuditLog();
 
   const [activeTab, setActiveTab] = useState<TabKey>("personal");
   const [employee, setEmployee] = useState<Employee | null>(null);
@@ -50,13 +54,25 @@ export default function EmployeeDetail() {
   const [showSensitive, setShowSensitive] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ── Reset Password states (isolated from all other logic) ──
+  type ResetStep = null | "sending" | "sent" | "confirming" | "done";
+  const [resetStep, setResetStep] = useState<ResetStep>(null);
+  const [resetNewPassword, setResetNewPassword] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+
   const loadData = async () => {
     if (!employeeId) return;
 
     setLoading(true);
     setError(null);
 
-    const employeeRes = await db.from("employees").select("*").eq("id", employeeId).maybeSingle();
+    const employeeRes = await db
+      .from("employees")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("id", employeeId)
+      .maybeSingle();
     if (employeeRes.error || !employeeRes.data) {
       setError(employeeRes.error?.message ?? "Employee not found.");
       setLoading(false);
@@ -74,11 +90,12 @@ export default function EmployeeDetail() {
       db
         .from("attendance")
         .select("*")
+        .eq("tenant_id", tenantId)
         .eq("employee_id", currentEmployee.id)
         .gte("date", toIsoDate(fromDate))
         .order("date", { ascending: true }),
-      db.from("leaves").select("*").eq("employee_id", currentEmployee.id).order("applied_at", { ascending: false }),
-      db.from("tasks").select("*").eq("assigned_to", currentEmployee.id).order("created_at", { ascending: false }),
+      db.from("leaves").select("*").eq("tenant_id", tenantId).eq("employee_id", currentEmployee.id).order("applied_at", { ascending: false }),
+      db.from("tasks").select("*").eq("tenant_id", tenantId).eq("assigned_to", currentEmployee.id).order("created_at", { ascending: false }),
       storage.from("employee-documents").list({ prefix: `employees/${currentEmployee.id}/`, limit: 200, offset: 0 }),
     ]);
 
@@ -102,7 +119,7 @@ export default function EmployeeDetail() {
 
   useEffect(() => {
     void loadData();
-  }, [employeeId]);
+  }, [employeeId, tenantId]);
 
   const attendanceMap = useMemo(() => {
     return attendance.reduce<Record<string, Attendance["status"]>>((acc, item) => {
@@ -160,13 +177,15 @@ export default function EmployeeDetail() {
       emergency_contact_relation: editForm.emergency_contact_relation,
     };
 
-    const { error: updateError } = await db.from("employees").update(payload).eq("id", employee.id);
+    const { error: updateError } = await db.from("employees").update(payload).eq("tenant_id", tenantId).eq("id", employee.id);
 
     if (updateError) {
       setError(updateError.message);
       setSaving(false);
       return;
     }
+
+    void logAction("employee.updated", "employee", employee.id, { fields_changed: Object.keys(payload) });
 
     await loadData();
     setIsEditing(false);
@@ -176,7 +195,7 @@ export default function EmployeeDetail() {
   const updateStatus = async (status: Employee["status"]) => {
     if (!employee) return;
     setSaving(true);
-    const { error: updateError } = await db.from("employees").update({ status }).eq("id", employee.id);
+    const { error: updateError } = await db.from("employees").update({ status }).eq("tenant_id", tenantId).eq("id", employee.id);
 
     if (updateError) {
       setError(updateError.message);
@@ -184,8 +203,51 @@ export default function EmployeeDetail() {
       return;
     }
 
+    if (status === "terminated") {
+      void logAction("employee.terminated", "employee", employee.id);
+    }
+
     await loadData();
     setSaving(false);
+  };
+
+  // ── Reset Password handlers ──
+  const openPasswordReset = () => {
+    if (!employee?.email) return;
+    setResetError(null);
+    setResetNewPassword("");
+    setResetStep("sent");
+  };
+
+  const confirmPasswordReset = async () => {
+    if (!employee?.email || resetNewPassword.trim().length < 8) return;
+    setResetLoading(true);
+    setResetError(null);
+    setResetStep("confirming");
+    try {
+      const fnRes = await insforge.functions.invoke("set-employee-password", {
+        body: { email: employee.email, password: resetNewPassword.trim() },
+      });
+      if (fnRes.error || !fnRes.data?.success) {
+        const msg: string = fnRes.data?.error ?? fnRes.error?.message ?? "Failed to update password.";
+        setResetError(msg);
+        setResetStep("sent");
+      } else {
+        setResetStep("done");
+        setResetNewPassword("");
+      }
+    } catch (err) {
+      setResetError(err instanceof Error ? err.message : "Failed to update password.");
+      setResetStep("sent");
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const cancelReset = () => {
+    setResetStep(null);
+    setResetNewPassword("");
+    setResetError(null);
   };
 
   if (loading) {
@@ -267,6 +329,14 @@ export default function EmployeeDetail() {
           ) : null}
           <button
             type="button"
+            disabled={saving || resetLoading || resetStep !== null}
+            onClick={openPasswordReset}
+            className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-60"
+          >
+            Reset Password
+          </button>
+          <button
+            type="button"
             disabled={saving || employee.status === "inactive"}
             onClick={() => {
               void updateStatus("inactive");
@@ -289,6 +359,58 @@ export default function EmployeeDetail() {
       </div>
 
       {error ? <p className="mt-3 text-sm text-rose-600">{error}</p> : null}
+
+      {/* ── Inline Reset Password panel ── */}
+      {(resetStep === "sent" || resetStep === "confirming" || resetStep === "done") && (
+        <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50 p-4">
+          {resetStep === "done" ? (
+            <div className="flex items-center gap-3">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-violet-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              <div>
+                <p className="text-sm font-semibold text-violet-900">Password updated successfully!</p>
+                <p className="text-xs text-violet-700 mt-0.5">The employee can now log in with their new password.</p>
+              </div>
+              <button type="button" onClick={cancelReset} className="ml-auto text-xs text-violet-600 underline hover:no-underline">Dismiss</button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-violet-900">Reset Employee Password</p>
+                  <p className="text-xs text-violet-700 mt-0.5">
+                    Set a new login password for <strong>{employee.email}</strong>. The employee can use it immediately after saving.
+                  </p>
+                </div>
+                <button type="button" onClick={cancelReset} className="shrink-0 text-xs text-violet-500 underline hover:no-underline">Cancel</button>
+              </div>
+
+              {resetError && (
+                <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{resetError}</p>
+              )}
+
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  placeholder="New password, minimum 8 characters"
+                  value={resetNewPassword}
+                  onChange={(e) => setResetNewPassword(e.target.value)}
+                  className="flex-1 rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm outline-none ring-violet-400 focus:ring"
+                />
+                <button
+                  type="button"
+                  disabled={resetLoading || resetNewPassword.trim().length < 8}
+                  onClick={() => { void confirmPasswordReset(); }}
+                  className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+                >
+                  {resetStep === "confirming" ? "Saving…" : "Set Password"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
         {tabs.map((tab) => (

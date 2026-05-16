@@ -3,10 +3,12 @@ import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { auth } from "../insforge/client";
 import { useAuth } from "../hooks/useAuth";
+import { useAuditLog } from "../hooks/useAuditLog";
 
 export default function Login() {
   const navigate = useNavigate();
   const { login, verifyEmail, role, user, loading } = useAuth();
+  const { logAction } = useAuditLog();
 
   // Step 1: credentials
   const [email, setEmail] = useState("");
@@ -26,17 +28,24 @@ export default function Login() {
 
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
 
+  const getPostLoginPath = (userId: string, currentRole: typeof role) => {
+    if (currentRole === "superadmin") return "/admin/dashboard";
+    const lastProduct = localStorage.getItem(`talentmesh_last_product_${userId}`);
+    if (currentRole === "hr" && lastProduct === "hr") return "/hr/dashboard";
+    if (currentRole === "employee" && lastProduct === "employee") return "/employee/dashboard";
+    return "/select";
+  };
+
   useEffect(() => {
-    if (role === "hr") navigate("/hr/dashboard", { replace: true });
-    if (role === "employee") navigate("/employee/dashboard", { replace: true });
-  }, [role, navigate]);
+    if (user?.id && role) navigate(getPostLoginPath(user.id, role), { replace: true });
+  }, [role, user?.id, navigate]);
 
   if (loading) {
     return <div className="grid min-h-screen place-items-center text-slate-500">Loading...</div>;
   }
 
   if (user && role) {
-    return <Navigate to={role === "hr" ? "/hr/dashboard" : "/employee/dashboard"} replace />;
+    return <Navigate to={getPostLoginPath(user.id, role)} replace />;
   }
 
   // ── Step 1: Sign In ──────────────────────────────────────────────────────────
@@ -59,7 +68,13 @@ export default function Login() {
     }
 
     if (result.error) {
+      void logAction("login.failed", "employee", undefined, { email });
       setError(result.error);
+    } else {
+      const { data } = await auth.getCurrentUser();
+      if (data?.user?.id) {
+        void logAction("login.success", "employee", data.user.id, { email });
+      }
     }
 
     setSubmitting(false);
@@ -102,9 +117,15 @@ export default function Login() {
 
     const result = await verifyEmail(pendingEmail, code);
     if (result.error) {
+      void logAction("login.failed", "employee", undefined, { email: pendingEmail });
       setOtpError(result.error);
       setVerifying(false);
       return;
+    } else {
+      const { data } = await auth.getCurrentUser();
+      if (data?.user?.id) {
+        void logAction("login.success", "employee", data.user.id, { email: pendingEmail });
+      }
     }
     // verifyEmail sets user+role in context → useEffect navigates automatically
   };

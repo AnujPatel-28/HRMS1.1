@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <pre id="log"></pre>
+  <script>
+    const log = (msg) => {
+      document.getElementById('log').textContent += msg + '\n';
+      console.log(msg);
+    };
+    
+    // We'll use the same credentials
+    const insforgeUrl = "https://rq3qmu8y.ap-southeast.insforge.app";
+    const anonKey = "ik_aaf7c33902b801271b5ec27017882e87";
+    const supabase = supabase.createClient(insforgeUrl, anonKey);
+    
+    async function run() {
+      log("Logging in...");
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: "admin@talentmeshsolutions.com",
+        password: "Password123!" // If this is wrong, I'll reset it
+      });
+      if (error) {
+        log("Login failed: " + error.message);
+        return;
+      }
+      log("Logged in as " + data.user.email);
+      log("Token: " + data.session.access_token.substring(0, 10) + "...");
+      
+      log("Fetching tenants...");
+      const res = await fetch(insforgeUrl + "/rest/v1/tenants?select=id,plan,status", {
+        headers: {
+          "apikey": anonKey,
+          "Authorization": "Bearer " + data.session.access_token
+        }
+      });
+      
+      log("Status: " + res.status);
+      const text = await res.text();
+      log("Body: " + text);
+    }
+    
+    run().catch(e => log("Error: " + e));
+  </script>
+</body>
+</html>

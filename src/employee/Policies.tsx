@@ -3,12 +3,14 @@ import { FileText, Eye, X } from "lucide-react";
 import type { HRPolicy } from "../types";
 import { db } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
+import { useTenant } from "../contexts/TenantContext";
 import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 
 export default function Policies() {
   const { employee } = useEmployee();
+  const { tenantId } = useTenant();
   const [policies, setPolicies] = useState<HRPolicy[]>([]);
   const [loading, setLoading] = useState(true);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -16,10 +18,11 @@ export default function Policies() {
   const { error } = useToast();
 
   const fetchPolicies = useCallback(async () => {
-    if (!employee?.id) return;
+    if (!employee?.id || !tenantId) return;
     try {
       // Fetch policies visible to this employee: 'all' or their department
       const { data, error: fetchErr } = await db.from("hr_policies").select("*")
+        .eq("tenant_id", tenantId)
         .in("visible_to", ["all", ...(employee.department ? ["department-specific"] : [])])
         .order("created_at", { ascending: false });
 
@@ -37,7 +40,7 @@ export default function Policies() {
     } finally {
       setLoading(false);
     }
-  }, [employee?.id, employee?.department, error]);
+  }, [employee?.id, employee?.department, tenantId, error]);
 
   useEffect(() => { void fetchPolicies(); }, [fetchPolicies]);
 

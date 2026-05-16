@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Upload, FileText, Trash2, X, Eye } from "lucide-react";
 import type { HRPolicy } from "../types";
+import { useTenant } from "../contexts/TenantContext";
 import { db, storage } from "../insforge/client";
+import { useAuditLog } from "../hooks/useAuditLog";
 import { useEmployee } from "../hooks/useEmployee";
 import { useToast } from "../shared/ToastContext";
 import { ConfirmModal } from "../shared/ConfirmModal";
@@ -12,6 +14,8 @@ const DEPT_OPTIONS = ["sales", "dev", "marketing", "operations", "design", "othe
 
 export default function PolicyUpload() {
   const { employee: hrEmployee } = useEmployee();
+  const { tenantId } = useTenant();
+  const { logAction } = useAuditLog();
   const [policies, setPolicies] = useState<HRPolicy[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -27,7 +31,7 @@ export default function PolicyUpload() {
   const fetchPolicies = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error: fetchErr } = await db.from("hr_policies").select("*").order("created_at", { ascending: false });
+      const { data, error: fetchErr } = await db.from("hr_policies").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false });
       if (fetchErr) throw fetchErr;
       if (data) setPolicies(data as HRPolicy[]);
     } catch (err) {
@@ -35,7 +39,7 @@ export default function PolicyUpload() {
     } finally {
       setLoading(false);
     }
-  }, [toastError]);
+  }, [tenantId, toastError]);
 
   useEffect(() => {
     void fetchPolicies();
@@ -58,7 +62,8 @@ export default function PolicyUpload() {
       const publicUrl = storage.from("hr-policies").getPublicUrl(filePath);
 
       // Insert into DB
-      await db.from("hr_policies").insert([{
+      const { data: inserted, error: insertError } = await db.from("hr_policies").insert([{
+        tenant_id: tenantId,
         title,
         description: description || null,
         file_url: publicUrl,
@@ -66,12 +71,14 @@ export default function PolicyUpload() {
         uploaded_by: hrEmployee.id,
         visible_to: visibility,
         department_filter: visibility === "department-specific" ? department : null,
-      }]);
+      }]).select("id").single();
+
+      if (insertError) throw insertError;
 
       // Notify
       const titlePrefix = visibility === "all" ? "New Company Policy:" : `New Policy for ${department}:`;
       const notifType = "new_policy";
-      let q = db.from("employees").select("id").eq("status", "active");
+      let q = db.from("employees").select("id").eq("tenant_id", tenantId).eq("status", "active");
       if (visibility === "department-specific" && department) {
         q = q.eq("department", department);
       }
@@ -80,6 +87,7 @@ export default function PolicyUpload() {
       if (targets && targets.length > 0) {
         await db.from("notifications").insert(
           targets.map(t => ({
+            tenant_id: tenantId,
             employee_id: t.id,
             title: "New HR Policy Document",
             body: `${titlePrefix} ${title}`,
@@ -87,6 +95,8 @@ export default function PolicyUpload() {
           }))
         );
       }
+
+      void logAction("policy.uploaded", "hr_policy", inserted?.id);
 
       setFile(null); setTitle(""); setDescription(""); setVisibility("all"); setDepartment("");
       success("Policy uploaded successfully.");
@@ -108,7 +118,8 @@ export default function PolicyUpload() {
         const filePath = pathParts[1];
         await storage.from("hr-policies").remove(filePath);
       }
-      await db.from("hr_policies").delete().eq("id", deletePolicyItem.id);
+      await db.from("hr_policies").delete().eq("tenant_id", tenantId).eq("id", deletePolicyItem.id);
+      void logAction("policy.deleted", "hr_policy", deletePolicyItem.id);
       success("Policy deleted.");
       setDeletePolicyItem(null);
       void fetchPolicies();

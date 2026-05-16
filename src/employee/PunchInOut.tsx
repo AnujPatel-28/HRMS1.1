@@ -3,7 +3,9 @@ import { Link } from "react-router-dom";
 import { Lock, LogIn, LogOut, Clock, CheckCircle } from "lucide-react";
 import type { Attendance, Task } from "../types";
 import { db } from "../insforge/client";
+import { useAuditLog } from "../hooks/useAuditLog";
 import { useEmployee } from "../hooks/useEmployee";
+import { useTenant } from "../contexts/TenantContext";
 import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
 
@@ -11,6 +13,8 @@ const TODAY = new Date().toISOString().slice(0, 10);
 
 export default function PunchInOut() {
   const { employee } = useEmployee();
+  const { tenant, tenantId } = useTenant();
+  const { logAction } = useAuditLog();
   const [attendance, setAttendance] = useState<Attendance | null>(null);
   const [todayTasks, setTodayTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,12 +24,17 @@ export default function PunchInOut() {
 
   const { success, error, info } = useToast();
 
+  const [startHour, startMin] = (tenant?.punch_in_start ?? "09:00").split(":").map(Number);
+  const [cutoffHour, cutoffMin] = (tenant?.punch_in_cutoff ?? "10:30").split(":").map(Number);
+  const currentTime = new Date();
+  const canPunchIn = currentTime.getHours() > startHour || (currentTime.getHours() === startHour && currentTime.getMinutes() >= startMin);
+
   const fetchData = async () => {
-    if (!employee?.id) return;
+    if (!employee?.id || !tenantId || !tenant) return;
     try {
       const [attRes, taskRes] = await Promise.all([
-        db.from("attendance").select("*").eq("employee_id", employee.id).eq("date", TODAY).maybeSingle(),
-        db.from("tasks").select("*").eq("assigned_to", employee.id).eq("due_date", TODAY),
+        db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("date", TODAY).maybeSingle(),
+        db.from("tasks").select("*").eq("tenant_id", tenantId).eq("assigned_to", employee.id).eq("due_date", TODAY),
       ]);
       setAttendance(attRes.data as Attendance | null);
       setTodayTasks((taskRes.data ?? []) as Task[]);
@@ -36,7 +45,7 @@ export default function PunchInOut() {
     }
   };
 
-  useEffect(() => { void fetchData(); }, [employee?.id]);
+  useEffect(() => { void fetchData(); }, [employee?.id, tenantId, tenant]);
 
   // Live timer
   useEffect(() => {
@@ -63,25 +72,30 @@ export default function PunchInOut() {
   }
 
   async function punchIn() {
-    if (!employee?.id || acting) return;
+    if (!employee?.id || !tenantId || !tenant || acting || !canPunchIn) return;
     setActing(true);
     try {
       const ip = await getIp();
-      // If NO tasks exist for today -> punch_out_allowed = true.
-      // If tasks DO exist -> punch_out_allowed = false (locked until HR approves)
-      const allowed = todayTasks.length === 0;
+      const now = new Date();
+      const hour = now.getHours();
+      const minute = now.getMinutes();
+      const isHalfDay = hour > cutoffHour || (hour === cutoffHour && minute > cutoffMin);
+      const unapprovedTasks = todayTasks.filter(t => t.status !== "approved");
+      const allowed = tenant.punch_out_gate_enabled ? unapprovedTasks.length === 0 : true;
 
-      const { error: dbErr } = await db.from("attendance").insert([{
+      const { data: inserted, error: dbErr } = await db.from("attendance").insert([{
         employee_id: employee.id,
+        tenant_id: tenantId,
         date: TODAY,
-        punch_in: new Date().toISOString(),
+        punch_in: now.toISOString(),
         punch_in_ip: ip,
         punch_out_allowed: allowed,
-        status: "present",
-      }]);
+        status: isHalfDay ? "half_day" : "present",
+      }]).select("id").single();
 
       if (dbErr) throw dbErr;
       
+      void logAction("punch_in", "attendance", inserted?.id);
       success("Punched in successfully!");
       void fetchData();
     } catch (err) {
@@ -93,20 +107,22 @@ export default function PunchInOut() {
   }
 
   async function punchOut() {
-    if (!attendance?.id || !attendance.punch_in || acting) return;
+    if (!attendance?.id || !attendance.punch_in || !tenant || acting) return;
     setActing(true);
     try {
       const now = new Date();
       const punchInTime = new Date(attendance.punch_in);
-      const workHours = (now.getTime() - punchInTime.getTime()) / 3600000;
+      const rawHours = (now.getTime() - punchInTime.getTime()) / 3600000;
+      const workHours = Math.max(0, rawHours - (tenant.lunch_break_minutes / 60));
       
       const { error: dbErr } = await db.from("attendance").update({
         punch_out: now.toISOString(),
         work_hours: parseFloat(workHours.toFixed(2)),
-      }).eq("id", attendance.id);
+      }).eq("tenant_id", tenantId).eq("id", attendance.id);
 
       if (dbErr) throw dbErr;
 
+      void logAction("punch_out", "attendance", attendance.id, { work_hours: parseFloat(workHours.toFixed(2)) });
       success("Punched out successfully! Have a great day!");
       void fetchData();
     } catch (err) {
@@ -117,7 +133,7 @@ export default function PunchInOut() {
     }
   }
 
-  if (loading) return (
+  if (loading || !tenant) return (
     <section className="space-y-6">
       <Skeleton className="h-12 w-48" />
       <Skeleton className="h-64 w-full max-w-sm mx-auto rounded-2xl" />
@@ -163,10 +179,12 @@ export default function PunchInOut() {
             <p className="text-lg font-semibold text-slate-700">Not clocked in</p>
             <p className="text-sm text-slate-400">Ready to start your day?</p>
           </div>
-          <button onClick={punchIn} disabled={acting}
+          <button onClick={punchIn} disabled={acting || !canPunchIn}
             className="w-full rounded-xl bg-emerald-600 py-4 text-lg font-bold text-white shadow-md hover:bg-emerald-700 active:scale-95 transition disabled:opacity-60">
-            {acting ? "Punching In…" : "🟢 Punch In"}
+            {acting ? "Punching In…" : canPunchIn ? "🟢 Punch In" : `Punch-in opens at ${tenant.punch_in_start}`}
           </button>
+          {!canPunchIn && <p className="text-sm font-medium text-amber-600">Punch-in opens at {tenant.punch_in_start}</p>}
+          <p className="text-xs text-slate-400">Office hours: {tenant.punch_in_start} onwards · Half day after {tenant.punch_in_cutoff}</p>
           <p className="text-xs text-slate-400">Your IP address will be recorded.</p>
         </div>
       </section>
@@ -174,7 +192,8 @@ export default function PunchInOut() {
   }
 
   // States 2 & 3: Punched in
-  const locked = !attendance.punch_out_allowed;
+  const unapprovedTasks = todayTasks.filter(t => t.status !== "approved");
+  const locked = tenant.punch_out_gate_enabled ? unapprovedTasks.length > 0 : false;
   return (
     <section className="space-y-6">
       <div>

@@ -4,12 +4,14 @@ import type { ChatMessage, Employee, ChatChannel } from "../types";
 import { db, storage, realtime } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
 import { useAuth } from "../hooks/useAuth";
+import { useTenant } from "../contexts/TenantContext";
 import { EmptyState } from "./EmptyState";
 import { ConfirmModal } from "./ConfirmModal";
 
 export default function Chat() {
   const { employee } = useEmployee();
   const { role } = useAuth();
+  const { tenantId } = useTenant();
   const isHr = role === "hr";
 
   const [channels, setChannels] = useState<ChatChannel[]>([]);
@@ -27,13 +29,16 @@ export default function Chat() {
   const [newChannelName, setNewChannelName] = useState("");
   const [newChannelDesc, setNewChannelDesc] = useState("");
   const [newChannelType, setNewChannelType] = useState<"global" | "department" | "custom">("global");
+  const [newChannelDepts, setNewChannelDepts] = useState<string[]>([]);
+  const [newChannelMembers, setNewChannelMembers] = useState<string[]>([]); // employee ids
   
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch Channels
   const fetchChannels = useCallback(async () => {
-    const { data } = await db.from("chat_channels").select("*").order("name", { ascending: true });
+    if (!tenantId) return;
+    const { data } = await db.from("chat_channels").select("*").eq("tenant_id", tenantId).order("name", { ascending: true });
     if (data) {
       const allChannels = data as ChatChannel[];
       setChannels(allChannels);
@@ -50,22 +55,23 @@ export default function Chat() {
   }, [selectedChannel]);
 
   useEffect(() => {
-    void fetchChannels();
-  }, []);
+    if (tenantId) void fetchChannels();
+  }, [tenantId, fetchChannels]);
 
   useEffect(() => {
     let active = true;
-    db.from("employees").select("*").then(({ data }) => {
+    if (!tenantId) return;
+    db.from("employees_public").select("*").eq("tenant_id", tenantId).then(({ data }) => {
       if (active && data) setEmployees(data as Employee[]);
     });
     return () => { active = false; };
-  }, []);
+  }, [tenantId]);
 
   const fetchMessages = useCallback(async () => {
-    if (!selectedChannel) return;
+    if (!selectedChannel || !tenantId) return;
     setLoading(true);
     const { data } = await db.from("chat_messages").select("*")
-      .eq("channel", selectedChannel.name).eq("is_deleted", false)
+      .eq("tenant_id", tenantId).eq("channel", selectedChannel.name).eq("is_deleted", false)
       .order("created_at", { ascending: false }).limit(50); // Get latest 50
     
     if (data) {
@@ -76,45 +82,68 @@ export default function Chat() {
     }
     setLoading(false);
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
-  }, [selectedChannel, employees]);
+  }, [selectedChannel, employees, tenantId]);
 
   useEffect(() => {
     if (employees.length > 0) void fetchMessages();
   }, [fetchMessages, employees]);
 
-  // Realtime subscription
+  // Realtime subscription — subscribe to the global chat_messages channel
+  // The DB trigger publishes INSERT events there for all channels
   useEffect(() => {
-    if (!selectedChannel || employees.length === 0) return;
-    // The subscribe method connects to the channel
+    if (employees.length === 0 || !tenantId) return;
+
     const setupRealtime = async () => {
       await realtime.connect();
-      await realtime.subscribe(`chat:${selectedChannel.name}`);
+      await realtime.subscribe("chat_messages");
     };
-    
+
     void setupRealtime();
 
     const handler = (payload: any) => {
-      if (payload.meta?.channel !== `chat:${selectedChannel.name}`) return;
+      // payload fields come directly from row_to_json(NEW)
+      const newMsg = payload as ChatMessage & { meta?: any };
+      if (!newMsg.id || !newMsg.channel) return;
+      if (newMsg.tenant_id !== tenantId) return;
+
+      // Only show messages for the currently selected channel
+      if (newMsg.channel !== selectedChannel?.name) return;
+      if (newMsg.is_deleted) return;
+
+      const empMap: Record<string, Employee> = {};
+      employees.forEach((e) => { empMap[e.id] = e; });
+
+      setMessages(prev => {
+        // Deduplicate — sender already added it locally via sendMessage()
+        if (prev.some(m => m.id === newMsg.id)) return prev;
+        return [...prev, { ...newMsg, sender: empMap[newMsg.sender_id] }];
+      });
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+    };
+
+    const updateHandler = (payload: any) => {
+      const updatedMsg = payload as ChatMessage;
+      if (!updatedMsg.id) return;
+      if (updatedMsg.tenant_id !== tenantId) return;
       
-      const newMsg = payload as ChatMessage;
-      if (newMsg.channel === selectedChannel.name && !newMsg.is_deleted) {
-        const empMap: Record<string, Employee> = {};
-        employees.forEach((e) => { empMap[e.id] = e; });
-        setMessages(prev => [...prev, { ...newMsg, sender: empMap[newMsg.sender_id] }]);
-        setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+      // If it's deleted, remove it from the state
+      if (updatedMsg.is_deleted) {
+        setMessages(prev => prev.filter(m => m.id !== updatedMsg.id));
       }
     };
-    
-    realtime.on('INSERT_message', handler);
+
+    realtime.on("INSERT", handler);
+    realtime.on("UPDATE", updateHandler);
 
     return () => {
-      realtime.off('INSERT_message', handler);
-      realtime.unsubscribe(`chat:${selectedChannel.name}`);
+      realtime.off("INSERT", handler);
+      realtime.off("UPDATE", updateHandler);
+      realtime.unsubscribe("chat_messages");
     };
-  }, [selectedChannel, employees]);
+  }, [selectedChannel, employees, tenantId]);
 
   async function sendMessage() {
-    if ((!input.trim() && !file) || !employee?.id) return;
+    if ((!input.trim() && !file) || !employee?.id || !tenantId) return;
     setSending(true);
 
     let attachment_url = null;
@@ -133,28 +162,40 @@ export default function Chat() {
         attachment_name = file.name;
       }
 
-      await db.from("chat_messages").insert([{
+      const { data, error } = await db.from("chat_messages").insert([{
         sender_id: employee.id,
+        tenant_id: tenantId,
         channel: selectedChannel?.name || "general",
         channel_id: selectedChannel?.id,
         content: input.trim() || "Sent an attachment",
         attachment_url,
         attachment_name,
-      }]);
+      }]).select();
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        const newMsg = data[0] as ChatMessage;
+        setMessages(prev => {
+          if (prev.some(m => m.id === newMsg.id)) return prev;
+          return [...prev, { ...newMsg, sender: employee }];
+        });
+        setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+      }
 
       setInput("");
       setFile(null);
-      // We don't need to fetchMessages() because realtime will append it.
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to send message", err);
-      alert("Failed to send message.");
+      alert("Failed to send message: " + (err.message || JSON.stringify(err)));
     } finally {
       setSending(false);
     }
   }
 
   async function deleteMessage(id: string) {
-    await db.from("chat_messages").update({ is_deleted: true }).eq("id", id);
+    if (!tenantId) return;
+    await db.from("chat_messages").update({ is_deleted: true }).eq("tenant_id", tenantId).eq("id", id);
     setMessages(prev => prev.filter(m => m.id !== id));
   }
 
@@ -169,26 +210,64 @@ export default function Chat() {
   const isMine = (m: ChatMessage) => m.sender_id === employee?.id;
   const canSend = isHr || (selectedChannel && !selectedChannel.is_announcement);
 
+  const DEPARTMENTS = ["sales", "dev", "marketing", "operations", "design", "other"] as const;
+
+  function resetCreateModal() {
+    setNewChannelName("");
+    setNewChannelDesc("");
+    setNewChannelType("global");
+    setNewChannelDepts([]);
+    setNewChannelMembers([]);
+  }
+
+  function toggleDept(dept: string) {
+    setNewChannelDepts(prev => prev.includes(dept) ? prev.filter(d => d !== dept) : [...prev, dept]);
+  }
+
+  function toggleMember(id: string) {
+    setNewChannelMembers(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]);
+  }
+
   async function createChannel() {
     if (!newChannelName.trim()) return;
+    if (newChannelType === "department" && newChannelDepts.length === 0) {
+      alert("Please select at least one department.");
+      return;
+    }
+    if (newChannelType === "custom" && newChannelMembers.length === 0) {
+      alert("Please select at least one member for the private channel.");
+      return;
+    }
     setCreating(true);
     try {
       const { data, error } = await db.from("chat_channels").insert([{
+        tenant_id: tenantId,
         name: newChannelName.trim().toLowerCase().replace(/\s+/g, "-"),
         description: newChannelDesc.trim() || null,
         type: newChannelType,
         created_by: employee?.id,
-        target_departments: newChannelType === "department" ? [employee?.department || ""] : [],
+        target_departments: newChannelType === "department" ? newChannelDepts : [],
       }]).select();
 
       if (error) throw error;
       if (data) {
         const created = data[0] as ChatChannel;
+
+        // For private/custom channels, insert members into chat_channel_members
+        if (newChannelType === "custom" && newChannelMembers.length > 0) {
+          const memberRows = newChannelMembers.map(empId => ({ tenant_id: tenantId, channel_id: created.id, employee_id: empId }));
+          // Also add the HR creator as a member
+          if (employee?.id && !newChannelMembers.includes(employee.id)) {
+            memberRows.push({ tenant_id: tenantId, channel_id: created.id, employee_id: employee.id });
+          }
+          const { error: membersError } = await db.from("chat_channel_members").insert(memberRows);
+          if (membersError) console.error("Failed to add members", membersError);
+        }
+
         setChannels(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
         setSelectedChannel(created);
         setShowCreateModal(false);
-        setNewChannelName("");
-        setNewChannelDesc("");
+        resetCreateModal();
       }
     } catch (err) {
       console.error("Failed to create channel", err);
@@ -202,9 +281,9 @@ export default function Chat() {
     if (!channelToDelete) return;
     setDeleting(true);
     try {
-      const { error } = await db.from("chat_channels").delete().eq("id", channelToDelete.id);
+      const { error } = await db.rpc("delete_chat_channel", { channel_id: channelToDelete.id });
       if (error) throw error;
-      
+
       setChannels(prev => prev.filter(c => c.id !== channelToDelete.id));
       if (selectedChannel?.id === channelToDelete.id) {
         setSelectedChannel(channels.find(c => c.id !== channelToDelete.id) || null);
@@ -218,12 +297,15 @@ export default function Chat() {
     }
   }
 
-  // Filter visible channels for employees
+  // For custom channels, the employee's membership IDs come from the DB-joined channel data
+  // We rely on the RLS SELECT policy on chat_channels which already filters custom channels
+  // by membership — so fetched channels are already the correct visible set.
   const visibleChannels = isHr
     ? channels
-    : channels.filter(c => 
-        c.type === "global" || 
-        (c.type === "department" && c.target_departments.includes(employee?.department || ""))
+    : channels.filter(c =>
+        c.type === "global" ||
+        (c.type === "department" && c.target_departments.includes(employee?.department || "")) ||
+        c.type === "custom"  // custom channels are already filtered by RLS
       );
 
   return (
@@ -370,7 +452,7 @@ export default function Chat() {
 
       <ConfirmModal
         isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
+        onClose={() => { setShowCreateModal(false); resetCreateModal(); }}
         onConfirm={() => void createChannel()}
         title="Create New Channel"
         confirmText="Create Channel"
@@ -378,12 +460,13 @@ export default function Chat() {
         message="Create a new communication channel for your team."
       >
         <div className="space-y-4 pt-2">
+          {/* Channel Name */}
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Channel Name</label>
             <div className="relative">
               <Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={newChannelName}
                 onChange={e => setNewChannelName(e.target.value)}
                 placeholder="e.g. project-x"
@@ -391,9 +474,11 @@ export default function Chat() {
               />
             </div>
           </div>
+
+          {/* Description */}
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Description (Optional)</label>
-            <textarea 
+            <textarea
               value={newChannelDesc}
               onChange={e => setNewChannelDesc(e.target.value)}
               placeholder="What is this channel about?"
@@ -401,17 +486,101 @@ export default function Chat() {
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none resize-none"
             />
           </div>
+
+          {/* Channel Type */}
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Channel Type</label>
-            <select 
-              value={newChannelType}
-              onChange={e => setNewChannelType(e.target.value as any)}
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
-            >
-              <option value="global">Global (Everyone)</option>
-              <option value="department">Department (Your department only)</option>
-            </select>
+            <div className="grid grid-cols-3 gap-2">
+              {(["global", "department", "custom"] as const).map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => { setNewChannelType(t); setNewChannelDepts([]); setNewChannelMembers([]); }}
+                  className={`flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-3 text-xs font-semibold transition ${
+                    newChannelType === t
+                      ? "border-brand-500 bg-brand-50 text-brand-700"
+                      : "border-slate-200 bg-white text-slate-500 hover:border-brand-300"
+                  }`}
+                >
+                  <span className="text-base">{t === "global" ? "🌐" : t === "department" ? "🏢" : "🔒"}</span>
+                  <span className="capitalize">{t === "custom" ? "Private" : t}</span>
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-slate-400">
+              {newChannelType === "global" && "Everyone in the company can see and message this channel."}
+              {newChannelType === "department" && "Only employees from the selected departments can access this channel."}
+              {newChannelType === "custom" && "Only the specific employees you choose can access this channel."}
+            </p>
           </div>
+
+          {/* Department Picker */}
+          {newChannelType === "department" && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Select Departments</label>
+              <div className="flex flex-wrap gap-2">
+                {DEPARTMENTS.map(dept => (
+                  <button
+                    key={dept}
+                    type="button"
+                    onClick={() => toggleDept(dept)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold capitalize transition border ${
+                      newChannelDepts.includes(dept)
+                        ? "bg-brand-600 text-white border-brand-600"
+                        : "bg-white text-slate-600 border-slate-300 hover:border-brand-400"
+                    }`}
+                  >
+                    {dept}
+                  </button>
+                ))}
+              </div>
+              {newChannelDepts.length === 0 && (
+                <p className="mt-1.5 text-[11px] text-rose-400 font-medium">Please select at least one department.</p>
+              )}
+            </div>
+          )}
+
+          {/* Employee Picker for Private channels */}
+          {newChannelType === "custom" && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Select Members</label>
+              <div className="max-h-40 overflow-y-auto space-y-1 rounded-lg border border-slate-200 p-2">
+                {employees
+                  .filter(e => e.id !== employee?.id) // Exclude self (creator is auto-added)
+                  .map(emp => (
+                    <button
+                      key={emp.id}
+                      type="button"
+                      onClick={() => toggleMember(emp.id)}
+                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition ${
+                        newChannelMembers.includes(emp.id)
+                          ? "bg-brand-50 border border-brand-200"
+                          : "hover:bg-slate-50 border border-transparent"
+                      }`}
+                    >
+                      <div className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-bold ${
+                        newChannelMembers.includes(emp.id) ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600"
+                      }`}>
+                        {emp.full_name.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`font-semibold truncate text-xs ${newChannelMembers.includes(emp.id) ? "text-brand-800" : "text-slate-700"}`}>{emp.full_name}</p>
+                        <p className="text-[10px] text-slate-400 capitalize">{emp.department || "—"}</p>
+                      </div>
+                      {newChannelMembers.includes(emp.id) && (
+                        <span className="text-brand-600 text-xs font-bold">✓</span>
+                      )}
+                    </button>
+                  ))}
+              </div>
+              {newChannelMembers.length === 0 && (
+                <p className="mt-1.5 text-[11px] text-rose-400 font-medium">Please select at least one employee.</p>
+              )}
+              {newChannelMembers.length > 0 && (
+                <p className="mt-1.5 text-[11px] text-brand-600 font-medium">{newChannelMembers.length} member{newChannelMembers.length > 1 ? "s" : ""} selected (+ you)</p>
+              )}
+            </div>
+          )}
         </div>
       </ConfirmModal>
 

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle, XCircle, Filter, Download, Calendar, Plus, Trash2, Upload, FileBox } from "lucide-react";
 import type { Employee, Holiday, Leave } from "../types";
+import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
+import { useAuditLog } from "../hooks/useAuditLog";
 import { useEmployee } from "../hooks/useEmployee";
 import { useToast } from "../shared/ToastContext";
 import { ConfirmModal } from "../shared/ConfirmModal";
@@ -33,6 +35,8 @@ function exportCSV(rows: string[][], filename: string) {
 
 export default function LeaveManagement() {
   const { employee: hrEmployee } = useEmployee();
+  const { tenantId } = useTenant();
+  const { logAction } = useAuditLog();
   const [tab, setTab] = useState<Tab>("pending");
   const { success, error: toastError } = useToast();
   const [deleteHolId, setDeleteHolId] = useState<string | null>(null);
@@ -41,11 +45,11 @@ export default function LeaveManagement() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   useEffect(() => {
     let active = true;
-    db.from("employees").select("*").order("full_name").then(({ data }) => {
+    db.from("employees").select("*").eq("tenant_id", tenantId).order("full_name").then(({ data }) => {
       if (active && data) setEmployees(data as Employee[]);
     });
     return () => { active = false; };
-  }, []);
+  }, [tenantId]);
 
   // ── PENDING TAB
   const [pendingLeaves, setPendingLeaves] = useState<LeaveWithEmployee[]>([]);
@@ -57,7 +61,7 @@ export default function LeaveManagement() {
   const fetchPending = useCallback(async () => {
     setPendingLoading(true);
     try {
-      const { data, error: fetchErr } = await db.from("leaves").select("*").eq("status", "pending").order("applied_at", { ascending: false });
+      const { data, error: fetchErr } = await db.from("leaves").select("*").eq("tenant_id", tenantId).eq("status", "pending").order("applied_at", { ascending: false });
       if (fetchErr) throw fetchErr;
       const leaves = (data ?? []) as Leave[];
       const empMap: Record<string, Employee> = {};
@@ -68,7 +72,7 @@ export default function LeaveManagement() {
     } finally {
       setPendingLoading(false);
     }
-  }, [employees, toastError]);
+  }, [employees, tenantId, toastError]);
 
   useEffect(() => {
     if (tab === "pending" && employees.length > 0) void fetchPending();
@@ -78,23 +82,24 @@ export default function LeaveManagement() {
     if (!hrEmployee?.id) return;
     setActionLoading(true);
     try {
-      await db.from("leaves").update({ status: "approved", reviewed_by: hrEmployee.id, reviewed_at: new Date().toISOString() }).eq("id", leave.id);
+      await db.from("leaves").update({ status: "approved", reviewed_by: hrEmployee.id, reviewed_at: new Date().toISOString() }).eq("tenant_id", tenantId).eq("id", leave.id);
 
       // create attendance rows for each leave day
       const start = new Date(leave.start_date);
       const end = new Date(leave.end_date);
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         const dateStr = d.toISOString().slice(0, 10);
-        const existing = await db.from("attendance").select("id").eq("employee_id", leave.employee_id).eq("date", dateStr);
+        const existing = await db.from("attendance").select("id").eq("tenant_id", tenantId).eq("employee_id", leave.employee_id).eq("date", dateStr);
         if (existing.data && existing.data.length > 0) {
-          await db.from("attendance").update({ status: "on_leave", punch_out_allowed: true }).eq("employee_id", leave.employee_id).eq("date", dateStr);
+          await db.from("attendance").update({ status: "on_leave", punch_out_allowed: true }).eq("tenant_id", tenantId).eq("employee_id", leave.employee_id).eq("date", dateStr);
         } else {
-          await db.from("attendance").insert([{ employee_id: leave.employee_id, date: dateStr, status: "on_leave", punch_out_allowed: true }]);
+          await db.from("attendance").insert([{ employee_id: leave.employee_id, tenant_id: tenantId, date: dateStr, status: "on_leave", punch_out_allowed: true }]);
         }
       }
 
       // notification
       await db.from("notifications").insert([{
+        tenant_id: tenantId,
         employee_id: leave.employee_id,
         title: "Leave Approved",
         body: `Your ${leave.leave_type ?? "leave"} from ${fmt(leave.start_date)} to ${fmt(leave.end_date)} has been approved.`,
@@ -102,6 +107,7 @@ export default function LeaveManagement() {
         reference_id: leave.id,
       }]);
 
+      void logAction("leave.approved", "leave", leave.id);
       success("Leave approved.");
     } catch (err) {
       toastError("Failed to approve leave.");
@@ -115,14 +121,16 @@ export default function LeaveManagement() {
     if (!hrEmployee?.id) return;
     setActionLoading(true);
     try {
-      await db.from("leaves").update({ status: "rejected", reviewed_by: hrEmployee.id, reviewed_at: new Date().toISOString(), rejection_reason: rejectReason }).eq("id", leave.id);
+      await db.from("leaves").update({ status: "rejected", reviewed_by: hrEmployee.id, reviewed_at: new Date().toISOString(), rejection_reason: rejectReason }).eq("tenant_id", tenantId).eq("id", leave.id);
       await db.from("notifications").insert([{
+        tenant_id: tenantId,
         employee_id: leave.employee_id,
         title: "Leave Rejected",
         body: `Your ${leave.leave_type ?? "leave"} request was rejected. ${rejectReason ? `Reason: ${rejectReason}` : ""}`,
         type: "leave_rejected",
         reference_id: leave.id,
       }]);
+      void logAction("leave.rejected", "leave", leave.id, { reason: rejectReason });
       success("Leave rejected.");
       setRejectId(null);
       setRejectReason("");
@@ -146,7 +154,7 @@ export default function LeaveManagement() {
   const fetchAll = useCallback(async () => {
     setAllLoading(true);
     try {
-      let q = db.from("leaves").select("*").order("applied_at", { ascending: false });
+      let q = db.from("leaves").select("*").eq("tenant_id", tenantId).order("applied_at", { ascending: false });
       if (filterEmp !== "all") q = q.eq("employee_id", filterEmp);
       if (filterType !== "all") q = q.eq("leave_type", filterType);
       if (filterStatus !== "all") q = q.eq("status", filterStatus);
@@ -163,7 +171,7 @@ export default function LeaveManagement() {
     } finally {
       setAllLoading(false);
     }
-  }, [employees, filterEmp, filterType, filterStatus, filterFrom, filterTo, toastError]);
+  }, [employees, filterEmp, filterType, filterStatus, filterFrom, filterTo, tenantId, toastError]);
 
   useEffect(() => {
     if (tab === "all" && employees.length > 0) void fetchAll();
@@ -184,7 +192,7 @@ export default function LeaveManagement() {
   const fetchHolidays = useCallback(async () => {
     setHolLoading(true);
     try {
-      const { data, error: fetchErr } = await db.from("holidays").select("*").order("date");
+      const { data, error: fetchErr } = await db.from("holidays").select("*").eq("tenant_id", tenantId).order("date");
       if (fetchErr) throw fetchErr;
       setHolidays((data ?? []) as Holiday[]);
     } catch (err) {
@@ -192,7 +200,7 @@ export default function LeaveManagement() {
     } finally {
       setHolLoading(false);
     }
-  }, [toastError]);
+  }, [tenantId, toastError]);
 
   useEffect(() => {
     if (tab === "holidays") void fetchHolidays();
@@ -202,7 +210,7 @@ export default function LeaveManagement() {
     if (!holName || !holDate) return;
     setHolAdding(true);
     try {
-      const { error: insErr } = await db.from("holidays").insert([{ name: holName, date: holDate, type: holType, description: holDesc || null }]);
+      const { error: insErr } = await db.from("holidays").insert([{ name: holName, tenant_id: tenantId, date: holDate, type: holType, description: holDesc || null }]);
       if (insErr) throw insErr;
       success("Holiday added.");
       setHolName(""); setHolDate(""); setHolDesc(""); setShowAddHol(false);
@@ -217,7 +225,7 @@ export default function LeaveManagement() {
   async function deleteHoliday() {
     if (!deleteHolId) return;
     try {
-      const { error: delErr } = await db.from("holidays").delete().eq("id", deleteHolId);
+      const { error: delErr } = await db.from("holidays").delete().eq("tenant_id", tenantId).eq("id", deleteHolId);
       if (delErr) throw delErr;
       success("Holiday deleted.");
       setDeleteHolId(null);
@@ -231,7 +239,7 @@ export default function LeaveManagement() {
     const lines = csvText.trim().split("\n").filter(Boolean);
     const rows = lines.map((line) => {
       const [name, date, type, description] = line.split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
-      return { name, date, type: (type ?? "national") as Holiday["type"], description: description ?? null };
+      return { name, tenant_id: tenantId, date, type: (type ?? "national") as Holiday["type"], description: description ?? null };
     }).filter((r) => r.name && r.date);
     if (rows.length === 0) return;
     try {

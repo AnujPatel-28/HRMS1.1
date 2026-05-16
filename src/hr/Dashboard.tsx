@@ -5,6 +5,7 @@ import {
   TrendingUp, CheckCircle2, XCircle, ArrowRight, CheckCircle, Bell
 } from "lucide-react";
 import type { Attendance, Employee, Leave, Notification } from "../types";
+import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
 import { useToast } from "../shared/ToastContext";
@@ -27,6 +28,7 @@ function fmt(d: string) {
 export default function HRDashboard() {
   const navigate = useNavigate();
   const { employee } = useEmployee();
+  const { tenantId } = useTenant();
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [pendingLeaves, setPendingLeaves] = useState<(Leave & { employee?: Employee })[]>([]);
@@ -42,10 +44,10 @@ export default function HRDashboard() {
     setLoading(true);
     try {
       const [empRes, leaveRes, attRes, notifRes] = await Promise.all([
-        db.from("employees").select("*").eq("status", "active"),
-        db.from("leaves").select("*").eq("status", "pending").order("applied_at", { ascending: false }).limit(5),
-        db.from("attendance").select("*").eq("date", today),
-        db.from("notifications").select("*").order("created_at", { ascending: false }).limit(6),
+        db.from("employees").select("*").eq("tenant_id", tenantId).eq("status", "active"),
+        db.from("leaves").select("*").eq("tenant_id", tenantId).eq("status", "pending").order("applied_at", { ascending: false }).limit(5),
+        db.from("attendance").select("*").eq("tenant_id", tenantId).eq("date", today),
+        db.from("notifications").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(6),
       ]);
 
       if (empRes.error) throw empRes.error;
@@ -66,7 +68,7 @@ export default function HRDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [today, toastError]);
+  }, [tenantId, today, toastError]);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 

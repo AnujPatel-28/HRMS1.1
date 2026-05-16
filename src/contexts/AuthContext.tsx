@@ -11,6 +11,11 @@ type AuthUser = {
   profile?: Record<string, unknown> | null;
 };
 
+type EmployeeLookup = {
+  id: string;
+  tenant_id: string;
+};
+
 type LoginResult =
   | { error: string; requiresVerification?: false }
   | { error: null; requiresVerification: true; email: string }
@@ -19,6 +24,7 @@ type LoginResult =
 type AuthContextValue = {
   user: AuthUser | null;
   role: EmployeeRole | null;
+  tenantId: string | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<LoginResult>;
   verifyEmail: (email: string, otp: string) => Promise<{ error: string | null }>;
@@ -31,12 +37,32 @@ export const AuthContext = createContext<AuthContextValue | undefined>(undefined
 const extractRole = (user: AuthUser | null): EmployeeRole | null => {
   if (!user) return null;
   const raw = user.metadata?.role ?? user.profile?.role;
+  if (raw === "superadmin") return "superadmin";
   return raw === "hr" || raw === "employee" ? raw : null;
+};
+
+const extractTenantId = (user: AuthUser | null): string | null => {
+  if (!user) return null;
+  const raw = user.metadata?.tenant_id ?? user.profile?.tenant_id;
+  return typeof raw === "string" && raw.length > 0 ? raw : null;
+};
+
+const isTenantLoginBlocked = async (tenantId: string | null) => {
+  if (!tenantId) return false;
+  const { data } = await db.from("tenants").select("status").eq("id", tenantId).maybeSingle();
+  const status = (data as { status?: string } | null)?.status;
+  return status === "suspended" || status === "cancelled";
+};
+
+const resolvePlatformRole = async (): Promise<EmployeeRole | null> => {
+  const { data } = await db.rpc("get_my_platform_role");
+  return data ? "superadmin" : null;
 };
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [role, setRole] = useState<EmployeeRole | null>(null);
+  const [tenantId, setTenantId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refreshUser = useCallback(async (showLoading = true) => {
@@ -45,27 +71,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error || !data?.user) {
       setUser(null);
       setRole(null);
+      setTenantId(null);
       if (showLoading) setLoading(false);
       return;
     }
 
     const nextUser = data.user as AuthUser;
-    let resolvedRole = extractRole(nextUser);
+    let resolvedRole = await resolvePlatformRole() ?? extractRole(nextUser);
+    let resolvedTenantId = extractTenantId(nextUser);
 
     // Fallback: if no role in metadata/profile, check the employees DB table
     if (!resolvedRole) {
       const empCheck = await db
         .from("employees")
-        .select("id")
+        .select("id,tenant_id")
         .eq("user_id", nextUser.id)
         .limit(1);
       if (empCheck.data && empCheck.data.length > 0) {
         resolvedRole = "employee";
+        resolvedTenantId = (empCheck.data[0] as EmployeeLookup).tenant_id;
       }
+    }
+
+    if (resolvedRole !== "superadmin" && await isTenantLoginBlocked(resolvedTenantId)) {
+      await auth.signOut();
+      setUser(null);
+      setRole(null);
+      setTenantId(null);
+      if (showLoading) setLoading(false);
+      return;
     }
 
     setUser(nextUser);
     setRole(resolvedRole);
+    setTenantId(resolvedRole === "superadmin" ? null : resolvedTenantId);
     if (showLoading) setLoading(false);
   }, []);
 
@@ -90,7 +129,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     // Fetch full user (with metadata/profile including role) via getCurrentUser
-    await refreshUser(false); // silent – don't flash loading screen
+    await refreshUser(false); // silent - don't flash loading screen
+    const { data: current } = await auth.getCurrentUser();
+    const signedInUser = current?.user as AuthUser | undefined;
+    const signedInRole = await resolvePlatformRole() ?? extractRole(signedInUser ?? null);
+    let signedInTenantId = extractTenantId(signedInUser ?? null);
+
+    if (!signedInRole && signedInUser?.id) {
+      const empCheck = await db
+        .from("employees")
+        .select("id,tenant_id")
+        .eq("user_id", signedInUser.id)
+        .limit(1);
+      if (empCheck.data && empCheck.data.length > 0) {
+        signedInTenantId = (empCheck.data[0] as EmployeeLookup).tenant_id;
+      }
+    }
+
+    if (signedInRole !== "superadmin" && await isTenantLoginBlocked(signedInTenantId)) {
+      await auth.signOut();
+      setUser(null);
+      setRole(null);
+      setTenantId(null);
+      return { error: "This company account is suspended. Please contact TalentMesh support." };
+    }
+
     return { error: null };
   }, [refreshUser]);
 
@@ -100,7 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { error: error?.message ?? "Invalid code. Please try again." };
     }
     // Fetch full user with role metadata after verification
-    await refreshUser(false); // silent – don't flash loading screen
+    await refreshUser(false); // silent - don't flash loading screen
     return { error: null };
   }, [refreshUser]);
 
@@ -108,6 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await auth.signOut();
     setUser(null);
     setRole(null);
+    setTenantId(null);
   }, []);
 
   useEffect(() => {
@@ -115,8 +179,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshUser]);
 
   const value = useMemo(
-    () => ({ user, role, loading, login, verifyEmail, logout, refreshUser }),
-    [user, role, loading, login, verifyEmail, logout, refreshUser],
+    () => ({ user, role, tenantId, loading, login, verifyEmail, logout, refreshUser }),
+    [user, role, tenantId, loading, login, verifyEmail, logout, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import type { Notification } from "../types";
 import { db, realtime } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
+import { useTenant } from "../contexts/TenantContext";
 
 type NotificationBellProps = {
   unreadCount?: number;
@@ -33,6 +34,7 @@ function timeAgo(dateStr: string) {
 
 export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: NotificationBellProps) {
   const { employee } = useEmployee();
+  const { tenantId } = useTenant();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -43,13 +45,14 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
   }, [initialUnreadCount]);
 
   useEffect(() => {
-    if (!employee?.id) return;
+    if (!employee?.id || !tenantId) return;
     let active = true;
 
     // Initial fetch of recent 20
     const fetchNotifs = async () => {
       const { data } = await db.from("notifications")
         .select("*")
+        .eq("tenant_id", tenantId)
         .eq("employee_id", employee.id)
         .order("created_at", { ascending: false })
         .limit(20);
@@ -71,6 +74,7 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
     const handler = (payload: any) => {
       if (!active || payload.meta?.channel !== `notifications:${employee.id}`) return;
       const newNotif = payload as Notification;
+      if (newNotif.tenant_id !== tenantId) return;
       setNotifications(prev => [newNotif, ...prev].slice(0, 20));
       setUnreadCount(prev => prev + 1);
     };
@@ -82,7 +86,7 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
       realtime.off('INSERT_notification', handler);
       realtime.unsubscribe(`notifications:${employee.id}`);
     };
-  }, [employee?.id]);
+  }, [employee?.id, tenantId]);
 
   useEffect(() => {
     // Close dropdown on click outside
@@ -97,7 +101,7 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
   async function handleNotificationClick(notif: Notification) {
     setIsOpen(false);
     if (!notif.is_read) {
-      await db.from("notifications").update({ is_read: true }).eq("id", notif.id);
+      await db.from("notifications").update({ is_read: true }).eq("tenant_id", tenantId).eq("id", notif.id);
       setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n));
       setUnreadCount(prev => Math.max(0, prev - 1));
     }
@@ -112,11 +116,11 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
   }
 
   async function markAllRead() {
-    if (!employee?.id) return;
+    if (!employee?.id || !tenantId) return;
     const unreadIds = notifications.filter(n => !n.is_read).map(n => n.id);
     if (unreadIds.length === 0) return;
 
-    await db.from("notifications").update({ is_read: true }).in("id", unreadIds);
+    await db.from("notifications").update({ is_read: true }).eq("tenant_id", tenantId).in("id", unreadIds);
     setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
     setUnreadCount(0);
   }

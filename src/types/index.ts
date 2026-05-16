@@ -1,7 +1,8 @@
-export type EmployeeRole = "hr" | "employee";
+export type EmployeeRole = "hr" | "employee" | "superadmin";
 
 export interface Employee {
   id: string;
+  tenant_id: string;
   user_id: string | null;
   full_name: string;
   email: string;
@@ -34,6 +35,7 @@ export interface Employee {
 
 export interface Attendance {
   id: string;
+  tenant_id: string;
   employee_id: string;
   date: string;
   punch_in: string | null;
@@ -49,6 +51,7 @@ export interface Attendance {
 
 export interface Leave {
   id: string;
+  tenant_id: string;
   employee_id: string;
   leave_type: "casual" | "sick" | "earned" | "unpaid" | "maternity" | "paternity" | "other" | null;
   start_date: string;
@@ -64,6 +67,7 @@ export interface Leave {
 
 export interface Holiday {
   id: string;
+  tenant_id: string;
   name: string;
   date: string;
   type: "national" | "company" | "optional" | null;
@@ -73,6 +77,7 @@ export interface Holiday {
 
 export interface HRPolicy {
   id: string;
+  tenant_id: string;
   title: string;
   description: string | null;
   file_url: string;
@@ -86,6 +91,7 @@ export interface HRPolicy {
 
 export interface Task {
   id: string;
+  tenant_id: string;
   title: string;
   description: string | null;
   assigned_to: string;
@@ -101,6 +107,7 @@ export interface Task {
 
 export interface TaskSubmission {
   id: string;
+  tenant_id: string;
   task_id: string;
   employee_id: string;
   notes: string | null;
@@ -115,6 +122,7 @@ export interface TaskSubmission {
 
 export interface CalendarEvent {
   id: string;
+  tenant_id: string;
   employee_id: string;
   date: string;
   type: "green" | "red" | "absent" | "leave" | "holiday" | null;
@@ -136,6 +144,7 @@ export interface ChatChannel {
 
 export interface ChatMessage {
   id: string;
+  tenant_id: string;
   sender_id: string;
   channel: string;
   channel_id: string | null;
@@ -148,6 +157,7 @@ export interface ChatMessage {
 
 export interface Notification {
   id: string;
+  tenant_id: string;
   employee_id: string;
   title: string;
   body: string;

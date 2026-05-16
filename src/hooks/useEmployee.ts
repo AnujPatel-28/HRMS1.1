@@ -1,11 +1,13 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useState } from "react";
+import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
 import type { Employee } from "../types";
 import { useAuth } from "./useAuth";
 
 export function useEmployee() {
   const { user } = useAuth();
+  const { tenantId } = useTenant();
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -16,13 +18,18 @@ export function useEmployee() {
     }
 
     setLoading(true);
-    const { data, error } = await db.from("employees").select("*").eq("user_id", user.id).maybeSingle();
+    const { data, error } = await db
+      .from("employees")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("user_id", user.id)
+      .maybeSingle();
 
     if (!error) {
       setEmployee((data as Employee | null) ?? null);
     }
     setLoading(false);
-  }, [user]);
+  }, [tenantId, user]);
 
   useEffect(() => {
     void fetchEmployee();

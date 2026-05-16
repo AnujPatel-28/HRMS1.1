@@ -3,6 +3,7 @@ import { Calendar } from "lucide-react";
 import type { Leave } from "../types";
 import { db } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
+import { useTenant } from "../contexts/TenantContext";
 import { useToast } from "../shared/ToastContext";
 import { ConfirmModal } from "../shared/ConfirmModal";
 import { Skeleton } from "../shared/Skeleton";
@@ -20,6 +21,7 @@ const STATUS_BADGE: Record<Leave["status"], string> = {
 
 export default function MyLeaves() {
   const { employee } = useEmployee();
+  const { tenantId } = useTenant();
   const [tab, setTab] = useState<Tab>("history");
   const [leaves, setLeaves] = useState<Leave[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,9 +32,9 @@ export default function MyLeaves() {
   const [cancelModal, setCancelModal] = useState<{ isOpen: boolean; leaveId: string | null; dates: string; type: string }>({ isOpen: false, leaveId: null, dates: "", type: "" });
 
   const fetchLeaves = async () => {
-    if (!employee?.id) return;
+    if (!employee?.id || !tenantId) return;
     try {
-      const { data, error: fetchErr } = await db.from("leaves").select("*").eq("employee_id", employee.id).order("applied_at", { ascending: false });
+      const { data, error: fetchErr } = await db.from("leaves").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).order("applied_at", { ascending: false });
       if (fetchErr) throw fetchErr;
       setLeaves((data ?? []) as Leave[]);
     } catch (err) {
@@ -42,7 +44,7 @@ export default function MyLeaves() {
     }
   };
 
-  useEffect(() => { void fetchLeaves(); }, [employee?.id]);
+  useEffect(() => { void fetchLeaves(); }, [employee?.id, tenantId]);
 
   const totalDays = form.start_date && form.end_date
     ? Math.max(0, Math.ceil((new Date(form.end_date).getTime() - new Date(form.start_date).getTime()) / 86400000) + 1)
@@ -50,11 +52,12 @@ export default function MyLeaves() {
 
   async function applyLeave(e: React.FormEvent) {
     e.preventDefault();
-    if (!employee?.id || !form.start_date || !form.end_date || !form.reason) return;
+    if (!employee?.id || !tenantId || !form.start_date || !form.end_date || !form.reason) return;
     setSubmitting(true);
     try {
       const { error: insErr } = await db.from("leaves").insert([{
         employee_id: employee.id,
+        tenant_id: tenantId,
         leave_type: form.leave_type,
         start_date: form.start_date,
         end_date: form.end_date,
@@ -66,11 +69,12 @@ export default function MyLeaves() {
       if (insErr) throw insErr;
 
       // Notify HR
-      const { data: hrEmps } = await db.from("employees").select("id").eq("department", "operations");
+      const { data: hrEmps } = await db.from("employees").select("id").eq("tenant_id", tenantId).eq("department", "operations");
       if (hrEmps && hrEmps.length > 0) {
         await db.from("notifications").insert(
           hrEmps.map((h: { id: string }) => ({
             employee_id: h.id,
+            tenant_id: tenantId,
             title: "New Leave Request",
             body: `${employee.full_name} has requested ${form.leave_type} leave from ${form.start_date} to ${form.end_date}.`,
             type: "general",
@@ -94,7 +98,7 @@ export default function MyLeaves() {
   async function handleCancelLeave() {
     if (!cancelModal.leaveId) return;
     try {
-      const { error: delErr } = await db.from("leaves").delete().eq("id", cancelModal.leaveId).eq("status", "pending");
+      const { error: delErr } = await db.from("leaves").delete().eq("tenant_id", tenantId).eq("id", cancelModal.leaveId).eq("status", "pending");
       if (delErr) throw delErr;
       success("Leave request cancelled.");
       setCancelModal({ isOpen: false, leaveId: null, dates: "", type: "" });

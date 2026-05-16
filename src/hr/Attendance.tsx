@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Calendar, ChevronLeft, ChevronRight, Download, Users, BarChart3, Clock, Pencil, Check, X, ClipboardList } from "lucide-react";
 import type { Attendance, Employee } from "../types";
+import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
 import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
@@ -69,6 +70,7 @@ function exportCSV(rows: string[][], filename: string) {
 export default function HRAttendance() {
   const [view, setView] = useState<ViewMode>("daily");
   const { success, error: toastError } = useToast();
+  const { tenantId } = useTenant();
 
   // ── Daily view state
   const [dailyDate, setDailyDate] = useState(fmt(new Date()));
@@ -99,18 +101,23 @@ export default function HRAttendance() {
     let active = true;
     db.from("employees")
       .select("*")
+      .eq("tenant_id", tenantId)
       .order("full_name")
       .then(({ data }) => {
         if (active && data) setAllEmployees(data as Employee[]);
       });
     return () => { active = false; };
-  }, []);
+  }, [tenantId]);
 
   // ── Fetch Daily view
   const fetchDaily = useCallback(async () => {
     setDailyLoading(true);
     try {
-      const { data: attData, error: fetchErr } = await db.from("attendance").select("*").eq("date", dailyDate);
+      const { data: attData, error: fetchErr } = await db
+        .from("attendance")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("date", dailyDate);
       if (fetchErr) throw fetchErr;
       const att = (attData ?? []) as Attendance[];
       const merged: AttendanceWithEmployee[] = allEmployees.map((emp) => {
@@ -118,6 +125,7 @@ export default function HRAttendance() {
         if (rec) return { ...rec, employee: emp };
         return {
           id: "",
+          tenant_id: tenantId,
           employee_id: emp.id,
           date: dailyDate,
           punch_in: null,
@@ -138,7 +146,7 @@ export default function HRAttendance() {
     } finally {
       setDailyLoading(false);
     }
-  }, [dailyDate, allEmployees, toastError]);
+  }, [dailyDate, allEmployees, tenantId, toastError]);
 
   useEffect(() => {
     if (view === "daily" && allEmployees.length > 0) void fetchDaily();
@@ -152,7 +160,7 @@ export default function HRAttendance() {
       const start = fmt(new Date(empViewYear, empViewMonth, 1));
       const end = fmt(new Date(empViewYear, empViewMonth + 1, 0));
       const { data, error: fetchErr } = await db.from("attendance").select("*")
-        .eq("employee_id", empViewEmployee).gte("date", start).lte("date", end);
+        .eq("tenant_id", tenantId).eq("employee_id", empViewEmployee).gte("date", start).lte("date", end);
       if (fetchErr) throw fetchErr;
       setEmpAttendance((data ?? []) as Attendance[]);
     } catch (err) {
@@ -160,7 +168,7 @@ export default function HRAttendance() {
     } finally {
       setEmpLoading(false);
     }
-  }, [empViewEmployee, empViewYear, empViewMonth, toastError]);
+  }, [empViewEmployee, empViewYear, empViewMonth, tenantId, toastError]);
 
   useEffect(() => {
     if (view === "employee") void fetchEmpAttendance();
@@ -172,7 +180,12 @@ export default function HRAttendance() {
     try {
       const start = fmt(new Date(summaryYear, summaryMonth, 1));
       const end = fmt(new Date(summaryYear, summaryMonth + 1, 0));
-      const { data: attData, error: fetchErr } = await db.from("attendance").select("*").gte("date", start).lte("date", end);
+      const { data: attData, error: fetchErr } = await db
+        .from("attendance")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .gte("date", start)
+        .lte("date", end);
       if (fetchErr) throw fetchErr;
       const att = (attData ?? []) as Attendance[];
       const rows: SummaryRow[] = allEmployees.map((emp) => {
@@ -195,7 +208,7 @@ export default function HRAttendance() {
     } finally {
       setSummaryLoading(false);
     }
-  }, [summaryYear, summaryMonth, allEmployees, toastError]);
+  }, [summaryYear, summaryMonth, allEmployees, tenantId, toastError]);
 
   useEffect(() => {
     if (view === "summary" && allEmployees.length > 0) void fetchSummary();
@@ -212,10 +225,11 @@ export default function HRAttendance() {
         : null;
 
       if (row.id) {
-        await db.from("attendance").update({ punch_in: punchIn, punch_out: punchOut, status: editStatus, work_hours: workHours }).eq("id", row.id);
+        await db.from("attendance").update({ punch_in: punchIn, punch_out: punchOut, status: editStatus, work_hours: workHours }).eq("tenant_id", tenantId).eq("id", row.id);
       } else {
         await db.from("attendance").insert([{
           employee_id: row.employee_id, date: dailyDate,
+          tenant_id: tenantId,
           punch_in: punchIn, punch_out: punchOut, status: editStatus, work_hours: workHours,
         }]);
       }
