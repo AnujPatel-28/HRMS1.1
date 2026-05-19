@@ -6,7 +6,7 @@ import { db, storage, insforge } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
-import { File, Calendar, ClipboardList } from "lucide-react";
+import { File, Calendar, ClipboardList, MoreVertical } from "lucide-react";
 
 type TabKey = "personal" | "identity" | "documents" | "attendance" | "leaves" | "tasks";
 
@@ -52,6 +52,7 @@ export default function EmployeeDetail() {
   const [saving, setSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [showSensitive, setShowSensitive] = useState(false);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // ── Reset Password states (isolated from all other logic) ──
@@ -291,7 +292,7 @@ export default function EmployeeDetail() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2 relative">
           <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeClass(employee.status)}`}>
             {employee.status}
           </span>
@@ -302,7 +303,7 @@ export default function EmployeeDetail() {
                 setIsEditing(false);
                 setEditForm(employee);
               }}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 transition"
             >
               Cancel
             </button>
@@ -310,7 +311,7 @@ export default function EmployeeDetail() {
             <button
               type="button"
               onClick={() => setIsEditing(true)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 transition"
             >
               Edit
             </button>
@@ -322,39 +323,57 @@ export default function EmployeeDetail() {
                 void saveChanges();
               }}
               disabled={saving}
-              className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+              className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60 transition"
             >
               Save
             </button>
           ) : null}
+          
+          {/* Mobile Action Menu Toggle */}
           <button
             type="button"
-            disabled={saving || resetLoading || resetStep !== null}
-            onClick={openPasswordReset}
-            className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-60"
+            onClick={() => setShowActionsMenu(!showActionsMenu)}
+            className="md:hidden rounded-lg border border-slate-300 p-2 text-slate-700 hover:bg-slate-100 transition"
           >
-            Reset Password
+            <MoreVertical className="h-5 w-5" />
           </button>
-          <button
-            type="button"
-            disabled={saving || employee.status === "inactive"}
-            onClick={() => {
-              void updateStatus("inactive");
-            }}
-            className="rounded-lg border border-amber-300 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-60"
-          >
-            Deactivate
-          </button>
-          <button
-            type="button"
-            disabled={saving || employee.status === "terminated"}
-            onClick={() => {
-              void updateStatus("terminated");
-            }}
-            className="rounded-lg border border-rose-300 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-60"
-          >
-            Terminate
-          </button>
+
+          {/* Action Buttons (Desktop visible, Mobile dropdown) */}
+          <div className={`absolute right-0 top-full mt-2 w-48 flex-col gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg md:static md:w-auto md:flex-row md:border-none md:bg-transparent md:p-0 md:shadow-none z-10 ${showActionsMenu ? "flex" : "hidden md:flex"}`}>
+            <button
+              type="button"
+              disabled={saving || resetLoading || resetStep !== null}
+              onClick={() => {
+                openPasswordReset();
+                setShowActionsMenu(false);
+              }}
+              className="w-full text-left md:w-auto rounded-lg border-0 md:border md:border-violet-300 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-60 transition"
+            >
+              Reset Password
+            </button>
+            <button
+              type="button"
+              disabled={saving || employee.status === "inactive"}
+              onClick={() => {
+                void updateStatus("inactive");
+                setShowActionsMenu(false);
+              }}
+              className="w-full text-left md:w-auto rounded-lg border-0 md:border md:border-amber-300 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-60 transition"
+            >
+              Deactivate
+            </button>
+            <button
+              type="button"
+              disabled={saving || employee.status === "terminated"}
+              onClick={() => {
+                void updateStatus("terminated");
+                setShowActionsMenu(false);
+              }}
+              className="w-full text-left md:w-auto rounded-lg border-0 md:border md:border-rose-300 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-60 transition"
+            >
+              Terminate
+            </button>
+          </div>
         </div>
       </div>
 
@@ -412,14 +431,14 @@ export default function EmployeeDetail() {
         </div>
       )}
 
-      <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+      <div className="mt-4 flex gap-2 border-b border-slate-200 pb-3 overflow-x-auto hide-scrollbar snap-x">
         {tabs.map((tab) => (
           <button
             key={tab.key}
             type="button"
             onClick={() => setActiveTab(tab.key)}
-            className={`rounded-lg px-3 py-2 text-sm font-medium ${
-              activeTab === tab.key ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100"
+            className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors snap-start ${
+              activeTab === tab.key ? "bg-brand-50 text-brand-700 shadow-sm" : "text-slate-600 hover:bg-slate-100"
             }`}
           >
             {tab.label}

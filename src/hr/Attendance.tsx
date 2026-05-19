@@ -843,13 +843,13 @@ export default function HRAttendance() {
   const officeLng = toNumber(tenantSettings["office_lng"]);
 
   return (
-    <section className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <section className="space-y-8 md:space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-6 md:gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-slate-900">Attendance Management</h2>
-          <p className="text-sm text-slate-500">Track, edit and export employee attendance records.</p>
+          <h2 className="text-2xl md:text-xl font-bold md:font-semibold text-slate-900">Attendance Management</h2>
+          <p className="text-base md:text-sm text-slate-500 mt-2 md:mt-0">Track, edit and export employee attendance records.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-4 md:gap-2 overflow-x-auto hide-scrollbar w-full md:w-auto pb-2 md:pb-1 snap-x">
           {[
             { key: "daily", icon: Calendar, label: "Daily" },
             { key: "employee", icon: Users, label: "Employee" },
@@ -860,8 +860,8 @@ export default function HRAttendance() {
             <button
               key={key}
               onClick={() => setView(key as ViewMode)}
-              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                view === key ? "bg-brand-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              className={`whitespace-nowrap snap-start inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                view === key ? "bg-brand-600 text-white shadow-sm" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
               }`}
             >
               <Icon className="h-4 w-4" />
@@ -872,28 +872,28 @@ export default function HRAttendance() {
       </div>
 
       {view === "daily" ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-slate-700">Date:</label>
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-5 shadow-sm">
+          <div className="mb-6 md:mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-6 md:gap-3">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <label className="text-sm font-medium text-slate-700 whitespace-nowrap">Date:</label>
               <input
                 type="date"
                 value={dailyDate}
                 onChange={(event) => setDailyDate(event.target.value)}
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring"
+                className="w-full sm:w-auto rounded-lg border border-slate-300 px-3 py-2 sm:py-1.5 text-sm outline-none ring-brand-600 focus:ring"
               />
             </div>
             <button
               onClick={exportDaily}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="w-full sm:w-auto justify-center inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition shadow-sm"
             >
               <Download className="h-4 w-4" /> Export CSV
             </button>
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-slate-600">
+            <table className="min-w-full divide-y divide-slate-200 text-sm block md:table">
+              <thead className="hidden md:table-header-group bg-slate-50 text-left text-slate-600">
                 <tr>
                   <th className="px-4 py-3 font-semibold">Employee</th>
                   <th className="px-4 py-3 font-semibold">Punch In</th>
@@ -904,7 +904,7 @@ export default function HRAttendance() {
                   <th className="px-4 py-3 font-semibold">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 bg-white">
+              <tbody className="divide-y divide-slate-200 bg-white block md:table-row-group">
                 {dailyLoading ? (
                   [...Array(5)].map((_, index) => (
                     <tr key={index}>
@@ -921,47 +921,57 @@ export default function HRAttendance() {
                     const { cls, label } = statusBadge(row.status as AttendanceStatus);
                     const punchInLat = toNumber(row.punch_in_lat);
                     return (
-                      <tr key={row.employee_id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-medium text-slate-900">{row.employee?.full_name ?? "-"}</td>
-                        <td className="px-4 py-3 text-slate-700">
+                      <tr key={row.employee_id} className="hover:bg-slate-50 block md:table-row border border-slate-200 md:border-0 md:border-b border-slate-100 rounded-2xl md:rounded-none mb-4 md:mb-0 p-5 md:p-0 bg-white shadow-[0_2px_10px_-4px_rgba(0,0,0,0.1)] md:shadow-none relative">
+                        <td className="px-0 py-2 md:px-4 md:py-3 block md:table-cell border-b border-slate-100 md:border-0 mb-3 md:mb-0 pb-3 md:pb-0">
+                          <div className="flex items-center justify-between md:justify-start">
+                            <span className="md:hidden text-xs font-semibold uppercase tracking-wider text-slate-400">Employee</span>
+                            <span className="font-bold text-slate-900">{row.employee?.full_name ?? "-"}</span>
+                          </div>
+                        </td>
+                        <td className="px-0 py-1.5 md:px-4 md:py-3 text-slate-700 block md:table-cell flex items-center justify-between md:justify-start">
+                          <span className="md:hidden text-xs font-semibold uppercase tracking-wider text-slate-400">Punch In</span>
                           {isEditing
-                            ? <input type="time" value={editPunchIn} onChange={(event) => setEditPunchIn(event.target.value)} className="rounded border border-slate-300 px-2 py-1 text-xs" />
+                            ? <input type="time" value={editPunchIn} onChange={(event) => setEditPunchIn(event.target.value)} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-brand-500" />
                             : (
                               <div className="inline-flex items-center gap-2">
-                                <span>{fmtTime(row.punch_in)}</span>
-                                {row.is_late ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Late</span> : null}
+                                <span className="font-medium">{fmtTime(row.punch_in)}</span>
+                                {row.is_late ? <span className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 uppercase tracking-wide">Late</span> : null}
                               </div>
                             )}
                         </td>
-                        <td className="px-4 py-3 text-slate-700">
+                        <td className="px-0 py-1.5 md:px-4 md:py-3 text-slate-700 block md:table-cell flex items-center justify-between md:justify-start">
+                          <span className="md:hidden text-xs font-semibold uppercase tracking-wider text-slate-400">Punch Out</span>
                           {isEditing
-                            ? <input type="time" value={editPunchOut} onChange={(event) => setEditPunchOut(event.target.value)} className="rounded border border-slate-300 px-2 py-1 text-xs" />
-                            : fmtTime(row.punch_out)}
+                            ? <input type="time" value={editPunchOut} onChange={(event) => setEditPunchOut(event.target.value)} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-brand-500" />
+                            : <span className="font-medium">{fmtTime(row.punch_out)}</span>}
                         </td>
-                        <td className="px-4 py-3 text-slate-700">
-                          {row.work_hours != null ? `${row.work_hours.toFixed(2)}h` : "-"}
+                        <td className="px-0 py-1.5 md:px-4 md:py-3 text-slate-700 block md:table-cell flex items-center justify-between md:justify-start">
+                          <span className="md:hidden text-xs font-semibold uppercase tracking-wider text-slate-400">Work Hours</span>
+                          <span className="font-medium text-slate-800">{row.work_hours != null ? `${row.work_hours.toFixed(2)}h` : "-"}</span>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-0 py-1.5 md:px-4 md:py-3 block md:table-cell flex items-center justify-between md:justify-start">
+                          <span className="md:hidden text-xs font-semibold uppercase tracking-wider text-slate-400">Status</span>
                           {isEditing ? (
-                            <select value={editStatus} onChange={(event) => setEditStatus(event.target.value as AttendanceStatus)} className="rounded border border-slate-300 px-2 py-1 text-xs">
+                            <select value={editStatus} onChange={(event) => setEditStatus(event.target.value as AttendanceStatus)} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-brand-500">
                               <option value="present">Present</option>
                               <option value="absent">Absent</option>
                               <option value="half_day">Half Day</option>
                               <option value="on_leave">On Leave</option>
                             </select>
                           ) : (
-                            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${cls}`}>{label}</span>
+                            <span className={`inline-flex rounded-md px-2 py-1 text-xs font-bold uppercase tracking-wide ${cls}`}>{label}</span>
                           )}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-0 py-1.5 md:px-4 md:py-3 block md:table-cell flex items-center justify-between md:justify-start">
+                          <span className="md:hidden text-xs font-semibold uppercase tracking-wider text-slate-400">Location</span>
                           {punchInLat != null ? (
                             <button
                               type="button"
                               onClick={() => setSelectedLocationRow(row)}
-                              className={`inline-flex h-8 w-8 items-center justify-center rounded-full border ${
+                              className={`inline-flex h-8 w-8 items-center justify-center rounded-xl border transition-all hover:scale-105 active:scale-95 ${
                                 row.punch_in_location_status === "outside_fence"
-                                  ? "border-rose-200 bg-rose-50 text-rose-600"
-                                  : "border-emerald-200 bg-emerald-50 text-emerald-600"
+                                  ? "border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 shadow-[0_2px_8px_-2px_rgba(225,29,72,0.2)]"
+                                  : "border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 shadow-[0_2px_8px_-2px_rgba(16,185,129,0.2)]"
                               }`}
                               title="View location details"
                             >
@@ -969,19 +979,19 @@ export default function HRAttendance() {
                             </button>
                           ) : "-"}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-0 py-2 md:px-4 md:py-3 block md:table-cell flex items-center justify-end md:justify-start mt-3 md:mt-0 pt-4 md:pt-0 border-t border-slate-100 md:border-0">
                           {isEditing ? (
-                            <div className="flex gap-1">
-                              <button onClick={() => saveEdit(row)} disabled={saving} className="rounded bg-emerald-600 px-2 py-1 text-xs text-white hover:bg-emerald-700 disabled:opacity-50">
-                                <Check className="h-3.5 w-3.5" />
+                            <div className="flex gap-2 w-full md:w-auto">
+                              <button onClick={() => saveEdit(row)} disabled={saving} className="flex-1 md:flex-none justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 transition-all active:scale-95 flex items-center gap-1.5 shadow-sm hover:shadow-md hover:shadow-emerald-600/20">
+                                <Check className="h-4 w-4" /> Save
                               </button>
-                              <button onClick={() => setEditId(null)} className="rounded bg-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-300">
-                                <X className="h-3.5 w-3.5" />
+                              <button onClick={() => setEditId(null)} className="flex-1 md:flex-none justify-center rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200 transition-all active:scale-95 flex items-center gap-1.5 border border-slate-200 hover:border-slate-300">
+                                <X className="h-4 w-4" /> Cancel
                               </button>
                             </div>
                           ) : (
-                            <button onClick={() => startEdit(row)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100">
-                              <Pencil className="h-3 w-3" /> Edit
+                            <button onClick={() => startEdit(row)} className="w-full md:w-auto justify-center inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all active:scale-95 shadow-sm hover:shadow">
+                              <Pencil className="h-4 w-4 text-slate-400" /> Edit
                             </button>
                           )}
                         </td>
@@ -996,20 +1006,20 @@ export default function HRAttendance() {
       ) : null}
 
       {view === "employee" ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-5 flex flex-wrap items-center gap-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-5 shadow-sm">
+          <div className="mb-6 md:mb-5 flex flex-col sm:flex-row sm:items-center gap-6 md:gap-3">
             <select
               value={empViewEmployee}
               onChange={(event) => setEmpViewEmployee(event.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
+              className="w-full sm:w-auto rounded-lg border border-slate-300 px-3 py-2.5 sm:py-2 text-sm outline-none ring-brand-600 focus:ring"
             >
               <option value="">Select Employee</option>
               {allEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.full_name}</option>)}
             </select>
-            <div className="flex items-center gap-2">
-              <button onClick={() => { const date = new Date(empViewYear, empViewMonth - 1); setEmpViewYear(date.getFullYear()); setEmpViewMonth(date.getMonth()); }} className="rounded-lg border border-slate-200 p-1.5 hover:bg-slate-100"><ChevronLeft className="h-4 w-4" /></button>
+            <div className="flex items-center justify-between sm:justify-start gap-2 w-full sm:w-auto">
+              <button onClick={() => { const date = new Date(empViewYear, empViewMonth - 1); setEmpViewYear(date.getFullYear()); setEmpViewMonth(date.getMonth()); }} className="rounded-lg border border-slate-200 p-2 sm:p-1.5 hover:bg-slate-100 transition flex items-center justify-center"><ChevronLeft className="h-5 w-5 sm:h-4 sm:w-4" /></button>
               <span className="min-w-[130px] text-center text-sm font-semibold text-slate-700">{monthNames[empViewMonth]} {empViewYear}</span>
-              <button onClick={() => { const date = new Date(empViewYear, empViewMonth + 1); setEmpViewYear(date.getFullYear()); setEmpViewMonth(date.getMonth()); }} className="rounded-lg border border-slate-200 p-1.5 hover:bg-slate-100"><ChevronRight className="h-4 w-4" /></button>
+              <button onClick={() => { const date = new Date(empViewYear, empViewMonth + 1); setEmpViewYear(date.getFullYear()); setEmpViewMonth(date.getMonth()); }} className="rounded-lg border border-slate-200 p-2 sm:p-1.5 hover:bg-slate-100 transition flex items-center justify-center"><ChevronRight className="h-5 w-5 sm:h-4 sm:w-4" /></button>
             </div>
           </div>
 

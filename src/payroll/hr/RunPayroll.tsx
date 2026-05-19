@@ -494,37 +494,59 @@ export default function RunPayroll() {
                   <span className="text-xs text-slate-500">{rows.length} employees</span>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="min-w-[900px] w-full text-sm divide-y divide-slate-100">
-                    <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
+                  <table className="w-full min-w-full md:min-w-[900px] text-sm divide-y divide-slate-100 block md:table">
+                    <thead className="hidden md:table-header-group bg-slate-50 text-xs font-semibold uppercase text-slate-500">
                       <tr>
                         {["Employee","Present","Absent","Leave","Half","Gross","Deductions","Net Payable"].map(h => (
                           <th key={h} className="px-4 py-3 text-left">{h}</th>
                         ))}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
+                    <tbody className="divide-y divide-slate-100 block md:table-row-group">
                       {rowsWithFinal.map((r) => (
-                        <tr key={r.employeeId} className="hover:bg-slate-50/70">
-                          <td className="px-4 py-3">
-                            <p className="font-medium text-slate-900">{r.employee.full_name}</p>
-                            <p className="text-xs text-slate-500 capitalize">{r.employee.department}</p>
-                            {r.overtimeAmount && r.overtimeAmount > 0 ? (
-                              <p className="text-xs font-medium text-purple-700">Overtime: {formatCurrency(r.overtimeAmount)}</p>
-                            ) : null}
+                        <tr key={r.employeeId} className="hover:bg-slate-50/70 block md:table-row border-b border-slate-100 p-4 md:p-0 md:border-none relative">
+                          <td className="px-0 py-1.5 md:px-4 md:py-3 block md:table-cell flex items-start justify-between md:justify-start">
+                            <span className="md:hidden text-xs font-semibold text-slate-500 mt-0.5">Employee</span>
+                            <div className="text-right md:text-left">
+                              <p className="font-medium text-slate-900">{r.employee.full_name}</p>
+                              <p className="text-xs text-slate-500 capitalize">{r.employee.department}</p>
+                              {r.overtimeAmount && r.overtimeAmount > 0 ? (
+                                <p className="text-xs font-medium text-purple-700">Overtime: {formatCurrency(r.overtimeAmount)}</p>
+                              ) : null}
+                            </div>
                           </td>
-                          <td className="px-4 py-3 text-center">{r.daysPresent}</td>
-                          <td className="px-4 py-3 text-center text-red-500">{r.daysAbsent}</td>
-                          <td className="px-4 py-3 text-center">{r.daysOnLeave}</td>
-                          <td className="px-4 py-3 text-center">{r.halfDays}</td>
-                          <td className="px-4 py-3 font-medium">
-                            <p>{formatCurrency(r.grossSalary)}</p>
-                            {r.overtimeAmount && r.overtimeAmount > 0 ? (
-                              <p className="text-xs font-medium text-purple-700">Includes OT</p>
-                            ) : null}
+                          <td className="px-0 py-1.5 md:px-4 md:py-3 text-right md:text-center block md:table-cell flex items-center justify-between md:justify-center">
+                            <span className="md:hidden text-xs font-semibold text-slate-500">Present</span>
+                            <span>{r.daysPresent}</span>
                           </td>
-                          <td className="px-4 py-3 text-red-600">−{formatCurrency(r.totalDeductions)}</td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1">
+                          <td className="px-0 py-1.5 md:px-4 md:py-3 text-right md:text-center text-red-500 block md:table-cell flex items-center justify-between md:justify-center">
+                            <span className="md:hidden text-xs font-semibold text-slate-500 text-slate-500">Absent</span>
+                            <span>{r.daysAbsent}</span>
+                          </td>
+                          <td className="px-0 py-1.5 md:px-4 md:py-3 text-right md:text-center block md:table-cell flex items-center justify-between md:justify-center">
+                            <span className="md:hidden text-xs font-semibold text-slate-500">Leave</span>
+                            <span>{r.daysOnLeave}</span>
+                          </td>
+                          <td className="px-0 py-1.5 md:px-4 md:py-3 text-right md:text-center block md:table-cell flex items-center justify-between md:justify-center">
+                            <span className="md:hidden text-xs font-semibold text-slate-500">Half</span>
+                            <span>{r.halfDays}</span>
+                          </td>
+                          <td className="px-0 py-1.5 md:px-4 md:py-3 font-medium block md:table-cell flex items-center justify-between md:justify-start text-right md:text-left">
+                            <span className="md:hidden text-xs font-semibold text-slate-500">Gross</span>
+                            <div>
+                              <p>{formatCurrency(r.grossSalary)}</p>
+                              {r.overtimeAmount && r.overtimeAmount > 0 ? (
+                                <p className="text-xs font-medium text-purple-700">Includes OT</p>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="px-0 py-1.5 md:px-4 md:py-3 text-red-600 block md:table-cell flex items-center justify-between md:justify-start text-right md:text-left">
+                            <span className="md:hidden text-xs font-semibold text-slate-500">Deductions</span>
+                            <span>−{formatCurrency(r.totalDeductions)}</span>
+                          </td>
+                          <td className="px-0 py-2 md:px-4 md:py-3 block md:table-cell flex items-center justify-between md:justify-start mt-2 md:mt-0 pt-3 md:pt-0 border-t border-slate-100 md:border-none">
+                            <span className="md:hidden text-xs font-semibold text-slate-500">Net Payable</span>
+                            <div className="flex items-center gap-1 justify-end">
                               <span className="text-xs text-slate-400">₹</span>
                               <input
                                 type="number"

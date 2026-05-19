@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LogOut, LayoutDashboard, User, Clock, Calendar, ClipboardList, FileText, MessageSquare, Menu, X, Wallet } from "lucide-react";
+import { LogOut, LayoutDashboard, User, Clock, Calendar, ClipboardList, FileText, MessageSquare, Menu, X, Wallet, Home, MoreHorizontal } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
 import { NotificationBell } from "../shared/NotificationBell";
@@ -40,12 +40,9 @@ export default function EmployeeLayout() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white shadow-sm pt-safe md:pt-0">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-safe py-3 md:px-4">
           <div className="flex items-center gap-3">
-            <button onClick={() => setMobileOpen(true)} className="md:hidden p-1 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg">
-              <Menu className="h-6 w-6" />
-            </button>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">TalentMesh Solutions</p>
               <h1 className="text-lg font-semibold text-slate-900">Employee Portal</h1>
@@ -81,14 +78,14 @@ export default function EmployeeLayout() {
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-7xl px-4 py-6 md:gap-6">
+      <div className="mx-auto flex max-w-7xl px-safe py-10 md:px-4 md:py-6 md:gap-6">
         {/* Mobile Overlay */}
         {mobileOpen && (
           <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm md:hidden" onClick={() => setMobileOpen(false)} />
         )}
 
-        {/* Sidebar */}
-        <aside className={`fixed inset-y-0 left-0 z-50 w-64 transform bg-white p-4 shadow-xl transition-transform duration-200 ease-in-out md:static md:w-56 md:translate-x-0 md:bg-transparent md:p-0 md:shadow-none ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        {/* Sidebar (Desktop) / Slide-up Menu (Mobile) */}
+        <aside className={`fixed inset-y-0 right-0 z-50 w-full transform bg-white p-4 shadow-xl transition-transform duration-300 ease-in-out md:static md:w-56 md:translate-x-0 md:bg-transparent md:p-0 md:shadow-none sm:w-80 ${mobileOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}>
           <div className="flex items-center justify-between mb-6 md:hidden">
             <span className="font-semibold text-slate-900">Menu</span>
             <button onClick={() => setMobileOpen(false)} className="p-1 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg">
@@ -112,6 +109,47 @@ export default function EmployeeLayout() {
           <Outlet />
         </main>
       </div>
+
+      <nav className="fixed bottom-0 left-0 right-0 z-[100] flex items-center justify-around border-t border-slate-200 bg-white/90 pb-safe pt-2 backdrop-blur-md md:hidden px-safe">
+        <NavLink
+          to="/employee/dashboard"
+          className={({ isActive }) =>
+            `flex flex-col items-center p-2 text-xs font-medium transition-colors ${isActive ? "text-brand-700" : "text-slate-500 hover:text-slate-900"}`
+          }
+        >
+          <Home className="mb-1 h-5 w-5" />
+          Dashboard
+        </NavLink>
+        <NavLink
+          to="/employee/punch"
+          className={({ isActive }) =>
+            `flex flex-col items-center p-2 text-xs font-medium transition-colors ${isActive ? "text-brand-700" : "text-slate-500 hover:text-slate-900"}`
+          }
+        >
+          <Clock className="mb-1 h-5 w-5" />
+          Punch
+        </NavLink>
+        <NavLink
+          to="/employee/tasks"
+          className={({ isActive }) =>
+            `flex flex-col items-center p-2 text-xs font-medium transition-colors ${isActive ? "text-brand-700" : "text-slate-500 hover:text-slate-900"}`
+          }
+        >
+          <ClipboardList className="mb-1 h-5 w-5" />
+          Tasks
+        </NavLink>
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          className={`flex flex-col items-center p-2 text-xs font-medium transition-colors ${mobileOpen ? "text-brand-700" : "text-slate-500 hover:text-slate-900"}`}
+        >
+          <MoreHorizontal className="mb-1 h-5 w-5" />
+          More
+        </button>
+      </nav>
+      
+      {/* Spacer for mobile bottom nav */}
+      <div className="h-16 md:hidden" />
     </div>
   );
 }
