@@ -18,8 +18,9 @@ import EmployeeList from "./hr/EmployeeList";
 import HolidayList from "./hr/HolidayList";
 import HRLayout from "./hr/HRLayout";
 import LeaveManagement from "./hr/LeaveManagement";
+import PolicyCenter from "./hr/PolicyCenter";
 import PolicyUpload from "./hr/PolicyUpload";
-import HRSettings from "./hr/Settings";
+import ShiftManagement from "./hr/ShiftManagement";
 import TaskManagement from "./hr/TaskManagement";
 import PayrollLayout from "./payroll/PayrollLayout";
 import SalaryStructures from "./payroll/hr/SalaryStructures";
@@ -132,13 +133,15 @@ function TenantRoutes() {
           <Route path="employees/create" element={<EmployeeCreate />} />
           <Route path="employees/:employeeId" element={<EmployeeDetail />} />
           <Route path="attendance" element={<HRAttendance />} />
+          <Route path="shifts" element={<ShiftManagement />} />
           <Route path="leaves" element={<LeaveManagement />} />
           <Route path="tasks" element={<TaskManagement />} />
           <Route path="policies" element={<PolicyUpload />} />
           <Route path="holidays" element={<HolidayList />} />
           <Route path="calendar" element={<HRCalendar />} />
           <Route path="chat" element={<HRChat />} />
-          <Route path="settings" element={<HRSettings />} />
+          <Route path="policy-center" element={<PolicyCenter />} />
+          <Route path="settings" element={<Navigate to="/hr/policy-center" replace />} />
         </Route>
 
         <Route

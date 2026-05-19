@@ -299,13 +299,7 @@ export default function EmployeeCreate() {
     setOtpLoading(true);
     setOtpError(null);
     try {
-      if (otpValue === "123456") {
-        setOtpValue("");
-        setOtpError(null);
-        setAuthStep("setting-password");
-        setOtpLoading(false);
-        return;
-      }
+
       const res = await insforge.functions.invoke("verify-employee-code", {
         body: { email: pendingEmail, otp: otpValue },
       });
@@ -331,10 +325,10 @@ export default function EmployeeCreate() {
     setPwError(null);
     try {
       const res = await insforge.functions.invoke("set-employee-password", {
-        body: { email: pendingEmail, password: pwValue.trim() },
+        body: { email: pendingEmail, password: pwValue.trim(), tenant_id: tenantId },
       });
       if (res.error || !res.data?.success) {
-        const msg: string = res.data?.error ?? res.error?.message ?? "Failed to set password.";
+        const msg: string = res.data?.error ?? (res.error as any)?.error ?? res.error?.message ?? "Failed to set password.";
         setPwError(msg);
       } else {
         setCredentials({ email: pendingEmail, password: pwValue.trim() });

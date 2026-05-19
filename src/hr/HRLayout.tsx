@@ -6,18 +6,25 @@ import { useEmployee } from "../hooks/useEmployee";
 
 import { NotificationBell } from "../shared/NotificationBell";
 
-const links = [
-  ["Dashboard", "/hr/dashboard"],
-  ["Employees", "/hr/employees"],
-  ["Attendance", "/hr/attendance"],
-  ["Leaves", "/hr/leaves"],
-  ["Tasks", "/hr/tasks"],
-  ["Policies", "/hr/policies"],
-  ["Holidays", "/hr/holidays"],
-  ["Calendar", "/hr/calendar"],
-  ["Chat", "/hr/chat"],
-  ["Settings", "/hr/settings"],
-] as const;
+type NavLinkItem = {
+  label: string;
+  href: string;
+  indent?: boolean;
+};
+
+const links: readonly NavLinkItem[] = [
+  { label: "Dashboard", href: "/hr/dashboard" },
+  { label: "Employees", href: "/hr/employees" },
+  { label: "Attendance", href: "/hr/attendance" },
+  { label: "Shifts", href: "/hr/shifts" },
+  { label: "Leaves", href: "/hr/leaves" },
+  { label: "Tasks", href: "/hr/tasks" },
+  { label: "Policies", href: "/hr/policies" },
+  { label: "Holidays", href: "/hr/holidays" },
+  { label: "Calendar", href: "/hr/calendar" },
+  { label: "Chat", href: "/hr/chat" },
+  { label: "Policy Center", href: "/hr/policy-center" },
+];
 
 export default function HRLayout() {
   const navigate = useNavigate();
@@ -79,13 +86,13 @@ export default function HRLayout() {
             </button>
           </div>
           <div className="h-full space-y-1 md:h-fit md:rounded-xl md:border md:border-slate-200 md:bg-white md:p-3 md:shadow-sm">
-            {links.map(([label, href]) => (
+            {links.map(({ label, href, indent }) => (
               <NavLink
                 key={href}
                 to={href}
                 onClick={() => setMobileOpen(false)}
                 className={({ isActive }) =>
-                  `block rounded-lg px-3 py-2 text-sm ${isActive ? "bg-brand-50 text-brand-700 font-semibold" : "text-slate-600 hover:bg-slate-100"}`
+                  `block rounded-lg px-3 py-2 text-sm ${indent ? "ml-3" : ""} ${isActive ? "bg-brand-50 text-brand-700 font-semibold" : "text-slate-600 hover:bg-slate-100"}`
                 }
               >
                 {label}

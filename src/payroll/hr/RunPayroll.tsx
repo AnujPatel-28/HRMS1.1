@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Check, ChevronRight, Loader2, Play, RefreshCw } from "lucide-react";
-import { db, storage } from "../../insforge/client";
+import { db, functions, storage } from "../../insforge/client";
 import { useTenant } from "../../contexts/TenantContext";
 import { useEmployee } from "../../hooks/useEmployee";
 import { useAuditLog } from "../../hooks/useAuditLog";
@@ -9,7 +9,6 @@ import { Skeleton } from "../../shared/Skeleton";
 import type { Employee } from "../../types";
 import type { SalaryStructure } from "./SalaryStructures";
 import { MONTH_NAMES, formatCurrency, calcPayslip, getWorkingDays, type PayslipCalc } from "./payroll-calc";
-import { generatePayslipHtml } from "./payslip-html";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type RunStatus = "draft" | "under_review" | "approved" | "paid";
@@ -29,6 +28,13 @@ interface PayrollRun {
 interface RowCalc extends PayslipCalc {
   employee: Employee;
   structure: SalaryStructure;
+  lateMarkCount?: number;
+  lateMarkThreshold?: number;
+  lateMarkDeductionHours?: number;
+  lateMarkDeductionAmount?: number;
+  overtimeHours?: number;
+  overtimeAmount?: number;
+  overtimeBreakdown?: { id: string; amount: number }[];
 }
 
 const now = new Date();
@@ -80,6 +86,87 @@ function SummaryCard({ rows }: { rows: (RowCalc & { finalNet: number })[] }) {
   );
 }
 
+function buildGrossMonthly(structure: SalaryStructure) {
+  const monthlyCtc = structure.ctc_annual / 12;
+  const basicMonthly = monthlyCtc * (structure.basic_percent / 100);
+  const hraMonthly = basicMonthly * (structure.hra_percent / 100);
+  return basicMonthly + hraMonthly + structure.special_allowance + structure.other_allowances;
+}
+
+function payslipRow(label: string, value: string) {
+  return `<tr><td style="padding:4px 8px;color:#475569;font-size:13px">${label}</td><td style="padding:4px 8px;font-size:13px;font-weight:600;text-align:right">${value}</td></tr>`;
+}
+
+function buildPayslipHtml(
+  tenant: import("../../contexts/TenantContext").Tenant,
+  employee: Employee,
+  calc: RowCalc & { finalNet: number },
+  month: number,
+  year: number,
+) {
+  const logo = tenant.logo_url
+    ? `<img src="${tenant.logo_url}" style="height:48px;object-fit:contain" />`
+    : "";
+  const overtimeLine = calc.overtimeAmount && calc.overtimeAmount > 0
+    ? payslipRow("Overtime", formatCurrency(calc.overtimeAmount))
+    : "";
+  const lateMarkDeduction = calc.lateMarkDeductionAmount && calc.lateMarkDeductionAmount > 0
+    ? payslipRow("Late mark deduction", formatCurrency(calc.lateMarkDeductionAmount))
+    : "";
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>Payslip - ${MONTH_NAMES[month - 1]} ${year}</title>
+<style>
+  body{font-family:Arial,sans-serif;margin:0;padding:24px;color:#1e293b;background:#fff}
+  h1{font-size:22px;font-weight:700;margin:0}
+  .header{display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #6d28d9;padding-bottom:12px;margin-bottom:16px}
+  .section{margin-bottom:16px}
+  .section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6d28d9;border-bottom:1px solid #e2e8f0;padding-bottom:4px;margin-bottom:8px}
+  table{width:100%;border-collapse:collapse}
+  .net{background:#f3f0ff;border-radius:8px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;margin-top:16px}
+  .net-label{font-size:15px;font-weight:600}
+  .net-value{font-size:22px;font-weight:700;color:#6d28d9}
+  .footer{margin-top:24px;font-size:11px;color:#94a3b8;text-align:center;border-top:1px solid #e2e8f0;padding-top:12px}
+  .emp-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;font-size:13px}
+  .emp-grid span{color:#475569}
+  .emp-grid strong{color:#0f172a}
+  @media print{body{padding:0}}
+</style></head><body>
+<div class="header">
+  <div>${logo}<div style="margin-top:4px"><p style="margin:0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#6d28d9">${tenant.company_name}</p><h1>PAYSLIP</h1></div></div>
+  <div style="text-align:right"><p style="margin:0;font-size:14px;font-weight:600">${MONTH_NAMES[month - 1]} ${year}</p><p style="margin:0;font-size:12px;color:#64748b">Pay Period</p></div>
+</div>
+
+<div class="section">
+  <div class="section-title">Employee Details</div>
+  <div class="emp-grid">
+    <div><span>Name: </span><strong>${employee.full_name}</strong></div>
+    <div><span>Code: </span><strong>${employee.employee_code ?? "-"}</strong></div>
+    <div><span>Department: </span><strong style="text-transform:capitalize">${employee.department ?? "-"}</strong></div>
+    <div><span>Designation: </span><strong>${employee.designation ?? "-"}</strong></div>
+    <div><span>Days Present: </span><strong>${calc.daysPresent}</strong></div>
+    <div><span>Days Absent: </span><strong>${calc.daysAbsent}</strong></div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+  <div class="section">
+    <div class="section-title">Earnings</div>
+    <table>${payslipRow("Basic", formatCurrency(calc.basicMonthly))}${payslipRow("HRA", formatCurrency(calc.hraMonthly))}${payslipRow("Special Allowance", formatCurrency(calc.specialAllowance))}${payslipRow("Other Allowances", formatCurrency(calc.otherAllowances))}${overtimeLine}
+    <tr style="border-top:1px solid #e2e8f0"><td style="padding:6px 8px;font-weight:700;font-size:13px">Gross</td><td style="padding:6px 8px;font-weight:700;font-size:13px;text-align:right">${formatCurrency(calc.grossSalary)}</td></tr></table>
+  </div>
+  <div class="section">
+    <div class="section-title">Deductions</div>
+    <table>${payslipRow("PF (Employee)", formatCurrency(calc.pfEmployee))}${payslipRow("ESI (Employee)", formatCurrency(calc.esiEmployee))}${payslipRow("TDS", formatCurrency(calc.tds))}${lateMarkDeduction}${payslipRow("Other", formatCurrency(Math.max(calc.otherDeductions - (calc.lateMarkDeductionAmount ?? 0), 0)))}
+    <tr style="border-top:1px solid #e2e8f0"><td style="padding:6px 8px;font-weight:700;font-size:13px">Total Deductions</td><td style="padding:6px 8px;font-weight:700;font-size:13px;text-align:right">${formatCurrency(calc.totalDeductions)}</td></tr></table>
+  </div>
+</div>
+
+<div class="net"><span class="net-label">Net Payable</span><span class="net-value">${formatCurrency(calc.finalNet)}</span></div>
+<div class="footer">This is a computer-generated payslip. No signature required.</div>
+</body></html>`;
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function RunPayroll() {
   const { tenantId, tenant } = useTenant();
@@ -119,18 +206,38 @@ export default function RunPayroll() {
       const startDate = `${monthStr}-01`;
       const endDate = `${monthStr}-${new Date(year, month, 0).getDate().toString().padStart(2, "0")}`;
 
-      const [empRes, structRes, attRes, holRes] = await Promise.all([
+      const [empRes, structRes, attRes, holRes, overtimeRes] = await Promise.all([
         db.from("employees").select("*").eq("tenant_id", tenantId).eq("status", "active").order("full_name"),
         db.from("salary_structures").select("*").eq("tenant_id", tenantId).order("effective_from", { ascending: false }),
         db.from("attendance").select("employee_id,status").eq("tenant_id", tenantId).gte("date", startDate).lte("date", endDate),
         db.from("holidays").select("date").eq("tenant_id", tenantId).gte("date", startDate).lte("date", endDate),
+        db
+          .from("overtime_records")
+          .select("id,employee_id,regular_hours,overtime_hours,overtime_rate,approved,date")
+          .eq("tenant_id", tenantId)
+          .eq("approved", true)
+          .gte("date", startDate)
+          .lte("date", endDate),
       ]);
 
       if (empRes.error) throw empRes.error;
+      if (structRes.error) throw structRes.error;
+      if (attRes.error) throw attRes.error;
+      if (holRes.error) throw holRes.error;
+      if (overtimeRes.error) throw overtimeRes.error;
       const employees = (empRes.data ?? []) as Employee[];
       const allStructures = (structRes.data ?? []) as SalaryStructure[];
       const attendances = (attRes.data ?? []) as { employee_id: string; status: string }[];
       const holidayDates = ((holRes.data ?? []) as { date: string }[]).map((h) => h.date);
+      const overtimeRecords = (overtimeRes.data ?? []) as {
+        id: string;
+        employee_id: string;
+        regular_hours: number;
+        overtime_hours: number;
+        overtime_rate: number;
+        approved: boolean;
+        date: string;
+      }[];
 
       // Latest structure per employee (effective_from ≤ first day of month)
       const effectiveCutoff = startDate;
@@ -154,16 +261,68 @@ export default function RunPayroll() {
 
       const workingDays = getWorkingDays(year, month, holidayDates);
 
+      const overtimeByEmployee = new Map<string, { totalHours: number; totalAmount: number; breakdown: { id: string; amount: number }[] }>();
+      overtimeRecords.forEach((record) => {
+        const structure = structMap.get(record.employee_id);
+        if (!structure || record.regular_hours <= 0 || workingDays <= 0) return;
+        const grossMonthly = buildGrossMonthly(structure);
+        const hourlyRate = grossMonthly / (record.regular_hours * workingDays);
+        const overtimeAmount = record.overtime_hours * record.overtime_rate * hourlyRate;
+        const current = overtimeByEmployee.get(record.employee_id) ?? { totalHours: 0, totalAmount: 0, breakdown: [] };
+        current.totalHours += record.overtime_hours;
+        current.totalAmount += overtimeAmount;
+        current.breakdown.push({ id: record.id, amount: overtimeAmount });
+        overtimeByEmployee.set(record.employee_id, current);
+      });
+
       const newRows: RowCalc[] = [];
       const newSkipped: Employee[] = [];
 
-      employees.forEach((emp) => {
+      for (const emp of employees) {
         const struct = structMap.get(emp.id);
-        if (!struct) { newSkipped.push(emp); return; }
+        if (!struct) { newSkipped.push(emp); continue; }
         const att = attMap.get(emp.id) ?? { daysPresent: workingDays, daysAbsent: 0, daysOnLeave: 0, halfDays: 0 };
         const calc = calcPayslip(struct, att, year, month, holidayDates);
-        newRows.push({ ...calc, employee: emp, structure: struct });
-      });
+        const { data: lateData, error: lateError } = await functions.invoke("calculate-late-marks", {
+          body: {
+            tenant_id: tenantId,
+            employee_id: emp.id,
+            month,
+            year,
+          },
+        });
+        if (lateError) throw lateError;
+        const lateSummary = (lateData ?? {}) as {
+          late_count?: number;
+          threshold?: number;
+          deduction_hours?: number;
+        };
+        const grossMonthly = buildGrossMonthly(struct);
+        const hourlyRate = grossMonthly / (Number(tenant?.work_hours_per_day ?? 8) * workingDays);
+        const lateDeductionAmount = (lateSummary.deduction_hours ?? 0) * hourlyRate;
+        const overtimeSummary = overtimeByEmployee.get(emp.id);
+        const overtimeAmount = overtimeSummary?.totalAmount ?? 0;
+        const otherDeductions = calc.otherDeductions + lateDeductionAmount;
+        const totalDeductions = calc.totalDeductions + lateDeductionAmount;
+        const grossSalary = calc.grossSalary + overtimeAmount;
+        const netPayable = Math.max(grossSalary - totalDeductions, 0);
+        newRows.push({
+          ...calc,
+          employee: emp,
+          structure: struct,
+          grossSalary,
+          otherDeductions,
+          totalDeductions,
+          netPayable,
+          lateMarkCount: lateSummary.late_count ?? 0,
+          lateMarkThreshold: lateSummary.threshold ?? 0,
+          lateMarkDeductionHours: lateSummary.deduction_hours ?? 0,
+          lateMarkDeductionAmount: lateDeductionAmount,
+          overtimeHours: overtimeSummary?.totalHours ?? 0,
+          overtimeAmount,
+          overtimeBreakdown: overtimeSummary?.breakdown ?? [],
+        });
+      }
 
       setRows(newRows);
       setSkipped(newSkipped);
@@ -213,7 +372,18 @@ export default function RunPayroll() {
 
       // Generate and upload payslips
       for (const r of rowsWithFinal) {
-        const pdfUrl = await uploadPayslip(r, r.finalNet, month, year, tenantId, tenant);
+        if (r.overtimeBreakdown && r.overtimeBreakdown.length > 0) {
+          for (const overtimeRecord of r.overtimeBreakdown) {
+            const { error: overtimeUpdateError } = await db
+              .from("overtime_records")
+              .update({ overtime_amount: Math.round(overtimeRecord.amount * 100) / 100 })
+              .eq("tenant_id", tenantId)
+              .eq("id", overtimeRecord.id);
+            if (overtimeUpdateError) throw overtimeUpdateError;
+          }
+        }
+
+        const pdfUrl = await uploadPayslip(r, month, year, tenantId, tenant);
         const payload = {
           tenant_id: tenantId,
           payroll_run_id: runId,
@@ -338,12 +508,20 @@ export default function RunPayroll() {
                           <td className="px-4 py-3">
                             <p className="font-medium text-slate-900">{r.employee.full_name}</p>
                             <p className="text-xs text-slate-500 capitalize">{r.employee.department}</p>
+                            {r.overtimeAmount && r.overtimeAmount > 0 ? (
+                              <p className="text-xs font-medium text-purple-700">Overtime: {formatCurrency(r.overtimeAmount)}</p>
+                            ) : null}
                           </td>
                           <td className="px-4 py-3 text-center">{r.daysPresent}</td>
                           <td className="px-4 py-3 text-center text-red-500">{r.daysAbsent}</td>
                           <td className="px-4 py-3 text-center">{r.daysOnLeave}</td>
                           <td className="px-4 py-3 text-center">{r.halfDays}</td>
-                          <td className="px-4 py-3 font-medium">{formatCurrency(r.grossSalary)}</td>
+                          <td className="px-4 py-3 font-medium">
+                            <p>{formatCurrency(r.grossSalary)}</p>
+                            {r.overtimeAmount && r.overtimeAmount > 0 ? (
+                              <p className="text-xs font-medium text-purple-700">Includes OT</p>
+                            ) : null}
+                          </td>
                           <td className="px-4 py-3 text-red-600">−{formatCurrency(r.totalDeductions)}</td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-1">
@@ -420,7 +598,6 @@ export default function RunPayroll() {
 // ─── Upload helper ─────────────────────────────────────────────────────────────
 async function uploadPayslip(
   r: RowCalc & { finalNet: number },
-  finalNet: number,
   month: number,
   year: number,
   tenantId: string,
@@ -428,7 +605,7 @@ async function uploadPayslip(
 ): Promise<string | null> {
   if (!tenant) return null;
   try {
-    const html = generatePayslipHtml(tenant, r.employee, r, finalNet, month, year);
+    const html = buildPayslipHtml(tenant, r.employee, r, month, year);
     const blob = new Blob([html], { type: "text/html" });
     const path = `${tenantId}/${year}/${month}/${r.employeeId}.html`;
     const { data, error } = await storage.from("payslips").upload(path, blob);

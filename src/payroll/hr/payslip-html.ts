@@ -11,13 +11,16 @@ function row(label: string, value: string) {
 export function generatePayslipHtml(
   tenant: Tenant,
   employee: Employee,
-  calc: PayslipCalc,
+  calc: PayslipCalc & { lateMarkDeductionAmount?: number },
   netFinal: number,
   month: number,
   year: number,
 ): string {
   const logo = tenant.logo_url
     ? `<img src="${tenant.logo_url}" style="height:48px;object-fit:contain" />`
+    : "";
+  const lateMarkDeduction = calc.lateMarkDeductionAmount && calc.lateMarkDeductionAmount > 0
+    ? row("Late mark deduction", formatCurrency(calc.lateMarkDeductionAmount))
     : "";
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
@@ -63,7 +66,7 @@ export function generatePayslipHtml(
   </div>
   <div class="section">
     <div class="section-title">Deductions</div>
-    <table>${row("PF (Employee)", formatCurrency(calc.pfEmployee))}${row("ESI (Employee)", formatCurrency(calc.esiEmployee))}${row("TDS", formatCurrency(calc.tds))}${row("Other", formatCurrency(calc.otherDeductions))}
+    <table>${row("PF (Employee)", formatCurrency(calc.pfEmployee))}${row("ESI (Employee)", formatCurrency(calc.esiEmployee))}${row("TDS", formatCurrency(calc.tds))}${lateMarkDeduction}${row("Other", formatCurrency(Math.max(calc.otherDeductions - (calc.lateMarkDeductionAmount ?? 0), 0)))}
     <tr style="border-top:1px solid #e2e8f0"><td style="padding:6px 8px;font-weight:700;font-size:13px">Total Deductions</td><td style="padding:6px 8px;font-weight:700;font-size:13px;text-align:right">${formatCurrency(calc.totalDeductions)}</td></tr></table>
   </div>
 </div>

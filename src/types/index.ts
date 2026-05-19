@@ -49,6 +49,30 @@ export interface Attendance {
   created_at: string;
 }
 
+export interface Shift {
+  id?: string;
+  tenant_id?: string;
+  name: string;
+  start_time: string;
+  end_time: string;
+  working_days: number[];
+  half_day_cutoff_override: string | null;
+  is_default?: boolean;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface EmployeeShift {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  shift_id: string;
+  effective_from: string;
+  effective_to: string | null;
+  created_at: string;
+}
+
 export interface Leave {
   id: string;
   tenant_id: string;
