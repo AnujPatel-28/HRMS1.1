@@ -140,7 +140,7 @@ export default function Login() {
 
   // ════════════════════════════════════════════════════════════════════════════
   return (
-    <main className="grid min-h-screen place-items-center bg-gradient-to-br from-emerald-50 to-cyan-50 p-4">
+    <main className="grid min-h-screen place-items-center p-4">
       <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-lg">
         <p className="text-sm font-semibold uppercase tracking-wide text-brand-700">TalentMesh HRMS</p>
 

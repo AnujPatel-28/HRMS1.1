@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "@insforge/sdk": "^1.2.5",
+    "@types/html2pdf.js": "^0.10.0",
     "@types/leaflet": "^1.9.21",
+    "html2pdf.js": "^0.14.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.8.0",
     "react": "^19.2.5",

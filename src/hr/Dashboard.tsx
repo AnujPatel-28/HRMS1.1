@@ -28,7 +28,7 @@ function fmt(d: string) {
 export default function HRDashboard() {
   const navigate = useNavigate();
   const { employee } = useEmployee();
-  const { tenantId } = useTenant();
+  const { tenantId, tenant } = useTenant();
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [pendingLeaves, setPendingLeaves] = useState<(Leave & { employee?: Employee })[]>([]);
@@ -120,16 +120,28 @@ export default function HRDashboard() {
   return (
     <section className="space-y-6">
       {/* Welcome */}
-      <div className="rounded-2xl border border-brand-100 bg-gradient-to-r from-brand-600 to-emerald-500 p-6 text-white shadow-sm">
-        <p className="text-sm font-medium opacity-80">Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 17 ? "afternoon" : "evening"},</p>
-        <h2 className="mt-0.5 text-2xl font-bold">{employee?.full_name ?? "HR Manager"} 👋</h2>
-        <p className="mt-1 text-sm opacity-70">Here's what's happening at TalentMesh today — {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}.</p>
+      <div
+        className="rounded-2xl border border-brand-100 p-6 text-white shadow-xl -translate-y-1 bg-cover bg-center bg-no-repeat bg-[url('/full.svg')] min-[912px]:bg-[url('/green%20gradiant.svg')] relative overflow-hidden"
+        style={{ backgroundColor: "#059669" }}
+      >
+        <div className="relative z-10 w-full md:w-2/3">
+          <p className="text-sm font-medium opacity-80">Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 17 ? "afternoon" : "evening"},</p>
+          <h2 className="mt-0.5 text-2xl font-bold">{employee?.full_name ?? "HR Manager"} 👋</h2>
+          <p className="mt-1 text-sm opacity-70">Here's what's happening at {tenant?.company_name ?? "TalentMesh"} today — {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}.</p>
+        </div>
+
+        {/* Desktop Illustration */}
+        <img
+          src="/illu1.svg"
+          alt=""
+          className="absolute right-4 bottom-0 h-[135%] w-auto object-contain object-bottom hidden min-[912px]:block pointer-events-none z-0"
+        />
       </div>
 
       {/* KPI Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {kpis.map((k) => (
-          <div key={k.label} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div key={k.label} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xl -translate-y-1 lg:min-h-[180px]">
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium text-slate-500">{k.label}</p>
               <span className={`rounded-xl p-2 ${k.bg} ${k.color}`}>{k.icon}</span>
@@ -146,7 +158,7 @@ export default function HRDashboard() {
 
       <div className="grid gap-5 lg:grid-cols-2">
         {/* Pending Leave Requests */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xl -translate-y-1">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="font-semibold text-slate-800">Pending Leave Requests</h3>
             <button
@@ -185,7 +197,7 @@ export default function HRDashboard() {
         </div>
 
         {/* Today's Attendance Snapshot */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xl -translate-y-1">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="font-semibold text-slate-800">Today's Attendance</h3>
             <button
@@ -245,7 +257,7 @@ export default function HRDashboard() {
       </div>
 
       {/* Recent Notifications */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xl -translate-y-1">
         <h3 className="mb-4 font-semibold text-slate-800">Recent Activity</h3>
         {loading ? (
           <div className="space-y-3 py-2">

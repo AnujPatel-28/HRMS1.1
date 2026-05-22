@@ -276,7 +276,7 @@ export default function LeaveManagement() {
 
       {/* Policy Stats Card */}
       {tab === "all" && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {[
             { label: "Approved This Month", value: policyStats.approved, color: "text-emerald-600" },
             { label: "Pending Approvals", value: policyStats.pending, color: "text-amber-600" },
@@ -291,10 +291,10 @@ export default function LeaveManagement() {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1 w-fit">
+      <div className="hide-scrollbar flex w-full gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 sm:w-fit">
         {(["pending", "all", "holidays"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setTab(t)}
-            className={`rounded-lg px-4 py-1.5 text-sm font-medium capitalize transition ${tab === t ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+            className={`whitespace-nowrap rounded-lg px-4 py-1.5 text-sm font-medium capitalize transition ${tab === t ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
             {t === "pending" ? "Pending Approvals" : t === "all" ? "All Leaves" : "Holiday List"}
           </button>
         ))}
@@ -374,27 +374,27 @@ export default function LeaveManagement() {
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
           <div className="flex flex-wrap items-center gap-3">
             <Filter className="h-4 w-4 text-slate-400" />
-            <select value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring">
+            <select value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring sm:flex-none">
               <option value="all">All Employees</option>
               {employees.map((e) => <option key={e.id} value={e.id}>{e.full_name}</option>)}
             </select>
-            <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring">
+            <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring sm:flex-none">
               <option value="all">All Types</option>
               {["casual","sick","earned","unpaid","maternity","paternity","other"].map((t) => <option key={t} value={t} className="capitalize">{t}</option>)}
             </select>
-            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring">
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring sm:flex-none">
               <option value="all">All Statuses</option>
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
               <option value="rejected">Rejected</option>
             </select>
-            <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring" />
-            <input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring" />
+            <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring sm:flex-none" />
+            <input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring sm:flex-none" />
             <button onClick={() => void fetchAll()} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700">Apply</button>
             <button onClick={() => exportCSV([
               ["Employee","Type","Start","End","Days","Status","Reason"],
               ...allLeaves.map((l) => [l.employee?.full_name ?? l.employee_id, l.leave_type ?? "", l.start_date, l.end_date, String(l.total_days ?? ""), l.status, l.reason])
-            ], "leaves_export.csv")} className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+            ], "leaves_export.csv")} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 sm:ml-auto">
               <Download className="h-4 w-4" /> Export
             </button>
           </div>
@@ -445,7 +445,7 @@ export default function LeaveManagement() {
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="font-semibold text-slate-800">Holiday List</h3>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button onClick={() => setShowBulk(!showBulk)} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
                 <Upload className="h-4 w-4" /> Bulk Import
               </button>
@@ -468,7 +468,7 @@ export default function LeaveManagement() {
 
           {showAddHol && (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <input value={holName} onChange={(e) => setHolName(e.target.value)} placeholder="Holiday Name" className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring col-span-2 md:col-span-1" />
                 <input type="date" value={holDate} onChange={(e) => setHolDate(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring" />
                 <select value={holType ?? "national"} onChange={(e) => setHolType(e.target.value as Holiday["type"])} className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring">

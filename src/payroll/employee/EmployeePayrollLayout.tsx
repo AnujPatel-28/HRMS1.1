@@ -16,9 +16,9 @@ export default function EmployeePayrollLayout() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50/30 to-slate-50">
+    <div className="min-h-screen">
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/90 backdrop-blur-md shadow-sm">
+      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/90 backdrop-blur-md shadow-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           {/* Left: Logo + Title */}
           <div className="flex items-center gap-3">

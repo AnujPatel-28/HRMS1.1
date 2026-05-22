@@ -56,7 +56,7 @@ function DetailModal({ tenant, onClose }: DetailModalProps) {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           {[
             { icon: Globe, label: "Subdomain", value: tenant.subdomain },
             { icon: CreditCard, label: "Plan", value: PLAN_LABELS[tenant.plan] ?? tenant.plan },
@@ -200,7 +200,7 @@ export default function AllCompanies() {
         </div>
       )}
 
-      <div className="mb-6 flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-6 flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
@@ -211,7 +211,7 @@ export default function AllCompanies() {
             className="w-full rounded-lg border border-slate-200 pl-10 pr-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Filter className="h-4 w-4 text-slate-400" />
           <select
             value={filterPlan}

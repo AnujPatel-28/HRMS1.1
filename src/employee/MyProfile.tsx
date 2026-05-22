@@ -91,7 +91,7 @@ export default function MyProfile() {
         {/* Personal Info */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="font-semibold text-slate-800 mb-4 pb-2 border-b border-slate-100">Personal Information</h3>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Full Name" value={employee.full_name} />
             <Field label="Email" value={employee.email} />
             <Field label="Phone" value={employee.phone} />
@@ -107,7 +107,7 @@ export default function MyProfile() {
         {/* Job Info */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="font-semibold text-slate-800 mb-4 pb-2 border-b border-slate-100">Job Details</h3>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Employee Code" value={employee.employee_code} />
             <Field label="Department" value={employee.department} />
             <Field label="Designation" value={employee.designation} />
@@ -120,7 +120,7 @@ export default function MyProfile() {
         {/* Sensitive */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="font-semibold text-slate-800 mb-4 pb-2 border-b border-slate-100">Identity Documents</h3>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             <MaskedField label="Aadhaar Number" value={employee.aadhaar_number} />
             <MaskedField label="PAN Number" value={employee.pan_number} />
           </div>
@@ -129,7 +129,7 @@ export default function MyProfile() {
         {/* Bank */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="font-semibold text-slate-800 mb-4 pb-2 border-b border-slate-100">Bank Details</h3>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Bank Name" value={employee.bank_name} />
             <Field label="IFSC Code" value={employee.ifsc_code} />
             <MaskedField label="Account Number" value={employee.account_number} />
@@ -139,7 +139,7 @@ export default function MyProfile() {
         {/* Emergency Contact */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2">
           <h3 className="font-semibold text-slate-800 mb-4 pb-2 border-b border-slate-100">Emergency Contact</h3>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid gap-4 sm:grid-cols-3">
             <Field label="Name" value={employee.emergency_contact_name} />
             <Field label="Phone" value={employee.emergency_contact_phone} />
             <Field label="Relation" value={employee.emergency_contact_relation} />

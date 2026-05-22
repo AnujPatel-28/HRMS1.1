@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { LogOut, Menu, X, Home, Users, CalendarCheck, MoreHorizontal } from "lucide-react";
-import { Link, NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, Menu } from "lucide-react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
 
@@ -27,30 +27,48 @@ const links: readonly NavLinkItem[] = [
 ];
 
 export default function HRLayout() {
-  const navigate = useNavigate();
   const location = useLocation();
+  const navigate = useNavigate();
   const { logout } = useAuth();
   const { employee } = useEmployee();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     await logout();
     navigate("/", { replace: true });
   };
 
+  const handleMobileNavigate = (href: string) => {
+    setMobileOpen(false);
+    navigate(href);
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white pt-safe md:pt-0">
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white shadow-md pt-safe md:pt-0">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-safe py-3 md:px-4">
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 md:hidden"
+              aria-label="Open navigation menu"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">TalentMesh Solutions</p>
               <h1 className="text-lg font-semibold text-slate-900">HR Portal</h1>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Link to="/select" className="hidden text-xs font-medium text-slate-500 hover:text-brand-700 sm:inline">
-              ⟵ Switch product
+            <Link to="/select" className="hidden items-center gap-1 text-xs font-medium text-slate-500 hover:text-brand-700 sm:inline-flex">
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Switch product</span>
             </Link>
             <NotificationBell />
             <div className="hidden text-right sm:block">
@@ -69,33 +87,44 @@ export default function HRLayout() {
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-7xl px-safe py-10 md:px-4 md:py-6 md:gap-6">
+      <div className="mx-auto flex max-w-7xl px-safe py-6 pb-24 md:gap-6 md:px-4 md:py-6">
         {/* Mobile Overlay */}
         {mobileOpen && (
           <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm md:hidden" onClick={() => setMobileOpen(false)} />
         )}
 
         {/* Sidebar (Desktop) / Slide-up Menu (Mobile) */}
-        <aside className={`fixed inset-y-0 right-0 z-50 w-full transform bg-white p-4 shadow-xl transition-transform duration-300 ease-in-out md:static md:w-56 md:translate-x-0 md:bg-transparent md:p-0 md:shadow-none sm:w-80 ${mobileOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}>
-          <div className="flex items-center justify-between mb-6 md:hidden">
-            <span className="font-semibold text-slate-900">Menu</span>
-            <button onClick={() => setMobileOpen(false)} className="p-1 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg">
+        <aside className={`fixed inset-y-0 left-0 z-50 w-[88vw] max-w-sm transform bg-white p-4 shadow-xl transition-transform duration-300 ease-in-out md:sticky md:top-24 md:z-30 md:w-56 md:max-w-none md:translate-x-0 md:self-start md:bg-transparent md:p-0 md:shadow-none ${mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
+          <div className="mb-6 flex items-start justify-between gap-3 md:hidden">
+            <div>
+              <span className="font-semibold text-slate-900">Navigation</span>
+              <p className="mt-1 text-xs text-slate-500">{employee?.full_name ?? "HR User"}</p>
+            </div>
+            <button onClick={() => setMobileOpen(false)} className="rounded-lg p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700">
               <X className="h-5 w-5" />
             </button>
           </div>
-          <div className="h-full space-y-1 md:h-fit md:rounded-xl md:border md:border-slate-200 md:bg-white md:p-3 md:shadow-sm">
-            {links.map(({ label, href, indent }) => (
-              <NavLink
-                key={href}
-                to={href}
-                onClick={() => setMobileOpen(false)}
-                className={({ isActive }) =>
-                  `block rounded-lg px-3 py-2 text-sm ${indent ? "ml-3" : ""} ${isActive ? "bg-brand-50 text-brand-700 font-semibold" : "text-slate-600 hover:bg-slate-100"}`
-                }
-              >
-                {label}
-              </NavLink>
-            ))}
+          <div className="h-full space-y-1 md:h-fit md:rounded-xl md:border md:border-slate-200 md:bg-white md:p-3 md:shadow-xl md:-translate-y-1">
+            <Link
+              to="/select"
+              className="mb-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 md:hidden"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Switch product
+            </Link>
+            {links.map(({ label, href, indent }) => {
+              const isActive = location.pathname === href;
+              return (
+                <button
+                  key={href}
+                  type="button"
+                  onClick={() => handleMobileNavigate(href)}
+                  className={`block w-full rounded-lg px-3 py-2.5 text-left text-sm font-display transition ${indent ? "ml-3" : ""} ${isActive ? "bg-brand-50 font-semibold text-brand-700" : "text-slate-600 hover:bg-slate-100"}`}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
         </aside>
 
@@ -143,8 +172,6 @@ export default function HRLayout() {
         </button>
       </nav>
       
-      {/* Spacer for mobile bottom nav */}
-      <div className="h-16 md:hidden" />
     </div>
   );
 }

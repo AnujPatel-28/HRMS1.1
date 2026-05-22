@@ -99,22 +99,25 @@ export function SalaryForm({ employee, structure, onClose, onSaved }: SalaryForm
 
     setSaving(true);
     try {
-      const { error } = await db.from("salary_structures").insert([
-        {
-          tenant_id: tenantId,
-          employee_id: employee.id,
-          effective_from: effectiveFrom,
-          ctc_annual: toNumber(ctcAnnual),
-          basic_percent: toNumber(basicPercent),
-          hra_percent: toNumber(hraPercent),
-          special_allowance: toNumber(specialAllowance),
-          pf_applicable: pfApplicable,
-          esi_applicable: esiApplicable,
-          tds_monthly: toNumber(tdsMonthly),
-          other_allowances: toNumber(otherAllowances),
-          created_by: currentEmployee?.id ?? null,
-        },
-      ]);
+      const { error } = await db.from("salary_structures").upsert(
+        [
+          {
+            tenant_id: tenantId,
+            employee_id: employee.id,
+            effective_from: effectiveFrom,
+            ctc_annual: toNumber(ctcAnnual),
+            basic_percent: toNumber(basicPercent),
+            hra_percent: toNumber(hraPercent),
+            special_allowance: toNumber(specialAllowance),
+            pf_applicable: pfApplicable,
+            esi_applicable: esiApplicable,
+            tds_monthly: toNumber(tdsMonthly),
+            other_allowances: toNumber(otherAllowances),
+            created_by: currentEmployee?.id ?? null,
+          },
+        ],
+        { onConflict: "tenant_id,employee_id,effective_from" },
+      );
 
       if (error) throw error;
 

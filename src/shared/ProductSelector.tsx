@@ -42,7 +42,7 @@ export default function ProductSelector() {
   };
 
   return (
-    <main className="grid min-h-screen place-items-center bg-slate-50 px-4 py-10">
+    <main className="grid min-h-screen place-items-center px-4 py-10">
       <section className="w-full max-w-5xl">
         <div className="mb-8 text-center">
           <div className="mx-auto grid h-20 w-20 place-items-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">

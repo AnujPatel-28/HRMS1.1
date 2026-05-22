@@ -358,7 +358,7 @@ export default function EmployeeCreate() {
         </button>
       </div>
 
-      <div className="mb-5 grid grid-cols-5 gap-2">
+      <div className="hide-scrollbar mb-5 flex gap-2 overflow-x-auto pb-1">
         {stepTitles.map((label, index) => {
           const stepNo = index + 1;
           const completed = stepNo < step;
@@ -366,7 +366,7 @@ export default function EmployeeCreate() {
           return (
             <div
               key={label}
-              className={`rounded-lg border px-2 py-2 text-center text-xs font-semibold ${
+              className={`min-w-[150px] rounded-lg border px-3 py-2 text-center text-xs font-semibold sm:min-w-0 sm:flex-1 ${
                 completed
                   ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                   : current

@@ -6,11 +6,38 @@
   color: #0f172a;
   background: #f8fafc;
   font-family: "Inter", "Segoe UI", sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  background-image: url('/bg1.1.svg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: "Manrope", "Inter", "Segoe UI", sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.font-display {
+  font-family: "Manrope", "Inter", "Segoe UI", sans-serif;
 }
 
 /* Hide scrollbar for horizontally scrollable tabs/containers but keep functionality */

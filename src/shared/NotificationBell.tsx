@@ -3,6 +3,7 @@ import { Bell, ClipboardList, CalendarCheck, FileText, CheckCircle, XCircle, Inf
 import { useNavigate } from "react-router-dom";
 import type { Notification } from "../types";
 import { db, realtime } from "../insforge/client";
+import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
 import { useTenant } from "../contexts/TenantContext";
 
@@ -32,7 +33,29 @@ function timeAgo(dateStr: string) {
   return `${days}d ago`;
 }
 
+function normalizeNotificationPayload(payload: unknown): Notification | null {
+  if (!payload || typeof payload !== "object") return null;
+
+  const source = payload as Record<string, unknown>;
+  const candidate =
+    (source.record as Record<string, unknown> | undefined) ??
+    (source.new as Record<string, unknown> | undefined) ??
+    source;
+
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.tenant_id !== "string" ||
+    typeof candidate.employee_id !== "string" ||
+    typeof candidate.title !== "string"
+  ) {
+    return null;
+  }
+
+  return candidate as unknown as Notification;
+}
+
 export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: NotificationBellProps) {
+  const { role } = useAuth();
   const { employee } = useEmployee();
   const { tenantId } = useTenant();
   const navigate = useNavigate();
@@ -48,7 +71,6 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
     if (!employee?.id || !tenantId) return;
     let active = true;
 
-    // Initial fetch of recent 20
     const fetchNotifs = async () => {
       const { data } = await db.from("notifications")
         .select("*")
@@ -63,7 +85,6 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
     };
     void fetchNotifs();
 
-    // Subscribe to realtime inserts
     const setupRealtime = async () => {
       await realtime.connect();
       await realtime.subscribe(`notifications:${employee.id}`);
@@ -72,18 +93,38 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
     void setupRealtime();
 
     const handler = (payload: any) => {
-      if (!active || payload.meta?.channel !== `notifications:${employee.id}`) return;
-      const newNotif = payload as Notification;
-      if (newNotif.tenant_id !== tenantId) return;
-      setNotifications(prev => [newNotif, ...prev].slice(0, 20));
-      setUnreadCount(prev => prev + 1);
+      if (!active) return;
+
+      const eventChannel = payload?.meta?.channel;
+      if (eventChannel && eventChannel !== `notifications:${employee.id}`) return;
+
+      const newNotif = normalizeNotificationPayload(payload);
+      if (!newNotif || newNotif.tenant_id !== tenantId || newNotif.employee_id !== employee.id) return;
+
+      let shouldIncreaseUnread = false;
+      setNotifications((prev) => {
+        const existingIndex = prev.findIndex((notif) => notif.id === newNotif.id);
+        if (existingIndex >= 0) {
+          const next = [...prev];
+          next[existingIndex] = newNotif;
+          return next;
+        }
+        shouldIncreaseUnread = !newNotif.is_read;
+        return [newNotif, ...prev].slice(0, 20);
+      });
+
+      if (shouldIncreaseUnread) {
+        setUnreadCount((prev) => prev + 1);
+      }
     };
 
-    realtime.on('INSERT_notification', handler);
+    realtime.on("INSERT", handler);
+    realtime.on("INSERT_notification", handler);
 
     return () => {
       active = false;
-      realtime.off('INSERT_notification', handler);
+      realtime.off("INSERT", handler);
+      realtime.off("INSERT_notification", handler);
       realtime.unsubscribe(`notifications:${employee.id}`);
     };
   }, [employee?.id, tenantId]);
@@ -106,8 +147,7 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
       setUnreadCount(prev => Math.max(0, prev - 1));
     }
 
-    const isHr = employee?.department === "operations" && employee.email === "hr@talentmesh.com"; // Simplistic role check
-    const prefix = isHr ? "/hr" : "/employee";
+    const prefix = role === "hr" ? "/hr" : "/employee";
 
     if (notif.type?.includes("task")) navigate(`${prefix}/tasks`);
     else if (notif.type?.includes("leave")) navigate(`${prefix}/leaves`);

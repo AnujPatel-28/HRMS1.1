@@ -5,12 +5,20 @@ import {
   TrendingUp,
   Wallet,
 } from "lucide-react";
-import { db } from "../../insforge/client";
+import { db, storage } from "../../insforge/client";
 import { useTenant } from "../../contexts/TenantContext";
 import { useEmployee } from "../../hooks/useEmployee";
 import { useToast } from "../../shared/ToastContext";
 import { EmptyState } from "../../shared/EmptyState";
 import { Skeleton } from "../../shared/Skeleton";
+import {
+  createPayslipPdfBlob,
+  downloadTenantPayslipBlob,
+  getPayslipStoragePath,
+  isTenantPayslipPath,
+  payslipFilename,
+  type PayslipPdfData,
+} from "../hr/payslip-pdf";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,13 +31,54 @@ interface Payslip {
   employee_id: string;
   month: number;
   year: number;
+  days_in_month: number;
+  working_days: number;
+  days_present: number;
+  days_absent: number;
+  days_on_leave: number;
+  half_days: number;
+  basic_monthly: number;
+  hra_monthly: number;
+  special_allowance: number;
+  other_allowances: number;
   gross_salary: number;
+  pf_employee: number;
+  pf_employer: number;
+  esi_employee: number;
+  esi_employer: number;
+  tds: number;
+  other_deductions: number;
   total_deductions: number;
   net_payable: number;
   pdf_url: string | null;
   created_at: string;
   // joined from payroll_runs
   run_status?: PayrollRunStatus;
+}
+
+function pdfDataFromPayslip(slip: Payslip): PayslipPdfData {
+  return {
+    employeeId: slip.employee_id,
+    daysInMonth: slip.days_in_month,
+    workingDays: slip.working_days,
+    daysPresent: slip.days_present,
+    daysAbsent: slip.days_absent,
+    daysOnLeave: slip.days_on_leave,
+    halfDays: slip.half_days,
+    basicMonthly: slip.basic_monthly,
+    hraMonthly: slip.hra_monthly,
+    specialAllowance: slip.special_allowance,
+    otherAllowances: slip.other_allowances,
+    grossSalary: slip.gross_salary,
+    pfEmployee: slip.pf_employee,
+    pfEmployer: slip.pf_employer,
+    esiEmployee: slip.esi_employee,
+    esiEmployer: slip.esi_employer,
+    tds: slip.tds,
+    otherDeductions: slip.other_deductions,
+    totalDeductions: slip.total_deductions,
+    netPayable: slip.net_payable,
+  };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -120,7 +169,7 @@ function RecentEarningsCards({ payslips }: { payslips: Payslip[] }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function MyPayslips() {
-  const { tenantId } = useTenant();
+  const { tenantId, tenant } = useTenant();
   const { employee, loading: empLoading } = useEmployee();
   const { error: toastError } = useToast();
 
@@ -185,27 +234,53 @@ export default function MyPayslips() {
   }, [fetchPayslips, empLoading]);
 
   // ── Download helper ─────────────────────────────────────────────────────────
-  const handleDownload = (slip: Payslip) => {
-    if (!slip.pdf_url) {
+  const handleDownload = async (slip: Payslip) => {
+    if (!slip.pdf_url || !tenant || !employee) {
       toastError("PDF not available for this payslip yet.");
       return;
     }
-    const a = document.createElement("a");
-    a.href = slip.pdf_url;
-    a.download = `Payslip_${MONTH_NAMES[slip.month - 1]}_${slip.year}.pdf`;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    try {
+      const path = getPayslipStoragePath(slip.pdf_url);
+      if (!isTenantPayslipPath(path, tenantId)) throw new Error("Payslip does not belong to this tenant.");
+      try {
+        await downloadTenantPayslipBlob(storage, tenantId, slip.pdf_url);
+      } catch (err) {
+        if ((err as Error).message !== "This payslip needs regeneration.") throw err;
+      }
+      const blob = await createPayslipPdfBlob(tenant, employee, pdfDataFromPayslip(slip), slip.month, slip.year);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = payslipFilename(employee?.full_name, slip.month, slip.year);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5_000);
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : "Failed to download payslip PDF.");
+    }
   };
 
-  const handleView = (slip: Payslip) => {
-    if (!slip.pdf_url) {
+  const handleView = async (slip: Payslip) => {
+    if (!slip.pdf_url || !tenant || !employee) {
       toastError("PDF not available for this payslip yet.");
       return;
     }
-    window.open(slip.pdf_url, "_blank", "noopener,noreferrer");
+    try {
+      const path = getPayslipStoragePath(slip.pdf_url);
+      if (!isTenantPayslipPath(path, tenantId)) throw new Error("Payslip does not belong to this tenant.");
+      try {
+        await downloadTenantPayslipBlob(storage, tenantId, slip.pdf_url);
+      } catch (err) {
+        if ((err as Error).message !== "This payslip needs regeneration.") throw err;
+      }
+      const blob = await createPayslipPdfBlob(tenant, employee, pdfDataFromPayslip(slip), slip.month, slip.year);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : "Failed to open payslip PDF.");
+    }
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────

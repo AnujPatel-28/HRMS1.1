@@ -73,7 +73,7 @@ export default function EmployeeDashboard() {
       {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Link to="/employee/punch"
-          className={`flex flex-col gap-2 rounded-2xl border p-4 shadow-sm transition hover:shadow-md ${status.color}`}>
+          className={`flex flex-col gap-2 rounded-2xl border p-4 shadow-xl -translate-y-1 hover:-translate-y-2 hover:shadow-2xl transition-all duration-300 ${status.color}`}>
           <div className="flex items-center gap-2">
             <span className={`h-2.5 w-2.5 rounded-full ${status.dot} animate-pulse`} />
             <span className="text-xs font-semibold uppercase tracking-wide">Today</span>
@@ -84,7 +84,7 @@ export default function EmployeeDashboard() {
           )}
         </Link>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xl -translate-y-1">
           <div className="flex items-center gap-2 text-slate-500 mb-2">
             <TrendingUp className="h-4 w-4" />
             <span className="text-xs font-semibold uppercase tracking-wide">This Month</span>
@@ -97,7 +97,7 @@ export default function EmployeeDashboard() {
         </div>
 
         <Link to="/employee/tasks"
-          className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm hover:shadow-md transition">
+          className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-xl -translate-y-1 hover:-translate-y-2 hover:shadow-2xl transition-all duration-300">
           <div className="flex items-center gap-2 text-amber-600 mb-2">
             <ClipboardList className="h-4 w-4" />
             <span className="text-xs font-semibold uppercase tracking-wide">Pending Tasks</span>
@@ -106,7 +106,7 @@ export default function EmployeeDashboard() {
         </Link>
 
         <Link to="/employee/leaves"
-          className="rounded-2xl border border-purple-200 bg-purple-50 p-4 shadow-sm hover:shadow-md transition">
+          className="rounded-2xl border border-purple-200 bg-purple-50 p-4 shadow-xl -translate-y-1 hover:-translate-y-2 hover:shadow-2xl transition-all duration-300">
           <div className="flex items-center gap-2 text-purple-600 mb-2">
             <Calendar className="h-4 w-4" />
             <span className="text-xs font-semibold uppercase tracking-wide">Leave Requests</span>
@@ -119,7 +119,7 @@ export default function EmployeeDashboard() {
       {/* Recent Activity */}
       <div className="grid gap-5 lg:grid-cols-3">
         {/* Recent Attendance */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xl -translate-y-1">
           <div className="flex items-center gap-2 mb-3">
             <Clock className="h-4 w-4 text-slate-400" />
             <h3 className="font-semibold text-slate-800">Recent Attendance</h3>
@@ -140,7 +140,7 @@ export default function EmployeeDashboard() {
         </div>
 
         {/* Recent Tasks */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xl -translate-y-1">
           <div className="flex items-center gap-2 mb-3">
             <ClipboardList className="h-4 w-4 text-slate-400" />
             <h3 className="font-semibold text-slate-800">Recent Tasks</h3>
@@ -165,7 +165,7 @@ export default function EmployeeDashboard() {
         </div>
 
         {/* Recent Leaves */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xl -translate-y-1">
           <div className="flex items-center gap-2 mb-3">
             <Calendar className="h-4 w-4 text-slate-400" />
             <h3 className="font-semibold text-slate-800">Recent Leaves</h3>

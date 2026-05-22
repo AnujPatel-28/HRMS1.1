@@ -20,9 +20,9 @@ export default function AdminLayout() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white shadow-md pt-safe md:pt-0">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-safe py-3 md:px-4">
           <div className="flex items-center gap-3">
             <button 
               onClick={() => setMobileOpen(true)} 
@@ -57,7 +57,7 @@ export default function AdminLayout() {
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-7xl px-4 py-6 md:gap-6">
+      <div className="mx-auto flex max-w-7xl px-safe py-6 md:gap-6 md:px-4">
         {/* Mobile Overlay */}
         {mobileOpen && (
           <div 
@@ -67,7 +67,7 @@ export default function AdminLayout() {
         )}
 
         {/* Sidebar */}
-        <aside className={`fixed inset-y-0 left-0 z-50 w-64 transform bg-white p-4 shadow-xl transition-transform duration-200 ease-in-out md:static md:w-56 md:translate-x-0 md:bg-transparent md:p-0 md:shadow-none ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <aside className={`fixed inset-y-0 left-0 z-50 w-[88vw] max-w-sm transform bg-white p-4 shadow-xl transition-transform duration-200 ease-in-out md:sticky md:top-24 md:z-30 md:w-56 md:max-w-none md:translate-x-0 md:self-start md:bg-transparent md:p-0 md:shadow-none ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
           <div className="mb-6 flex items-center justify-between md:hidden">
             <span className="font-semibold text-slate-900">Menu</span>
             <button 
@@ -77,14 +77,14 @@ export default function AdminLayout() {
               <X className="h-5 w-5" />
             </button>
           </div>
-          <div className="h-full space-y-1 md:h-fit md:rounded-xl md:border md:border-slate-200 md:bg-white md:p-3 md:shadow-sm">
+          <div className="h-full space-y-1 md:h-fit md:rounded-xl md:border md:border-slate-200 md:bg-white md:p-3 md:shadow-xl md:-translate-y-1">
             {navItems.map(({ label, href, icon: Icon }) => (
               <NavLink
                 key={href}
                 to={href}
                 onClick={() => setMobileOpen(false)}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                  `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-display transition-colors ${
                     isActive 
                       ? "bg-brand-50 font-semibold text-brand-700" 
                       : "text-slate-600 hover:bg-slate-100"
