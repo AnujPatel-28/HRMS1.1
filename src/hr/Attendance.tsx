@@ -922,14 +922,14 @@ export default function HRAttendance() {
                     const { cls, label } = statusBadge(row.status as AttendanceStatus);
                     const punchInLat = toNumber(row.punch_in_lat);
                     return (
-                      <tr key={row.employee_id} className="hover:bg-slate-50 block md:table-row border border-slate-200 md:border-0 md:border-b border-slate-100 rounded-2xl md:rounded-none mb-4 md:mb-0 p-5 md:p-0 bg-white shadow-[0_2px_10px_-4px_rgba(0,0,0,0.1)] md:shadow-none relative">
+                      <tr key={row.employee_id} className="hover:bg-slate-50 block md:table-row border border-slate-200 md:border-0 md:border-b rounded-2xl md:rounded-none mb-4 md:mb-0 p-5 md:p-0 bg-white shadow-[0_2px_10px_-4px_rgba(0,0,0,0.1)] md:shadow-none relative">
                         <td className="px-0 py-2 md:px-4 md:py-3 block md:table-cell border-b border-slate-100 md:border-0 mb-3 md:mb-0 pb-3 md:pb-0">
                           <div className="flex items-center justify-between md:justify-start">
                             <span className="md:hidden text-xs font-semibold uppercase tracking-wider text-slate-400">Employee</span>
                             <span className="font-bold text-slate-900">{row.employee?.full_name ?? "-"}</span>
                           </div>
                         </td>
-                        <td className="px-0 py-1.5 md:px-4 md:py-3 text-slate-700 block md:table-cell flex items-center justify-between md:justify-start">
+                        <td className="px-0 py-1.5 md:px-4 md:py-3 text-slate-700 flex md:table-cell items-center justify-between md:justify-start">
                           <span className="md:hidden text-xs font-semibold uppercase tracking-wider text-slate-400">Punch In</span>
                           {isEditing
                             ? <input type="time" value={editPunchIn} onChange={(event) => setEditPunchIn(event.target.value)} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-brand-500" />
@@ -940,17 +940,17 @@ export default function HRAttendance() {
                               </div>
                             )}
                         </td>
-                        <td className="px-0 py-1.5 md:px-4 md:py-3 text-slate-700 block md:table-cell flex items-center justify-between md:justify-start">
+                        <td className="px-0 py-1.5 md:px-4 md:py-3 text-slate-700 flex md:table-cell items-center justify-between md:justify-start">
                           <span className="md:hidden text-xs font-semibold uppercase tracking-wider text-slate-400">Punch Out</span>
                           {isEditing
                             ? <input type="time" value={editPunchOut} onChange={(event) => setEditPunchOut(event.target.value)} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-brand-500" />
                             : <span className="font-medium">{fmtTime(row.punch_out)}</span>}
                         </td>
-                        <td className="px-0 py-1.5 md:px-4 md:py-3 text-slate-700 block md:table-cell flex items-center justify-between md:justify-start">
+                        <td className="px-0 py-1.5 md:px-4 md:py-3 text-slate-700 flex md:table-cell items-center justify-between md:justify-start">
                           <span className="md:hidden text-xs font-semibold uppercase tracking-wider text-slate-400">Work Hours</span>
                           <span className="font-medium text-slate-800">{row.work_hours != null ? `${row.work_hours.toFixed(2)}h` : "-"}</span>
                         </td>
-                        <td className="px-0 py-1.5 md:px-4 md:py-3 block md:table-cell flex items-center justify-between md:justify-start">
+                        <td className="px-0 py-1.5 md:px-4 md:py-3 flex md:table-cell items-center justify-between md:justify-start">
                           <span className="md:hidden text-xs font-semibold uppercase tracking-wider text-slate-400">Status</span>
                           {isEditing ? (
                             <select value={editStatus} onChange={(event) => setEditStatus(event.target.value as AttendanceStatus)} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-brand-500">
@@ -963,7 +963,7 @@ export default function HRAttendance() {
                             <span className={`inline-flex rounded-md px-2 py-1 text-xs font-bold uppercase tracking-wide ${cls}`}>{label}</span>
                           )}
                         </td>
-                        <td className="px-0 py-1.5 md:px-4 md:py-3 block md:table-cell flex items-center justify-between md:justify-start">
+                        <td className="px-0 py-1.5 md:px-4 md:py-3 flex md:table-cell items-center justify-between md:justify-start">
                           <span className="md:hidden text-xs font-semibold uppercase tracking-wider text-slate-400">Location</span>
                           {punchInLat != null ? (
                             <button
@@ -980,7 +980,7 @@ export default function HRAttendance() {
                             </button>
                           ) : "-"}
                         </td>
-                        <td className="px-0 py-2 md:px-4 md:py-3 block md:table-cell flex items-center justify-end md:justify-start mt-3 md:mt-0 pt-4 md:pt-0 border-t border-slate-100 md:border-0">
+                        <td className="px-0 py-2 md:px-4 md:py-3 flex md:table-cell items-center justify-end md:justify-start mt-3 md:mt-0 pt-4 md:pt-0 border-t border-slate-100 md:border-0">
                           {isEditing ? (
                             <div className="flex gap-2 w-full md:w-auto">
                               <button onClick={() => saveEdit(row)} disabled={saving} className="flex-1 md:flex-none justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 transition-all active:scale-95 flex items-center gap-1.5 shadow-sm hover:shadow-md hover:shadow-emerald-600/20">
