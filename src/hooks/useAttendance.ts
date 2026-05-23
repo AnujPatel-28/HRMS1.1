@@ -30,9 +30,9 @@ export function useAttendance(employeeId?: string) {
           employee_id: employeeId,
           tenant_id: tenantId,
           date: today,
-          punch_in: new Date().toISOString(),
           punch_in_ip: ipAddress ?? null,
           status: "present",
+          session_status: "open",
         },
       ]);
       await fetchAttendance();
@@ -45,7 +45,7 @@ export function useAttendance(employeeId?: string) {
       const now = new Date().toISOString();
       await db
         .from("attendance")
-        .update({ punch_out: now, punch_out_ip: ipAddress ?? null, punch_out_allowed: false })
+        .update({ punch_out: now, punch_out_ip: ipAddress ?? null, punch_out_allowed: false, session_status: "closed" })
         .eq("tenant_id", tenantId)
         .eq("id", attendanceId);
       await fetchAttendance();

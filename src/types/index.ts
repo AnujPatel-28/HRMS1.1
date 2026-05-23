@@ -45,6 +45,7 @@ export interface Attendance {
   punch_out_ip: string | null;
   work_hours: number | null;
   status: "present" | "absent" | "half_day" | "on_leave";
+  session_status: "open" | "closed";
   notes: string | null;
   created_at: string;
 }

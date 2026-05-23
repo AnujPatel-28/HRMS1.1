@@ -138,7 +138,12 @@ export default function PunchInOut() {
   const halfDayCutoffMinutes = parseTime(halfDayCutoff);
   const expectedHours = shift ? getExpectedHours(shift.start_time, shift.end_time) : Number(tenant?.work_hours_per_day ?? 8);
   const isWorkingDay = shift ? shift.working_days.includes(currentTime.getDay()) : true;
-  const canPunchIn = currentMinutes >= shiftStartTime;
+  const isNightShift = shift ? parseTime(shift.end_time) < parseTime(shift.start_time) : false;
+  let effectiveCurrentMinutes = currentMinutes;
+  if (isNightShift && currentMinutes < 12 * 60) {
+    effectiveCurrentMinutes += 1440;
+  }
+  const canPunchIn = effectiveCurrentMinutes >= shiftStartTime;
   const regularizationEnabled = tenantSettings["regularization_enabled"] === "true";
 
   const fetchData = async () => {
@@ -148,8 +153,9 @@ export default function PunchInOut() {
       const recentStart = new Date(today);
       recentStart.setDate(today.getDate() - 6);
       const recentStartDate = recentStart.toISOString().slice(0, 10);
-      const [attRes, taskRes, settingsRes, recentAttRes, overtimeRes, correctionsRes] = await Promise.all([
-        db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("date", TODAY).maybeSingle(),
+      const [attRes, todayClosedRes, taskRes, settingsRes, recentAttRes, overtimeRes, correctionsRes] = await Promise.all([
+        db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("session_status", "open").order("punch_in", { ascending: false }).limit(1).maybeSingle(),
+        db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("date", TODAY).eq("session_status", "closed").order("punch_out", { ascending: false }).limit(1).maybeSingle(),
         db.from("tasks").select("*").eq("tenant_id", tenantId).eq("assigned_to", employee.id).eq("due_date", TODAY),
         db.from("tenant_settings").select("key,value").eq("tenant_id", tenantId),
         db
@@ -175,7 +181,14 @@ export default function PunchInOut() {
           .gte("attendance_date", recentStartDate)
           .lte("attendance_date", TODAY),
       ]);
-      setAttendance(attRes.data as AttendanceWithLocation | null);
+      
+      let activeAttendance = null;
+      if (attRes.data) {
+        activeAttendance = attRes.data;
+      } else if (todayClosedRes.data) {
+        activeAttendance = todayClosedRes.data;
+      }
+      setAttendance(activeAttendance as AttendanceWithLocation | null);
       setTodayTasks((taskRes.data ?? []) as Task[]);
       setTenantSettings(settingMap((settingsRes.data ?? []) as { key: string; value: string }[]));
       setRecentAttendance((recentAttRes.data ?? []) as AttendanceWithLocation[]);
@@ -264,10 +277,24 @@ export default function PunchInOut() {
     setActing(true);
     setActionText("Getting your location...");
     try {
+      await db.rpc("close_stale_attendance");
+    } catch (err) {
+      console.error("Failed to auto-close stale sessions", err);
+    }
+    try {
       const ipPromise = getIp();
       const now = new Date();
-      const nowMinutes = now.getHours() * 60 + now.getMinutes();
-      const isHalfDay = nowMinutes > halfDayCutoffMinutes;
+      const shiftStartDate = new Date();
+      shiftStartDate.setHours(Math.floor(shiftStartTime / 60), shiftStartTime % 60, 0, 0);
+      if (isNightShift && now.getHours() < 12) {
+        shiftStartDate.setDate(shiftStartDate.getDate() - 1);
+      }
+      const halfDayCutoffDate = new Date(shiftStartDate);
+      halfDayCutoffDate.setHours(Math.floor(halfDayCutoffMinutes / 60), halfDayCutoffMinutes % 60, 0, 0);
+      if (isNightShift && halfDayCutoffMinutes < shiftStartTime) {
+        halfDayCutoffDate.setDate(halfDayCutoffDate.getDate() + 1);
+      }
+      const isHalfDay = now.getTime() > halfDayCutoffDate.getTime();
       const unapprovedTasks = todayTasks.filter((task) => task.status !== "approved");
       const allowed = tenant.punch_out_gate_enabled ? unapprovedTasks.length === 0 : true;
       const geofenceEnabled = tenantSettings["geofence_enabled"] === "true";
@@ -288,6 +315,9 @@ export default function PunchInOut() {
 
       try {
         const position = await getCurrentPosition();
+        if (position.accuracy > 100) {
+          throw new Error("LOW_ACCURACY");
+        }
         locationData.punch_in_lat = position.lat;
         locationData.punch_in_lng = position.lng;
         locationData.punch_in_location_accuracy = position.accuracy;
@@ -315,16 +345,17 @@ export default function PunchInOut() {
       const ip = await ipPromise;
       setActionText("Punching In...");
       const gracePeriodMinutes = parseInt(tenantSettings["late_mark_grace_minutes"] || "0", 10);
-      const isLate = nowMinutes > (shiftStartTime + gracePeriodMinutes);
+      const elapsedSinceShiftStartMinutes = (now.getTime() - shiftStartDate.getTime()) / 60000;
+      const isLate = elapsedSinceShiftStartMinutes > gracePeriodMinutes;
 
       const { data: inserted, error: dbErr } = await db.from("attendance").insert([{
         employee_id: employee.id,
         tenant_id: tenantId,
         date: TODAY,
-        punch_in: now.toISOString(),
         punch_in_ip: ip,
         punch_out_allowed: allowed,
         status: isHalfDay ? "half_day" : "present",
+        session_status: "open",
         ...locationData,
       }]).select("id").single();
 
@@ -343,8 +374,12 @@ export default function PunchInOut() {
       success("Punched in successfully!");
       void fetchData();
     } catch (err) {
-      error("Failed to punch in.");
-      console.error(err);
+      if (err instanceof Error && err.message === "LOW_ACCURACY") {
+        error("GPS accuracy is too low (>100m). Please step outside or connect to Wi-Fi.");
+      } else {
+        error("Failed to punch in.");
+        console.error(err);
+      }
     } finally {
       setActing(false);
       setActionText("");
@@ -356,11 +391,6 @@ export default function PunchInOut() {
     setActing(true);
     setActionText("Getting your location...");
     try {
-      const now = new Date();
-      const punchInTime = new Date(attendance.punch_in);
-      const rawHours = (now.getTime() - punchInTime.getTime()) / 3600000;
-      const workHours = Math.max(0, rawHours - (tenant.lunch_break_minutes / 60));
-      const workHoursRounded = parseFloat(workHours.toFixed(2));
       const geofenceEnabled = tenantSettings["geofence_enabled"] === "true";
       const officeLat = parseFloat(tenantSettings["office_lat"] || "0");
       const officeLng = parseFloat(tenantSettings["office_lng"] || "0");
@@ -379,6 +409,9 @@ export default function PunchInOut() {
 
       try {
         const position = await getCurrentPosition();
+        if (position.accuracy > 100) {
+          throw new Error("LOW_ACCURACY");
+        }
         locationData.punch_out_lat = position.lat;
         locationData.punch_out_lng = position.lng;
         locationData.punch_out_location_accuracy = position.accuracy;
@@ -401,75 +434,53 @@ export default function PunchInOut() {
 
       setActionText("Punching Out...");
 
-      const { error: dbErr } = await db.from("attendance").update({
-        punch_out: now.toISOString(),
-        work_hours: workHoursRounded,
-        ...locationData,
-      }).eq("tenant_id", tenantId).eq("id", attendance.id);
-
-      if (dbErr) throw dbErr;
-
       const overtimeEnabled = tenantSettings["overtime_enabled"] === "true";
       const overtimeRate = parseFloat(tenantSettings["overtime_rate"] || "1.5");
-
-      if (overtimeEnabled && shift) {
+      let expectedShiftHours = Number(tenant.work_hours_per_day || 8);
+      
+      if (shift) {
         const shiftStartMin = parseTime(shift.start_time);
         const shiftEndMin = parseTime(shift.end_time);
-        const lunchMinutes = tenant.lunch_break_minutes;
+        const lunchMinutes = tenant.lunch_break_minutes || 0;
         const shiftDurationMinutes = shiftEndMin >= shiftStartMin
           ? shiftEndMin - shiftStartMin
           : (24 * 60 - shiftStartMin) + shiftEndMin;
-        const expectedShiftHours = (shiftDurationMinutes - lunchMinutes) / 60;
-        const overtimeHours = Math.max(0, workHoursRounded - expectedShiftHours);
-        const overtimeHoursRounded = Math.round(overtimeHours * 100) / 100;
-
-        if (overtimeHoursRounded > 0) {
-          const { data: existingOvertime, error: overtimeLookupError } = await db
-            .from("overtime_records")
-            .select("id")
-            .eq("tenant_id", tenantId)
-            .eq("attendance_id", attendance.id)
-            .maybeSingle();
-          if (overtimeLookupError) throw overtimeLookupError;
-
-          if (existingOvertime?.id) {
-            const { error: updateOvertimeError } = await db
-              .from("overtime_records")
-              .update({
-                regular_hours: Math.round(expectedShiftHours * 100) / 100,
-                overtime_hours: overtimeHoursRounded,
-                overtime_rate: overtimeRate,
-                approved: false,
-              })
-              .eq("tenant_id", tenantId)
-              .eq("id", existingOvertime.id);
-            if (updateOvertimeError) throw updateOvertimeError;
-          } else {
-            const { error: overtimeInsertError } = await db.from("overtime_records").insert([{
-              tenant_id: tenantId,
-              employee_id: employee.id,
-              attendance_id: attendance.id,
-              date: TODAY,
-              regular_hours: Math.round(expectedShiftHours * 100) / 100,
-              overtime_hours: overtimeHoursRounded,
-              overtime_rate: overtimeRate,
-              overtime_amount: null,
-              approved: false,
-            }]);
-            if (overtimeInsertError) throw overtimeInsertError;
-          }
-        }
+        expectedShiftHours = (shiftDurationMinutes - lunchMinutes) / 60;
       }
 
+      const { data, error: dbErr } = await db.rpc("punch_out_attendance", {
+        p_attendance_id: attendance.id,
+        p_tenant_id: tenantId,
+        p_lat: locationData.punch_out_lat,
+        p_lng: locationData.punch_out_lng,
+        p_acc: locationData.punch_out_location_accuracy,
+        p_loc_status: locationData.punch_out_location_status,
+        p_lunch_minutes: tenant.lunch_break_minutes || 0,
+        p_overtime_enabled: overtimeEnabled,
+        p_overtime_rate: overtimeRate,
+        p_expected_shift_hours: parseFloat(expectedShiftHours.toFixed(2))
+      });
+
+      if (dbErr) throw dbErr;
+      if (data && data.success === false) {
+        throw new Error(data.reason || "Server rejected punch out");
+      }
+
+      const workHoursReturned = data?.work_hours ?? 0;
+
       void logAction("punch_out", "attendance", attendance.id, {
-        work_hours: workHoursRounded,
+        work_hours: workHoursReturned,
         expected_hours: Number(expectedHours.toFixed(2)),
       });
       success("Punched out successfully! Have a great day!");
       void fetchData();
     } catch (err) {
-      error("Failed to punch out.");
-      console.error(err);
+      if (err instanceof Error && err.message === "LOW_ACCURACY") {
+        error("GPS accuracy is too low (>100m). Please step outside or connect to Wi-Fi.");
+      } else {
+        error("Failed to punch out.");
+        console.error(err);
+      }
     } finally {
       setActing(false);
       setActionText("");

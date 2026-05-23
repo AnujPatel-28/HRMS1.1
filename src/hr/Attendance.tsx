@@ -288,6 +288,7 @@ export default function HRAttendance() {
           punch_out_ip: null,
           work_hours: null,
           status: "absent" as AttendanceStatus,
+          session_status: "closed",
           notes: null,
           created_at: "",
           punch_in_lat: null,
