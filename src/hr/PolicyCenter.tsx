@@ -63,14 +63,14 @@ type LeaveTypeRow = {
   code: string;
   days_per_year: number;
   accrual_type: "lump_sum" | "monthly";
-  carry_forward: boolean;
-  max_carry_forward_days: number | null;
-  encashment_allowed: boolean;
-  applicable_after_days: number;
-  restrict_during_probation: boolean;
+  carry_forward_enabled: boolean;
+  carry_forward_max_days: number | null;
+  encashment_enabled: boolean;
+  applicable_from_day: number;
+  probation_restricted: boolean;
   requires_document: boolean;
-  minimum_notice_days: number;
-  maximum_consecutive_days: number | null;
+  min_notice_days: number;
+  max_consecutive_days: number | null;
   is_active: boolean;
   created_at?: string | null;
   updated_at?: string | null;
@@ -715,14 +715,14 @@ export default function PolicyCenter() {
         code: leaveType.code,
         days_per_year: String(leaveType.days_per_year),
         accrual_type: leaveType.accrual_type,
-        carry_forward: leaveType.carry_forward,
-        max_carry_forward_days: leaveType.max_carry_forward_days != null ? String(leaveType.max_carry_forward_days) : "",
-        encashment_allowed: leaveType.encashment_allowed,
-        applicable_after_days: String(leaveType.applicable_after_days ?? 0),
-        restrict_during_probation: leaveType.restrict_during_probation,
+        carry_forward: leaveType.carry_forward_enabled,
+        max_carry_forward_days: leaveType.carry_forward_max_days != null ? String(leaveType.carry_forward_max_days) : "",
+        encashment_allowed: leaveType.encashment_enabled,
+        applicable_after_days: String(leaveType.applicable_from_day ?? 0),
+        restrict_during_probation: leaveType.probation_restricted,
         requires_document: leaveType.requires_document,
-        minimum_notice_days: String(leaveType.minimum_notice_days ?? 0),
-        maximum_consecutive_days: leaveType.maximum_consecutive_days != null ? String(leaveType.maximum_consecutive_days) : "",
+        minimum_notice_days: String(leaveType.min_notice_days ?? 0),
+        maximum_consecutive_days: leaveType.max_consecutive_days != null ? String(leaveType.max_consecutive_days) : "",
         is_active: leaveType.is_active,
       });
     } else {
@@ -741,14 +741,14 @@ export default function PolicyCenter() {
         code: leaveTypeForm.code.trim().toUpperCase().slice(0, 5),
         days_per_year: Number(leaveTypeForm.days_per_year || 0),
         accrual_type: leaveTypeForm.accrual_type,
-        carry_forward: leaveTypeForm.carry_forward,
-        max_carry_forward_days: leaveTypeForm.carry_forward && leaveTypeForm.max_carry_forward_days.trim() ? Number(leaveTypeForm.max_carry_forward_days) : null,
-        encashment_allowed: leaveTypeForm.encashment_allowed,
-        applicable_after_days: Number(leaveTypeForm.applicable_after_days || 0),
-        restrict_during_probation: leaveTypeForm.restrict_during_probation,
+        carry_forward_enabled: leaveTypeForm.carry_forward,
+        carry_forward_max_days: leaveTypeForm.carry_forward && leaveTypeForm.max_carry_forward_days.trim() ? Number(leaveTypeForm.max_carry_forward_days) : 0,
+        encashment_enabled: leaveTypeForm.encashment_allowed,
+        applicable_from_day: Number(leaveTypeForm.applicable_after_days || 0),
+        probation_restricted: leaveTypeForm.restrict_during_probation,
         requires_document: leaveTypeForm.requires_document,
-        minimum_notice_days: Number(leaveTypeForm.minimum_notice_days || 0),
-        maximum_consecutive_days: leaveTypeForm.maximum_consecutive_days.trim() ? Number(leaveTypeForm.maximum_consecutive_days) : null,
+        min_notice_days: Number(leaveTypeForm.minimum_notice_days || 0),
+        max_consecutive_days: leaveTypeForm.maximum_consecutive_days.trim() ? Number(leaveTypeForm.maximum_consecutive_days) : null,
         is_active: leaveTypeForm.is_active,
       };
 
@@ -800,14 +800,14 @@ export default function PolicyCenter() {
       const { error: insertError } = await db.from("leave_types").insert(defaults.map((item) => ({
         tenant_id: tenantId,
         ...item,
-        carry_forward: item.code === "EL",
-        max_carry_forward_days: item.code === "EL" ? 15 : null,
-        encashment_allowed: item.code === "EL",
-        applicable_after_days: 0,
-        restrict_during_probation: false,
+        carry_forward_enabled: item.code === "EL",
+        carry_forward_max_days: item.code === "EL" ? 15 : 0,
+        encashment_enabled: item.code === "EL",
+        applicable_from_day: 0,
+        probation_restricted: false,
         requires_document: false,
-        minimum_notice_days: 0,
-        maximum_consecutive_days: null,
+        min_notice_days: 0,
+        max_consecutive_days: null,
         is_active: true,
       })));
       if (insertError) throw insertError;
@@ -1110,7 +1110,7 @@ export default function PolicyCenter() {
                       <td className="px-4 py-3 text-slate-700">{leaveType.code}</td>
                       <td className="px-4 py-3 text-slate-700">{leaveType.days_per_year}</td>
                       <td className="px-4 py-3 text-slate-700">{leaveType.accrual_type === "monthly" ? "Monthly" : "Lump sum"}</td>
-                      <td className="px-4 py-3 text-slate-700">{leaveType.carry_forward ? `Yes${leaveType.max_carry_forward_days ? ` (${leaveType.max_carry_forward_days})` : ""}` : "No"}</td>
+                      <td className="px-4 py-3 text-slate-700">{leaveType.carry_forward_enabled ? `Yes${leaveType.carry_forward_max_days ? ` (${leaveType.carry_forward_max_days})` : ""}` : "No"}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${leaveType.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
                           {leaveType.is_active ? "Active" : "Inactive"}

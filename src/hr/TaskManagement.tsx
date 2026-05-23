@@ -97,16 +97,29 @@ export default function TaskManagement() {
   useEffect(() => { if (employees.length >= 0) void fetchTasks(); }, [fetchTasks, employees]);
 
   async function assignTask() {
-    if (!form.title || !hrEmployee?.id) return;
-    if (form.assign_mode === "employee" && !form.assigned_to) return;
-    if (form.assign_mode === "department" && !form.department) return;
+    if (!form.title) {
+      toastError("Please enter a task title.");
+      return;
+    }
+    if (!hrEmployee?.id) {
+      toastError("Employee profile not found. You cannot assign tasks.");
+      return;
+    }
+    if (form.assign_mode === "employee" && !form.assigned_to) {
+      toastError("Please select an employee from the list.");
+      return;
+    }
+    if (form.assign_mode === "department" && !form.department) {
+      toastError("Please select a department.");
+      return;
+    }
     setSubmitting(true);
     const targets: Employee[] = form.assign_mode === "employee"
       ? employees.filter(e => e.id === form.assigned_to)
       : employees.filter(e => e.department === form.department);
     try {
       for (const emp of targets) {
-        await db.from("tasks").insert([{
+        const { error: taskErr } = await db.from("tasks").insert([{
           title: form.title, description: form.description || null,
           tenant_id: tenantId,
           assigned_to: emp.id, assigned_by: hrEmployee.id,
@@ -114,18 +127,21 @@ export default function TaskManagement() {
           priority: form.priority, due_date: form.due_date || null, due_time: form.due_time || null,
           status: "assigned",
         }]);
-        await db.from("notifications").insert([{
+        if (taskErr) throw taskErr;
+        const { error: notifErr } = await db.from("notifications").insert([{
           tenant_id: tenantId,
           employee_id: emp.id, title: "New Task Assigned",
           body: `You have been assigned: "${form.title}"${form.due_date ? ` — due ${form.due_date}` : ""}`,
           type: "task_assigned",
         }]);
+        if (notifErr) throw notifErr;
       }
       success(`Task assigned to ${targets.length} employee${targets.length !== 1 ? 's' : ''}`);
       setForm(EMPTY_FORM);
       setTab("active");
-    } catch (err) {
-      toastError("Failed to assign task.");
+    } catch (err: any) {
+      console.error("Assign task error:", err);
+      toastError(err.message || "Failed to assign task.");
     } finally {
       setSubmitting(false);
       void fetchTasks();

@@ -42,17 +42,21 @@ export default function Chat() {
     if (data) {
       const allChannels = data as ChatChannel[];
       setChannels(allChannels);
-      // Select 'general' by default if not selected
-      if (!selectedChannel && allChannels.length > 0) {
-        const general = allChannels.find(c => c.name === "general") || allChannels[0];
-        setSelectedChannel(general);
-      } else if (selectedChannel) {
-        // Refresh selected channel info
-        const updated = allChannels.find(c => c.id === selectedChannel.id);
-        if (updated) setSelectedChannel(updated);
-      }
+      
+      setSelectedChannel(prev => {
+        if (!prev && allChannels.length > 0) {
+          return allChannels.find(c => c.name === "general") || allChannels[0];
+        } else if (prev) {
+          const updated = allChannels.find(c => c.id === prev.id);
+          if (updated && JSON.stringify(updated) !== JSON.stringify(prev)) {
+            return updated;
+          }
+          return updated ? prev : null;
+        }
+        return prev;
+      });
     }
-  }, [selectedChannel]);
+  }, [tenantId]);
 
   useEffect(() => {
     if (tenantId) void fetchChannels();
