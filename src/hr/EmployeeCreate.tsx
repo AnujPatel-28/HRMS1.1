@@ -103,6 +103,16 @@ export default function EmployeeCreate() {
   // appears in the same DOM position — disable it briefly to absorb the extra click.
   const [justNavigated, setJustNavigated] = useState(false);
 
+  const [insertedEmployeeId, setInsertedEmployeeId] = useState<string | null>(null);
+  const [uploadStatus, setUploadStatus] = useState({ profile: false, aadhaar: false, pan: false });
+
+  const validateFile = (file: File | null, type: string, allowedTypes: string[]) => {
+    if (!file) return null;
+    if (file.size > 5 * 1024 * 1024) return `${type} exceeds 5MB size limit.`;
+    if (!allowedTypes.includes(file.type)) return `${type} has unsupported format. Allowed: ${allowedTypes.map(t => t.split('/')[1].toUpperCase()).join(', ')}.`;
+    return null;
+  };
+
   const isLastStep = step === 5;
 
   const canMoveToNext = useMemo(() => {
@@ -127,6 +137,38 @@ export default function EmployeeCreate() {
       return () => clearTimeout(timer);
     }
   }, [justNavigated]);
+
+  useEffect(() => {
+    const draft = sessionStorage.getItem(`hrms_employee_draft_${tenantId}`);
+    if (draft) {
+      try {
+        const parsed = JSON.parse(draft);
+        if (parsed.form) setForm(parsed.form);
+        if (parsed.createdUserId) setCreatedUserId(parsed.createdUserId);
+        if (parsed.authStep) setAuthStep(parsed.authStep);
+        if (parsed.insertedEmployeeId) setInsertedEmployeeId(parsed.insertedEmployeeId);
+        if (parsed.uploadStatus) setUploadStatus(parsed.uploadStatus);
+        if (parsed.step) setStep(parsed.step);
+        if (parsed.credentials) setCredentials(parsed.credentials);
+        if (parsed.pendingEmail) setPendingEmail(parsed.pendingEmail);
+        if (parsed.isCreated) setIsCreated(parsed.isCreated);
+      } catch (e) {
+        console.error("Failed to parse employee draft", e);
+      }
+    }
+  }, [tenantId]);
+
+  useEffect(() => {
+    if (tenantId) {
+      if (isCreated) {
+        sessionStorage.removeItem(`hrms_employee_draft_${tenantId}`);
+      } else {
+        sessionStorage.setItem(`hrms_employee_draft_${tenantId}`, JSON.stringify({
+          form, createdUserId, authStep, insertedEmployeeId, uploadStatus, step, credentials, pendingEmail, isCreated
+        }));
+      }
+    }
+  }, [form, createdUserId, authStep, insertedEmployeeId, uploadStatus, step, credentials, pendingEmail, isCreated, tenantId]);
 
   const handleChange = (key: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -159,7 +201,8 @@ export default function EmployeeCreate() {
   };
 
   const handleSendOTP = async () => {
-    if (!form.email.trim() || !form.full_name.trim()) {
+    const normalizedEmail = form.email.trim().toLowerCase();
+    if (!normalizedEmail || !form.full_name.trim()) {
       setAuthError("Please enter full name and email first.");
       return;
     }
@@ -170,36 +213,51 @@ export default function EmployeeCreate() {
         .from("employees")
         .select("id")
         .eq("tenant_id", tenantId)
-        .eq("email", form.email.trim())
+        .eq("email", normalizedEmail)
         .limit(1);
       if (emailCheck.data && emailCheck.data.length > 0) {
-        throw new Error(`An employee with the email "${form.email.trim()}" already exists.`);
+        throw new Error(`An employee with the email "${normalizedEmail}" already exists.`);
       }
 
       const tempPassword = makePassword();
       const fnRes = await insforge.functions.invoke("create-employee-user", {
         body: {
-          email: form.email.trim(),
+          email: normalizedEmail,
           password: tempPassword,
           name: form.full_name.trim(),
+          tenant_id: tenantId,
         },
       });
 
       if (fnRes.error || !fnRes.data?.userId) {
+        console.error("Function Error:", fnRes);
+        // Attempt to parse the error if it's a stringified JSON or inside the error object
+        let parsedData = fnRes.data;
+        if (fnRes.error && !parsedData) {
+            try {
+               // Sometimes the error object itself has the data or context
+               const errObj = fnRes.error as any;
+               if (errObj.context && typeof errObj.context.json === 'function') {
+                   parsedData = await errObj.context.json();
+               }
+            } catch(e) {}
+        }
+
         const serverMsg: string =
-          fnRes.data?.error ??
-          fnRes.data?.message ??
+          parsedData?.error ??
+          parsedData?.message ??
           (fnRes.error as { message?: string } | null)?.message ??
-          "";
-        const isOrphaned = fnRes.data?.code === "ORPHANED_AUTH_USER";
+          "Failed to create auth account (Unknown Error)";
+          
+        const isOrphaned = parsedData?.code === "ORPHANED_AUTH_USER";
         const displayMsg = isOrphaned
-          ? `This email already has an auth account from a previous attempt. Go to InsForge Dashboard → Authentication → Users, delete "${form.email.trim()}", then try again.`
+          ? `This email already has an auth account from a previous attempt. Go to InsForge Dashboard → Authentication → Users, delete "${normalizedEmail}", then try again.`
           : serverMsg || "Failed to create auth account. Please try again.";
         throw new Error(displayMsg);
       }
 
       setCreatedUserId(fnRes.data.userId as string);
-      setPendingEmail(form.email.trim());
+      setPendingEmail(normalizedEmail);
       setAuthStep("verifying");
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
@@ -219,61 +277,119 @@ export default function EmployeeCreate() {
     setSubmitting(true);
     setError(null);
 
+    const fileErrors = [
+      validateFile(profilePhoto, "Profile Photo", ['image/jpeg', 'image/png']),
+      validateFile(aadhaarDoc, "Aadhaar Document", ['image/jpeg', 'image/png', 'application/pdf']),
+      validateFile(panDoc, "PAN Document", ['image/jpeg', 'image/png', 'application/pdf'])
+    ].filter(Boolean);
+
+    if (fileErrors.length > 0) {
+      setError(fileErrors.join(" "));
+      setSubmitting(false);
+      return;
+    }
+
     try {
-      // ── Insert employee record using the HR session (satisfies RLS) ──
-      const insertRes = await db
-        .from("employees")
-        .insert([
-          {
-            user_id: createdUserId,
-            tenant_id: tenantId,
-            full_name: form.full_name.trim(),
-            email: form.email.trim().toLowerCase(),
-            phone: form.phone.trim(),
-            date_of_birth: form.date_of_birth || null,
-            gender: form.gender || null,
-            address: form.address.trim() || null,
-            city: form.city.trim() || null,
-            state: form.state.trim() || null,
-            pincode: form.pincode.trim() || null,
-            department: form.department,
-            designation: form.designation.trim(),
-            employee_code: form.employee_code.trim(),
-            date_of_joining: form.date_of_joining,
-            employment_type: form.employment_type,
-            aadhaar_number: form.aadhaar_number.trim(),
-            pan_number: form.pan_number.trim(),
-            bank_name: form.bank_name.trim() || null,
-            account_number: form.account_number.trim() || null,
-            ifsc_code: form.ifsc_code.trim() || null,
-            emergency_contact_name: form.emergency_contact_name.trim(),
-            emergency_contact_phone: form.emergency_contact_phone.trim(),
-            emergency_contact_relation: form.emergency_contact_relation.trim() || null,
-            status: "active",
-          },
-        ])
-        .select()
-        .single();
+      let currentEmployeeId = insertedEmployeeId;
 
-      if (insertRes.error || !insertRes.data?.id) {
-        throw new Error(
-          insertRes.error?.message ??
-          "Employee profile could not be saved. The auth account was created — please delete it from InsForge Auth and try again."
-        );
+      if (!currentEmployeeId) {
+        // Double check email uniqueness server-side
+        const check = await db.from("employees").select("id").eq("tenant_id", tenantId).eq("email", form.email.trim().toLowerCase()).limit(1);
+        if (check.data && check.data.length > 0) {
+          throw new Error(`Email ${form.email.trim().toLowerCase()} is already registered in the system.`);
+        }
+
+        // ── Insert employee record using the HR session (satisfies RLS) ──
+        const insertRes = await db
+          .from("employees")
+          .insert([
+            {
+              user_id: createdUserId,
+              tenant_id: tenantId,
+              full_name: form.full_name.trim(),
+              email: form.email.trim().toLowerCase(),
+              phone: form.phone.trim(),
+              date_of_birth: form.date_of_birth || null,
+              gender: form.gender || null,
+              address: form.address.trim() || null,
+              city: form.city.trim() || null,
+              state: form.state.trim() || null,
+              pincode: form.pincode.trim() || null,
+              department: form.department,
+              designation: form.designation.trim(),
+              employee_code: form.employee_code.trim(),
+              date_of_joining: form.date_of_joining,
+              employment_type: form.employment_type,
+              aadhaar_number: form.aadhaar_number.trim(),
+              pan_number: form.pan_number.trim(),
+              bank_name: form.bank_name.trim() || null,
+              account_number: form.account_number.trim() || null,
+              ifsc_code: form.ifsc_code.trim() || null,
+              emergency_contact_name: form.emergency_contact_name.trim(),
+              emergency_contact_phone: form.emergency_contact_phone.trim(),
+              emergency_contact_relation: form.emergency_contact_relation.trim() || null,
+              status: "active",
+            },
+          ])
+          .select()
+          .single();
+
+        if (insertRes.error || !insertRes.data?.id) {
+          throw new Error(
+            insertRes.error?.message ??
+            "Employee profile could not be saved. Please try again."
+          );
+        }
+
+        currentEmployeeId = insertRes.data.id as string;
+        setInsertedEmployeeId(currentEmployeeId);
       }
-
-      const employeeId = insertRes.data.id as string;
 
       // ── Upload documents (optional) ──
-      if (profilePhoto) {
-        const uploaded = await uploadFileToEmployeeFolder(employeeId, profilePhoto, "Profile Photo");
-        await db.from("employees").update({ profile_photo_url: uploaded.url }).eq("tenant_id", tenantId).eq("id", employeeId);
+      const newUploadStatus = { ...uploadStatus };
+      let hasUploadError = false;
+      const uploadErrors: string[] = [];
+
+      if (profilePhoto && !newUploadStatus.profile) {
+        try {
+          const uploaded = await uploadFileToEmployeeFolder(currentEmployeeId, profilePhoto, "Profile Photo");
+          await db.from("employees").update({ profile_photo_url: uploaded.url }).eq("tenant_id", tenantId).eq("id", currentEmployeeId);
+          newUploadStatus.profile = true;
+        } catch (e) {
+          hasUploadError = true;
+          uploadErrors.push("Profile Photo: " + (e as Error).message);
+        }
       }
-      if (aadhaarDoc) await uploadFileToEmployeeFolder(employeeId, aadhaarDoc, "Aadhaar");
-      if (panDoc) await uploadFileToEmployeeFolder(employeeId, panDoc, "PAN");
+
+      if (aadhaarDoc && !newUploadStatus.aadhaar) {
+        try {
+          await uploadFileToEmployeeFolder(currentEmployeeId, aadhaarDoc, "Aadhaar");
+          newUploadStatus.aadhaar = true;
+        } catch(e) {
+          hasUploadError = true;
+          uploadErrors.push("Aadhaar: " + (e as Error).message);
+        }
+      }
+
+      if (panDoc && !newUploadStatus.pan) {
+        try {
+          await uploadFileToEmployeeFolder(currentEmployeeId, panDoc, "PAN");
+          newUploadStatus.pan = true;
+        } catch(e) {
+          hasUploadError = true;
+          uploadErrors.push("PAN: " + (e as Error).message);
+        }
+      }
+
+      setUploadStatus(newUploadStatus);
+
+      if (hasUploadError) {
+        throw new Error("Failed to upload some documents:\n" + uploadErrors.join("\n") + "\n\nClick 'Confirm & Create' to retry failed uploads.");
+      }
 
       setIsCreated(true);
-      void logAction("employee.created", "employee", employeeId);
+      void logAction("employee.created", "employee", currentEmployeeId);
+      sessionStorage.removeItem(`hrms_employee_draft_${tenantId}`);
 
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong. Please try again.";
@@ -387,10 +503,14 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Full Name *</span>
                 <input
+                  type="text"
+                  placeholder="e.g. Jane Doe"
+                  maxLength={100}
                   value={form.full_name}
                   onChange={(event) => handleChange("full_name", event.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring disabled:bg-slate-100 disabled:text-slate-500"
                   required
+                  disabled={authStep !== "idle"}
                 />
               </label>
               <label className="text-sm md:col-span-2">
@@ -398,6 +518,8 @@ export default function EmployeeCreate() {
                 <div className="flex gap-2">
                   <input
                     type="email"
+                    placeholder="e.g. jane.doe@example.com"
+                    maxLength={100}
                     value={form.email}
                     onChange={(event) => handleChange("email", event.target.value)}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring disabled:bg-slate-100 disabled:text-slate-500"
@@ -520,6 +642,9 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Phone *</span>
                 <input
+                  type="tel"
+                  placeholder="e.g. 9876543210"
+                  maxLength={15}
                   value={form.phone}
                   onChange={(event) => handleChange("phone", event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
@@ -551,6 +676,8 @@ export default function EmployeeCreate() {
               <label className="text-sm md:col-span-2">
                 <span className="mb-1 block text-slate-600">Address</span>
                 <textarea
+                  placeholder="e.g. 123 Main St, Apt 4B"
+                  maxLength={500}
                   value={form.address}
                   onChange={(event) => handleChange("address", event.target.value)}
                   rows={3}
@@ -560,6 +687,9 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">City</span>
                 <input
+                  type="text"
+                  placeholder="e.g. Mumbai"
+                  maxLength={50}
                   value={form.city}
                   onChange={(event) => handleChange("city", event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
@@ -568,6 +698,9 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">State</span>
                 <input
+                  type="text"
+                  placeholder="e.g. Maharashtra"
+                  maxLength={50}
                   value={form.state}
                   onChange={(event) => handleChange("state", event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
@@ -576,6 +709,9 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Pincode</span>
                 <input
+                  type="text"
+                  placeholder="e.g. 400001"
+                  maxLength={10}
                   value={form.pincode}
                   onChange={(event) => handleChange("pincode", event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
@@ -614,6 +750,9 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Designation *</span>
                 <input
+                  type="text"
+                  placeholder="e.g. Software Engineer"
+                  maxLength={100}
                   value={form.designation}
                   onChange={(event) => handleChange("designation", event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
@@ -623,6 +762,9 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Employee Code *</span>
                 <input
+                  type="text"
+                  placeholder="e.g. EMP-1001"
+                  maxLength={20}
                   value={form.employee_code}
                   onChange={(event) => handleEmployeeCode(event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
@@ -660,6 +802,9 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Aadhaar Number *</span>
                 <input
+                  type="text"
+                  placeholder="e.g. 1234 5678 9012"
+                  maxLength={14}
                   value={form.aadhaar_number}
                   onChange={(event) => handleChange("aadhaar_number", event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
@@ -669,6 +814,9 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">PAN Number *</span>
                 <input
+                  type="text"
+                  placeholder="e.g. ABCDE1234F"
+                  maxLength={10}
                   value={form.pan_number}
                   onChange={(event) => handleChange("pan_number", event.target.value.toUpperCase())}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
@@ -694,6 +842,9 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Bank Name</span>
                 <input
+                  type="text"
+                  placeholder="e.g. HDFC Bank"
+                  maxLength={100}
                   value={form.bank_name}
                   onChange={(event) => handleChange("bank_name", event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
@@ -702,6 +853,9 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Account Number</span>
                 <input
+                  type="text"
+                  placeholder="e.g. 1234567890"
+                  maxLength={30}
                   value={form.account_number}
                   onChange={(event) => handleChange("account_number", event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
@@ -710,6 +864,9 @@ export default function EmployeeCreate() {
               <label className="text-sm md:col-span-2">
                 <span className="mb-1 block text-slate-600">IFSC Code</span>
                 <input
+                  type="text"
+                  placeholder="e.g. HDFC0001234"
+                  maxLength={11}
                   value={form.ifsc_code}
                   onChange={(event) => handleChange("ifsc_code", event.target.value.toUpperCase())}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
@@ -723,6 +880,9 @@ export default function EmployeeCreate() {
               <label className="text-sm md:col-span-2">
                 <span className="mb-1 block text-slate-600">Emergency Contact Name *</span>
                 <input
+                  type="text"
+                  placeholder="e.g. John Doe"
+                  maxLength={100}
                   value={form.emergency_contact_name}
                   onChange={(event) => handleChange("emergency_contact_name", event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
@@ -732,6 +892,9 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Emergency Contact Phone *</span>
                 <input
+                  type="tel"
+                  placeholder="e.g. 9876543210"
+                  maxLength={15}
                   value={form.emergency_contact_phone}
                   onChange={(event) => handleChange("emergency_contact_phone", event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"

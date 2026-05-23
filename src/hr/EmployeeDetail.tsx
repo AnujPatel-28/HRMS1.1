@@ -227,7 +227,7 @@ export default function EmployeeDetail() {
     setResetStep("confirming");
     try {
       const fnRes = await insforge.functions.invoke("set-employee-password", {
-        body: { email: employee.email, password: resetNewPassword.trim() },
+        body: { email: employee.email, password: resetNewPassword.trim(), tenant_id: tenantId },
       });
       if (fnRes.error || !fnRes.data?.success) {
         const msg: string = fnRes.data?.error ?? fnRes.error?.message ?? "Failed to update password.";
@@ -351,6 +351,19 @@ export default function EmployeeDetail() {
             >
               Reset Password
             </button>
+            {employee.status !== "active" && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  void updateStatus("active");
+                  setShowActionsMenu(false);
+                }}
+                className="w-full text-left md:w-auto rounded-lg border-0 md:border md:border-emerald-300 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 transition"
+              >
+                Reactivate
+              </button>
+            )}
             <button
               type="button"
               disabled={saving || employee.status === "inactive"}
@@ -458,12 +471,12 @@ export default function EmployeeDetail() {
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Email</span>
+            <span className="mb-1 block text-slate-600">Email (Cannot be changed after creation)</span>
             <input
               value={editForm.email ?? ""}
               onChange={(event) => updateField("email", event.target.value)}
-              disabled={!isEditing}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+              disabled={true} // Hard-disabled to prevent Auth desync
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500 cursor-not-allowed"
             />
           </label>
           <label className="text-sm">
