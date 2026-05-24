@@ -8,10 +8,13 @@ import { useToast } from "../shared/ToastContext";
 import { ConfirmModal } from "../shared/ConfirmModal";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
+import { formatLocalDate } from "../utils/date";
 
 type Tab = "apply" | "history";
 const LEAVE_TYPES = ["casual","sick","earned","unpaid","maternity","paternity","other"] as const;
-const TODAY = new Date().toISOString().slice(0, 10);
+// Business calendar date — uses local timezone to avoid UTC date-shift.
+// Must not use toISOString() here; it would return yesterday's date for IST users before 05:30.
+const TODAY = formatLocalDate(new Date());
 
 const STATUS_BADGE: Record<Leave["status"], string> = {
   pending: "bg-amber-100 text-amber-700",

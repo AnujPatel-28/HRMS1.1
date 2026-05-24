@@ -11,6 +11,7 @@ import { useEmployee } from "../hooks/useEmployee";
 import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
+import { formatLocalDate } from "../utils/date";
 
 interface KPI {
   label: string;
@@ -38,7 +39,9 @@ export default function HRDashboard() {
 
   const { error: toastError } = useToast();
 
-  const today = new Date().toISOString().slice(0, 10);
+  // Business-calendar date for today's attendance snapshot.
+  // Must use local timezone — not toISOString() which is UTC.
+  const today = formatLocalDate(new Date());
 
   const fetchAll = useCallback(async () => {
     setLoading(true);

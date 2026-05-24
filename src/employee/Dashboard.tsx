@@ -6,9 +6,13 @@ import { db } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
 import { useTenant } from "../contexts/TenantContext";
 import { Skeleton } from "../shared/Skeleton";
+import { formatLocalDate, formatLocalMonthBoundary } from "../utils/date";
 
-const TODAY = new Date().toISOString().slice(0, 10);
-const MONTH_START = TODAY.slice(0, 7) + "-01";
+// Business calendar dates — must use local timezone (not toISOString which is UTC).
+const TODAY = formatLocalDate(new Date());
+const now = new Date();
+// Month boundary: correctly handles April→May and December→January rollovers.
+const MONTH_START = formatLocalMonthBoundary(now.getFullYear(), now.getMonth(), "start");
 
 export default function EmployeeDashboard() {
   const { employee } = useEmployee();

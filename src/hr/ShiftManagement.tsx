@@ -7,6 +7,7 @@ import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { ConfirmModal } from "../shared/ConfirmModal";
+import { formatLocalDate } from "../utils/date";
 
 type ShiftFormState = {
   name: string;
@@ -76,14 +77,16 @@ function normalizeShift(raw: Shift): Shift {
   };
 }
 
+// Business-calendar dates for shift effective_from / effective_to.
+// Must use local timezone — toISOString() would return wrong date for IST midnight assignments.
 function tomorrowString() {
   const date = new Date();
   date.setDate(date.getDate() + 1);
-  return date.toISOString().slice(0, 10);
+  return formatLocalDate(date);
 }
 
 function todayString() {
-  return new Date().toISOString().slice(0, 10);
+  return formatLocalDate(new Date());
 }
 
 function ShiftFormFields({

@@ -7,6 +7,7 @@ import { useAuditLog } from "../hooks/useAuditLog";
 import { Skeleton } from "../shared/Skeleton";
 import { useToast } from "../shared/ToastContext";
 import LocationMap from "../shared/LocationMap";
+import { formatLocalDate } from "../utils/date";
 
 type TabKey = "attendance" | "leave" | "salary" | "task" | "company";
 
@@ -356,7 +357,9 @@ export default function PolicyCenter() {
   const [baselineTaskPolicy, setBaselineTaskPolicy] = useState(defaultTaskPolicy);
 
   const currentYear = new Date().getFullYear();
-  const today = new Date().toISOString().slice(0, 10);
+  // Business-calendar date for shift assignment queries.
+  // Must be local timezone — not toISOString() which returns UTC date.
+  const today = formatLocalDate(new Date());
 
   const logoPreview = useMemo(() => {
     if (logoFile) return URL.createObjectURL(logoFile);

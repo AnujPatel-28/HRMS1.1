@@ -4,6 +4,7 @@ import type { Attendance, Employee } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
+import { useAuditLog } from "../hooks/useAuditLog";
 import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
@@ -12,6 +13,8 @@ import { calculateDistance, getLocationStatusText, type LocationStatus } from ".
 import { functions } from "../insforge/client";
 import type { SalaryStructure } from "../payroll/hr/SalaryStructures";
 import { getWorkingDays, formatCurrency } from "../payroll/hr/payroll-calc";
+import { formatLocalDate } from "../utils/date";
+import { calculateShiftDuration, calculateLateness, toAttendanceTimestamp, normalizeShiftTimes } from "../utils/attendance";
 
 type ViewMode = "daily" | "employee" | "summary" | "overtime" | "corrections";
 type AttendanceStatus = "present" | "absent" | "half_day" | "on_leave";
@@ -79,9 +82,7 @@ type LateMarkSummary = {
   has_deduction: boolean;
 };
 
-function fmt(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
+const fmt = formatLocalDate;
 
 function fmtTime(ts: string | null) {
   if (!ts) return "-";
@@ -169,29 +170,14 @@ function pickCurrentStructures(structures: SalaryStructure[], effectiveCutoff: s
   return byEmployee;
 }
 
-function parseTimeToMinutes(timeValue: string) {
-  const [hours, minutes] = timeValue.slice(0, 5).split(":").map(Number);
-  return hours * 60 + minutes;
-}
 
-function calculateCorrectedWorkHours(punchIn: string | null, punchOut: string | null, lunchMinutes: number) {
-  if (!punchIn || !punchOut) return null;
-  const punchInMs = new Date(`1970-01-01T${punchIn}:00`).getTime();
-  const punchOutMs = new Date(`1970-01-01T${punchOut}:00`).getTime();
-  const rawHours = (punchOutMs - punchInMs) / (1000 * 60 * 60);
-  return Math.max(0, rawHours - (lunchMinutes / 60));
-}
-
-function toAttendanceTimestamp(date: string, time: string | null) {
-  if (!time) return null;
-  return new Date(`${date}T${time}:00`).toISOString();
-}
 
 export default function HRAttendance() {
   const [view, setView] = useState<ViewMode>("daily");
   const { success, error: toastError } = useToast();
   const { tenantId, tenant } = useTenant();
   const { employee: hrEmployee } = useEmployee();
+  const { logAction } = useAuditLog();
 
   const [dailyDate, setDailyDate] = useState(fmt(new Date()));
   const [dailyRows, setDailyRows] = useState<AttendanceWithEmployee[]>([]);
@@ -521,11 +507,26 @@ export default function HRAttendance() {
   async function saveEdit(row: AttendanceWithEmployee) {
     setSaving(true);
     try {
-      const punchIn = editPunchIn ? new Date(`${dailyDate}T${editPunchIn}:00`).toISOString() : null;
-      const punchOut = editPunchOut ? new Date(`${dailyDate}T${editPunchOut}:00`).toISOString() : null;
-      const workHours = punchIn && punchOut
-        ? (new Date(punchOut).getTime() - new Date(punchIn).getTime()) / 3600000
-        : null;
+      let punchIn = null;
+      let punchOut = null;
+      let workHours = null;
+
+      if (editPunchIn && editPunchOut) {
+        const durationResult = calculateShiftDuration(editPunchIn, editPunchOut, tenant?.lunch_break_minutes || 0);
+        if (durationResult.error) {
+          toastError(durationResult.error);
+          setSaving(false);
+          return;
+        }
+        workHours = durationResult.hours;
+
+        const { inDate, outDate } = normalizeShiftTimes(dailyDate, editPunchIn, editPunchOut);
+        punchIn = inDate.toISOString();
+        punchOut = outDate.toISOString();
+      } else {
+        punchIn = editPunchIn ? new Date(`${dailyDate}T${editPunchIn}:00`).toISOString() : null;
+        punchOut = editPunchOut ? new Date(`${dailyDate}T${editPunchOut}:00`).toISOString() : null;
+      }
 
       if (row.id) {
         await db.from("attendance").update({ punch_in: punchIn, punch_out: punchOut, status: editStatus, work_hours: workHours }).eq("tenant_id", tenantId).eq("id", row.id);
@@ -587,7 +588,7 @@ export default function HRAttendance() {
 
   const filteredCorrectionRows = useMemo(() => correctionRows.filter((row) => {
     if (correctionStatusFilter !== "all" && row.status !== correctionStatusFilter) return false;
-    if (correctionDepartmentFilter !== "all" && row.employee?.department !== correctionDepartmentFilter) return false;
+    if (correctionDepartmentFilter !== "all" && (row.employee?.department || "") !== correctionDepartmentFilter) return false;
     if (correctionDateFrom && row.attendance_date < correctionDateFrom) return false;
     if (correctionDateTo && row.attendance_date > correctionDateTo) return false;
     return true;
@@ -684,20 +685,92 @@ export default function HRAttendance() {
 
   async function approveCorrection(correction: AttendanceCorrectionRow) {
     if (!hrEmployee?.id || !tenant) return;
+
+    // ── Guard: reject empty corrections (both sides null) ──────────────────────
+    // Prevents HR from accidentally approving a no-op correction that would
+    // recalculate work_hours to null and overwrite a valid attendance record.
+    if (!correction.requested_punch_in && !correction.requested_punch_out) {
+      toastError("Cannot approve a correction with no requested punch times.");
+      return;
+    }
+
     setCorrectionActionLoading(true);
     try {
       const reviewedAt = new Date().toISOString();
       const graceMinutes = parseInt(tenantSettings["late_mark_grace_minutes"] || "0", 10);
       const shiftStart = await resolveShiftStartTime(correction.employee_id, correction.attendance_date);
-      const workHours = calculateCorrectedWorkHours(
-        correction.requested_punch_in,
-        correction.requested_punch_out,
+
+      // ── Fetch existing attendance FIRST so we can do a partial update ────────
+      // This must happen before we compute effective times so we can fall back
+      // to the existing timestamps for whichever side was not requested.
+      const { data: existingAttendance, error: attendanceLookupError } = await db
+        .from("attendance")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("employee_id", correction.employee_id)
+        .eq("date", correction.attendance_date)
+        .maybeSingle();
+      if (attendanceLookupError) throw attendanceLookupError;
+
+      // Extract existing HH:MM strings from the DB timestamps (if any).
+      // These are used as fallbacks when the correction only covers one side.
+      const existingPunchInHHMM = existingAttendance?.punch_in
+        ? new Date(existingAttendance.punch_in).toTimeString().slice(0, 5)
+        : null;
+      const existingPunchOutHHMM = existingAttendance?.punch_out
+        ? new Date(existingAttendance.punch_out).toTimeString().slice(0, 5)
+        : null;
+
+      // ── Merge: requested value takes priority; fall back to existing DB value.
+      // Use nullish coalescing (??) so an explicit empty string from the request
+      // still falls through to the existing value (not treating "" as a value).
+      // This ensures corrections are always PARTIAL updates, never full rewrites.
+      const effectivePunchIn = correction.requested_punch_in ?? existingPunchInHHMM;
+      const effectivePunchOut = correction.requested_punch_out ?? existingPunchOutHHMM;
+
+      // ── Calculate duration using MERGED effective times ──────────────────────
+      // Both sides must be present to calculate work_hours; if only one side
+      // is available (e.g. employee only correcting punch-in), hours stay null.
+      const durationResult = calculateShiftDuration(
+        effectivePunchIn,
+        effectivePunchOut,
         tenant.lunch_break_minutes,
       );
-      const isLate = correction.requested_punch_in
-        ? parseTimeToMinutes(correction.requested_punch_in) > (parseTimeToMinutes(shiftStart) + graceMinutes)
-        : false;
+      if (durationResult.error) {
+        throw new Error(durationResult.error);
+      }
+      const workHours = durationResult.hours;
 
+      // ── Lateness uses merged punch-in (correction may only fix punch-out) ────
+      const isLate = effectivePunchIn
+        ? calculateLateness(correction.attendance_date, shiftStart, effectivePunchIn, graceMinutes)
+        : (existingAttendance?.is_late ?? false);
+
+      // ── Build ISO timestamps from merged effective times ──────────────────────
+      // normalizeShiftTimes handles night shifts (punch-out before punch-in means +1 day).
+      let punchInIso: string | null = existingAttendance?.punch_in ?? null;
+      let punchOutIso: string | null = existingAttendance?.punch_out ?? null;
+
+      if (effectivePunchIn && effectivePunchOut) {
+        // Both sides known — can normalize for night shifts correctly.
+        const { inDate, outDate } = normalizeShiftTimes(
+          correction.attendance_date,
+          effectivePunchIn,
+          effectivePunchOut,
+        );
+        punchInIso = inDate.toISOString();
+        punchOutIso = outDate.toISOString();
+      } else if (effectivePunchIn) {
+        // Only punch-in is known — update only that side.
+        punchInIso = toAttendanceTimestamp(correction.attendance_date, effectivePunchIn);
+        // punchOutIso stays as the existing DB value (already set above).
+      } else if (effectivePunchOut) {
+        // Only punch-out is known — update only that side.
+        // punchInIso stays as the existing DB value (already set above).
+        punchOutIso = toAttendanceTimestamp(correction.attendance_date, effectivePunchOut);
+      }
+
+      // ── Mark the correction as approved ─────────────────────────────────────
       const { error: correctionError } = await db
         .from("attendance_corrections")
         .update({
@@ -710,23 +783,21 @@ export default function HRAttendance() {
         .eq("id", correction.id);
       if (correctionError) throw correctionError;
 
-      const { data: existingAttendance, error: attendanceLookupError } = await db
-        .from("attendance")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .eq("employee_id", correction.employee_id)
-        .eq("date", correction.attendance_date)
-        .maybeSingle();
-      if (attendanceLookupError) throw attendanceLookupError;
-
-      const attendancePayload = {
-        punch_in: toAttendanceTimestamp(correction.attendance_date, correction.requested_punch_in),
-        punch_out: toAttendanceTimestamp(correction.attendance_date, correction.requested_punch_out),
-        work_hours: workHours != null ? parseFloat(workHours.toFixed(2)) : null,
+      // ── Build the attendance payload ──────────────────────────────────────────
+      // Only include fields that changed to keep the update minimal and safe.
+      const attendancePayload: Record<string, unknown> = {
+        punch_in: punchInIso,
+        punch_out: punchOutIso,
         is_late: isLate,
       };
+      // Only overwrite work_hours if we could compute it from merged values.
+      // If only one side was provided and no existing counterpart, leave hours as-is.
+      if (workHours != null) {
+        attendancePayload.work_hours = parseFloat(workHours.toFixed(2));
+      }
 
       if (existingAttendance?.id) {
+        // ── Partial update: preserves session_status, status, location data, etc.
         const { error: attendanceUpdateError } = await db
           .from("attendance")
           .update(attendancePayload)
@@ -734,21 +805,54 @@ export default function HRAttendance() {
           .eq("id", existingAttendance.id);
         if (attendanceUpdateError) throw attendanceUpdateError;
       } else {
+        // ── Insert new record when no attendance row exists yet for this date ───
         const { error: attendanceInsertError } = await db
           .from("attendance")
           .insert([{
             tenant_id: tenantId,
             employee_id: correction.employee_id,
             date: correction.attendance_date,
-            punch_in: attendancePayload.punch_in,
-            punch_out: attendancePayload.punch_out,
-            work_hours: attendancePayload.work_hours,
-            is_late: attendancePayload.is_late,
+            punch_in: punchInIso,
+            punch_out: punchOutIso,
+            work_hours: workHours != null ? parseFloat(workHours.toFixed(2)) : null,
+            is_late: isLate,
             status: "present",
             punch_out_allowed: true,
           }]);
         if (attendanceInsertError) throw attendanceInsertError;
       }
+
+      // ── Audit log: capture before/after snapshot ─────────────────────────────
+      // Uses existing audit_logs table (tenant-scoped, RLS-safe) via useAuditLog.
+      // UTC timestamps are intentional here — audit logs must always be in UTC.
+      void logAction(
+        "attendance_correction.approved",
+        "attendance_corrections",
+        correction.id,
+        {
+          employee_id: correction.employee_id,
+          attendance_date: correction.attendance_date,
+          approver_id: hrEmployee.id,
+          approved_at: reviewedAt,
+          before: {
+            punch_in: existingAttendance?.punch_in ?? null,
+            punch_out: existingAttendance?.punch_out ?? null,
+            work_hours: existingAttendance?.work_hours ?? null,
+            is_late: existingAttendance?.is_late ?? null,
+          },
+          after: {
+            punch_in: punchInIso,
+            punch_out: punchOutIso,
+            work_hours: workHours != null ? parseFloat(workHours.toFixed(2)) : null,
+            is_late: isLate,
+          },
+          requested: {
+            punch_in: correction.requested_punch_in,
+            punch_out: correction.requested_punch_out,
+          },
+          reason: correction.reason,
+        },
+      );
 
       const { error: notificationError } = await db.from("notifications").insert([{
         tenant_id: tenantId,
@@ -764,7 +868,7 @@ export default function HRAttendance() {
       void fetchCorrections();
     } catch (err) {
       console.error(err);
-      toastError("Failed to approve attendance correction.");
+      toastError(err instanceof Error ? err.message : "Failed to approve attendance correction.");
     } finally {
       setCorrectionActionLoading(false);
     }
@@ -1059,12 +1163,17 @@ export default function HRAttendance() {
                   const day = index + 1;
                   const dateStr = `${empViewYear}-${String(empViewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
                   const record = attByDate[dateStr];
-                  const dotColor = record ? calDotColor(record.status) : "bg-white border border-slate-200";
+                  const isFuture = new Date(dateStr) > new Date();
+                  const dotColor = isFuture ? "bg-slate-50 border border-slate-100" : record ? calDotColor(record.status) : "bg-white border border-slate-200";
                   const isWeekend = new Date(dateStr).getDay() === 0 || new Date(dateStr).getDay() === 6;
                   return (
                     <div key={day} className={`flex h-14 flex-col items-center justify-center gap-1 border-b border-r border-slate-100 ${isWeekend ? "bg-slate-50" : ""}`}>
                       <span className="text-xs text-slate-500">{day}</span>
-                      <span className={`h-3 w-3 rounded-full ${isWeekend && !record ? "bg-slate-200" : dotColor}`} title={record?.status ?? (isWeekend ? "weekend" : "no record")} />
+                      {isFuture ? (
+                         <span className="text-xs font-semibold text-slate-300">—</span>
+                      ) : (
+                         <span className={`h-3 w-3 rounded-full ${isWeekend && !record ? "bg-slate-200" : dotColor}`} title={record?.status ?? (isWeekend ? "weekend" : "no record")} />
+                      )}
                     </div>
                   );
                 })}

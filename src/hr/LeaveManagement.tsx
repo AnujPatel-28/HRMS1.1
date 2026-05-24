@@ -9,6 +9,7 @@ import { useToast } from "../shared/ToastContext";
 import { ConfirmModal } from "../shared/ConfirmModal";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
+import { formatLocalDate, formatLocalMonthBoundary } from "../utils/date";
 
 type Tab = "pending" | "all" | "holidays";
 
@@ -88,7 +89,9 @@ export default function LeaveManagement() {
       const start = new Date(leave.start_date);
       const end = new Date(leave.end_date);
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dateStr = d.toISOString().slice(0, 10);
+        // Use formatLocalDate to safely handle month/year boundaries (April 30 → May 1, Dec 31 → Jan 1)
+        // without UTC date-shift from toISOString().
+        const dateStr = formatLocalDate(d);
         const existing = await db.from("attendance").select("id").eq("tenant_id", tenantId).eq("employee_id", leave.employee_id).eq("date", dateStr);
         if (existing.data && existing.data.length > 0) {
           await db.from("attendance").update({ status: "on_leave", punch_out_allowed: true }).eq("tenant_id", tenantId).eq("employee_id", leave.employee_id).eq("date", dateStr);
@@ -256,7 +259,9 @@ export default function LeaveManagement() {
   // ── Leave Policy Stats
   const policyStats = useMemo(() => {
     const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+    // Month boundary calculation using local timezone to correctly handle
+    // December→January and April→May rollovers.
+    const monthStart = formatLocalMonthBoundary(now.getFullYear(), now.getMonth(), "start");
     const approved = allLeaves.filter((l) => l.status === "approved" && l.start_date >= monthStart).length;
     const pending = allLeaves.filter((l) => l.status === "pending").length;
     const typeCount: Record<string, number> = {};

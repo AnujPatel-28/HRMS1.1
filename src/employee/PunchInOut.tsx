@@ -10,9 +10,12 @@ import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
 import { checkGeofence, getCurrentPosition, type LocationStatus } from "../utils/geolocation";
 import { useEmployeeShift } from "../hooks/useEmployeeShift";
+import { formatLocalDate } from "../utils/date";
 import { functions } from "../insforge/client";
 
-const TODAY = new Date().toISOString().slice(0, 10);
+// Business calendar date — uses local timezone to avoid UTC date-shift bugs.
+// See src/utils/date.ts for full explanation.
+const TODAY = formatLocalDate(new Date());
 
 type AttendanceWithLocation = Attendance & {
   is_late?: boolean | null;
@@ -152,7 +155,7 @@ export default function PunchInOut() {
       const today = new Date();
       const recentStart = new Date(today);
       recentStart.setDate(today.getDate() - 6);
-      const recentStartDate = recentStart.toISOString().slice(0, 10);
+      const recentStartDate = formatLocalDate(recentStart);
       const [attRes, todayClosedRes, taskRes, settingsRes, recentAttRes, overtimeRes, correctionsRes] = await Promise.all([
         db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("session_status", "open").order("punch_in", { ascending: false }).limit(1).maybeSingle(),
         db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("date", TODAY).eq("session_status", "closed").order("punch_out", { ascending: false }).limit(1).maybeSingle(),
@@ -490,7 +493,7 @@ export default function PunchInOut() {
   const recentDays = Array.from({ length: 7 }, (_, index) => {
     const date = new Date();
     date.setDate(date.getDate() - index);
-    const dateStr = date.toISOString().slice(0, 10);
+    const dateStr = formatLocalDate(date);
     const record = recentAttendance.find((item) => item.date === dateStr) ?? null;
     const correction = correctionByDate[dateStr];
     const workingDay = shift ? shift.working_days.includes(date.getDay()) : true;

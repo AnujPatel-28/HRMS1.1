@@ -6,6 +6,7 @@ import { db } from "../../insforge/client";
 import { useToast } from "../../shared/ToastContext";
 import type { Employee } from "../../types";
 import type { SalaryStructure } from "./SalaryStructures";
+import { formatLocalDate } from "../../utils/date";
 
 type SalaryFormProps = {
   employee: Employee;
@@ -14,7 +15,10 @@ type SalaryFormProps = {
   onSaved: () => Promise<void>;
 };
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Business-calendar date helper — uses local timezone.
+// toISOString() would return yesterday's date for IST users before 05:30,
+// causing salary structures to be effective-dated to the wrong month.
+const today = () => formatLocalDate(new Date());
 
 const toNumber = (value: string) => {
   const parsed = Number(value);

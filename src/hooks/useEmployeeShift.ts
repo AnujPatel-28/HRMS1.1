@@ -3,6 +3,7 @@ import { db } from "../insforge/client";
 import { useTenant } from "../contexts/TenantContext";
 import { useEmployee } from "./useEmployee";
 import type { Shift } from "../types";
+import { formatLocalDate } from "../utils/date";
 
 type UseEmployeeShiftResult = {
   shift: Shift | null;
@@ -50,7 +51,9 @@ export function useEmployeeShift(): UseEmployeeShiftResult {
 
     setIsLoading(true);
     setError(null);
-    const today = new Date().toISOString().slice(0, 10);
+    // Business calendar date — used for shift effective_from/effective_to range.
+    // Must use local timezone; toISOString() would return wrong date for IST users at midnight.
+    const today = formatLocalDate(new Date());
 
     try {
       const { data: activeAssignment, error: assignmentError } = await db

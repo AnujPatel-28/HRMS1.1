@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
 import type { Attendance } from "../types";
+import { formatLocalDate } from "../utils/date";
 
 export function useAttendance(employeeId?: string) {
   const { tenantId } = useTenant();
@@ -24,7 +25,9 @@ export function useAttendance(employeeId?: string) {
   const punchIn = useCallback(
     async (ipAddress?: string) => {
       if (!employeeId) return;
-      const today = new Date().toISOString().slice(0, 10);
+      // Business calendar date — local timezone required for correct attendance date.
+      // The UTC timestamp punch_out uses new Date().toISOString() which is correct (it IS a moment in time).
+      const today = formatLocalDate(new Date());
       await db.from("attendance").insert([
         {
           employee_id: employeeId,

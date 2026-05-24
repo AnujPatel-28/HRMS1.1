@@ -26,7 +26,7 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: "tasks", label: "Tasks" },
 ];
 
-const toIsoDate = (value: Date) => value.toISOString().slice(0, 10);
+import { formatLocalDate } from "../utils/date";
 
 const maskValue = (value: string | null, visible: boolean, minVisible = 4) => {
   if (!value) return "�";
@@ -93,7 +93,7 @@ export default function EmployeeDetail() {
         .select("*")
         .eq("tenant_id", tenantId)
         .eq("employee_id", currentEmployee.id)
-        .gte("date", toIsoDate(fromDate))
+        .gte("date", formatLocalDate(fromDate))
         .order("date", { ascending: true }),
       db.from("leaves").select("*").eq("tenant_id", tenantId).eq("employee_id", currentEmployee.id).order("applied_at", { ascending: false }),
       db.from("tasks").select("*").eq("tenant_id", tenantId).eq("assigned_to", currentEmployee.id).order("created_at", { ascending: false }),
@@ -612,21 +612,28 @@ export default function EmployeeDetail() {
           <p className="mb-3 text-sm text-slate-600">Last 30 days mini calendar</p>
           <div className="grid grid-cols-6 gap-2 sm:grid-cols-10">
             {lastThirtyDays.map((day) => {
-              const dateKey = toIsoDate(day);
-              const status = attendanceMap[dateKey] ?? "absent";
-              const colorClass =
-                status === "present"
+              const dateKey = formatLocalDate(day);
+              const status = attendanceMap[dateKey];
+              const isFuture = day > new Date();
+
+              const colorClass = isFuture
+                ? "bg-slate-50 text-slate-400 border border-slate-100"
+                : status === "present"
                   ? "bg-emerald-100 text-emerald-700"
                   : status === "half_day"
                     ? "bg-amber-100 text-amber-700"
                     : status === "on_leave"
                       ? "bg-cyan-100 text-cyan-700"
-                      : "bg-slate-100 text-slate-500";
+                      : status === "absent"
+                        ? "bg-rose-100 text-rose-700"
+                        : "bg-slate-100 text-slate-500 border border-slate-200";
 
               return (
-                <div key={dateKey} className={`rounded-lg p-2 text-center text-xs font-medium ${colorClass}`} title={`${dateKey} - ${status}`}>
+                <div key={dateKey} className={`rounded-lg p-2 text-center text-xs font-medium ${colorClass}`} title={`${dateKey} - ${isFuture ? "Future" : status || "No Record"}`}>
                   <div>{day.getDate()}</div>
-                  <div className="mt-1 uppercase">{status === "on_leave" ? "L" : status === "present" ? "P" : status === "half_day" ? "H" : "A"}</div>
+                  <div className="mt-1 uppercase">
+                    {isFuture ? "—" : status === "on_leave" ? "L" : status === "present" ? "P" : status === "half_day" ? "H" : status === "absent" ? "A" : "—"}
+                  </div>
                 </div>
               );
             })}
