@@ -81,7 +81,11 @@ export default function TaskManagement() {
       const subIds = taskList.filter(t => ["submitted","approved","rejected"].includes(t.status)).map(t => t.id);
       let subMap: Record<string,TaskSubmission> = {};
       if (subIds.length > 0) {
-        const { data: subs } = await db.from("task_submissions").select("*").eq("tenant_id", tenantId).in("task_id", subIds);
+        const { data: subs } = await db.from("task_submissions")
+          .select("*")
+          .eq("tenant_id", tenantId)
+          .in("task_id", subIds)
+          .order("submitted_at", { ascending: true });
         (subs ?? []).forEach((s: TaskSubmission) => { subMap[s.task_id] = s; });
       }
       const empMap: Record<string,Employee> = {};
@@ -126,6 +130,7 @@ export default function TaskManagement() {
           department_filter: form.assign_mode === "department" ? form.department : null,
           priority: form.priority, due_date: form.due_date || null, due_time: form.due_time || null,
           status: "assigned",
+          attendance_lock_date: form.due_date || null
         }]);
         if (taskErr) throw taskErr;
         const { error: notifErr } = await db.from("notifications").insert([{
@@ -152,16 +157,17 @@ export default function TaskManagement() {
     if (!hrEmployee?.id || !task.submission) return;
     setSavingReview(true);
     try {
-      const today = new Date().toISOString().slice(0,10);
-      await db.from("tasks").update({ status: "approved" }).eq("tenant_id", tenantId).eq("id", task.id);
-      await db.from("task_submissions").update({
-        status: "approved", reviewed_by: hrEmployee.id, reviewed_at: new Date().toISOString(),
-      }).eq("tenant_id", tenantId).eq("id", task.submission.id);
-      await db.from("attendance").update({ punch_out_allowed: true })
-        .eq("tenant_id", tenantId).eq("employee_id", task.assigned_to).eq("date", today);
+      const { error: rpcErr } = await db.rpc('approve_task_request', {
+        p_task_id: task.id,
+        p_hr_employee_id: hrEmployee.id
+      });
+      if (rpcErr) throw rpcErr;
+      
+      const targetDate = task.attendance_lock_date || task.due_date || new Date().toISOString().slice(0,10);
+      
       await db.from("calendar_events").insert([{
         tenant_id: tenantId,
-        employee_id: task.assigned_to, date: today, type: "green", task_id: task.id,
+        employee_id: task.assigned_to, date: targetDate, type: "green", task_id: task.id,
         notes: `Task approved: ${task.title}`,
       }]);
       await db.from("notifications").insert([{
@@ -184,11 +190,13 @@ export default function TaskManagement() {
     if (!hrEmployee?.id || !task.submission) return;
     setSavingReview(true);
     try {
-      await db.from("tasks").update({ status: "assigned" }).eq("tenant_id", tenantId).eq("id", task.id);
-      await db.from("task_submissions").update({
-        status: "rejected", reviewed_by: hrEmployee.id, reviewed_at: new Date().toISOString(),
-        review_notes: rejectNotes || null,
-      }).eq("tenant_id", tenantId).eq("id", task.submission.id);
+      const { error: rpcErr } = await db.rpc('reject_task_request', {
+        p_task_id: task.id,
+        p_hr_employee_id: hrEmployee.id,
+        p_notes: rejectNotes || null
+      });
+      if (rpcErr) throw rpcErr;
+      
       await db.from("notifications").insert([{
         tenant_id: tenantId,
         employee_id: task.assigned_to, title: "Task Rejected",

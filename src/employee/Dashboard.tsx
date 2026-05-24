@@ -50,6 +50,7 @@ export default function EmployeeDashboard() {
 
   const todayStatus = () => {
     if (!todayAtt) return { label: "Not Punched In", color: "bg-slate-100 text-slate-600 border-slate-200", dot: "bg-slate-400" };
+    if (todayAtt.status === "on_leave") return { label: "On Leave", color: "bg-purple-50 text-purple-700 border-purple-200", dot: "bg-purple-500" };
     if (todayAtt.punch_out) return { label: "Punched Out", color: "bg-blue-50 text-blue-700 border-blue-200", dot: "bg-blue-500" };
     return { label: "Clocked In", color: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500" };
   };

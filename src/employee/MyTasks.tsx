@@ -2,46 +2,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Paperclip, X, CheckCircle, Clock, AlertCircle, XCircle, CheckSquare } from "lucide-react";
 import type { Task, TaskSubmission } from "../types";
-import { db } from "../insforge/client";
+import { db, storage } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
 import { useTenant } from "../contexts/TenantContext";
 import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 
-const INSFORGE_URL = import.meta.env.VITE_INSFORGE_URL as string;
-const INSFORGE_KEY = import.meta.env.VITE_INSFORGE_KEY as string;
-
-/** Direct multipart upload using the deprecated PUT endpoint.
- *  Bypasses the broken two-step SDK upload flow (upload-strategy → confirm-upload).
- *  The task-attachments bucket is public so the anon key is sufficient. */
-async function uploadFileDirect(bucket: string, file: File): Promise<string> {
-  const ext = file.name.split(".").pop();
-  // Flat key — no slashes — avoids URL path routing issues
-  const key = `task-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const res = await fetch(
-    `${INSFORGE_URL}/api/storage/buckets/${bucket}/objects/${key}`,
-    {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${INSFORGE_KEY}` },
-      body: formData,
-    }
-  );
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Upload failed (${res.status}): ${errText}`);
-  }
-
-  const data = await res.json() as { url?: string };
-  // Prefer the URL from the response; fall back to constructing it
-  return data.url
-    ? (data.url.startsWith("http") ? data.url : `${INSFORGE_URL}${data.url}`)
-    : `${INSFORGE_URL}/api/storage/buckets/${bucket}/objects/${key}`;
-}
 
 
 const PRIORITY_BADGE: Record<Task["priority"], string> = {
@@ -83,7 +50,11 @@ export default function MyTasks() {
 
       const ids = tList.map(t => t.id);
       if (ids.length > 0) {
-        const { data: subData, error: subErr } = await db.from("task_submissions").select("*").eq("tenant_id", tenantId).in("task_id", ids);
+        const { data: subData, error: subErr } = await db.from("task_submissions")
+          .select("*")
+          .eq("tenant_id", tenantId)
+          .in("task_id", ids)
+          .order("submitted_at", { ascending: true });
         if (subErr) throw subErr;
         const map: Record<string, TaskSubmission> = {};
         (subData ?? []).forEach((s: TaskSubmission) => { map[s.task_id] = s; });
@@ -106,23 +77,20 @@ export default function MyTasks() {
 
     try {
       if (file) {
-        attachment_url = await uploadFileDirect("task-attachments", file);
+        const { data: uploadData, error: uploadErr } = await storage.from("task-attachments").uploadAuto(file);
+        if (uploadErr || !uploadData) throw new Error(`Failed to upload file: ${uploadErr?.message}`);
+        attachment_url = uploadData.url;
         attachment_name = file.name;
       }
 
-      const { error: subErr } = await db.from("task_submissions").insert([{
-        task_id: task.id,
-        employee_id: employee.id,
-        tenant_id: tenantId,
-        notes: notes || null,
-        attachment_url,
-        attachment_name,
-        status: "pending",
-      }]);
-      if (subErr) throw subErr;
-      
-      const { error: updErr } = await db.from("tasks").update({ status: "submitted" }).eq("tenant_id", tenantId).eq("id", task.id);
-      if (updErr) throw updErr;
+      const { error: rpcErr } = await db.rpc('submit_task_request', {
+        p_task_id: task.id,
+        p_employee_id: employee.id,
+        p_notes: notes || null,
+        p_attachment_url: attachment_url,
+        p_attachment_name: attachment_name
+      });
+      if (rpcErr) throw rpcErr;
 
       // Notify HR
       const { data: hrEmps } = await db.from("employees").select("id").eq("tenant_id", tenantId).eq("department", "operations");
@@ -178,10 +146,13 @@ export default function MyTasks() {
 
             return (
               <div key={task.id} className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-                {/* Card Header */}
                 <div
                   className="flex cursor-pointer items-start justify-between gap-4 p-4 hover:bg-slate-50 transition"
-                  onClick={() => setExpandedId(expanded ? null : task.id)}>
+                  onClick={() => {
+                    const expanding = !expanded;
+                    setExpandedId(expanding ? task.id : null);
+                    if (expanding) { setNotes(""); setFile(null); }
+                  }}>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold text-slate-900">{task.title}</p>

@@ -78,10 +78,12 @@ export interface Leave {
   id: string;
   tenant_id: string;
   employee_id: string;
+  leave_type_id?: string;
   leave_type: "casual" | "sick" | "earned" | "unpaid" | "maternity" | "paternity" | "other" | null;
   start_date: string;
   end_date: string;
   total_days: number | null;
+  approved_business_days?: number | null;
   reason: string;
   status: "pending" | "approved" | "rejected";
   reviewed_by: string | null;
@@ -125,6 +127,7 @@ export interface Task {
   priority: "low" | "medium" | "high" | "urgent";
   due_date: string | null;
   due_time: string | null;
+  attendance_lock_date?: string | null;
   status: "assigned" | "in_progress" | "submitted" | "approved" | "rejected";
   created_at: string;
   updated_at: string;

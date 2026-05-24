@@ -666,6 +666,23 @@ export default function PunchInOut() {
     );
   }
 
+  if (attendance?.status === "on_leave") {
+    return (
+      <section className="space-y-6">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-900">Punch In / Out</h2>
+          <p className="text-sm text-slate-500">{TODAY}</p>
+        </div>
+        <div className="mx-auto max-w-sm rounded-2xl border border-emerald-200 bg-emerald-50 p-8 text-center shadow-sm">
+          <CheckCircle className="mx-auto mb-3 h-14 w-14 text-emerald-500" />
+          <h3 className="mb-1 text-xl font-bold text-emerald-700">On Leave</h3>
+          <p className="mb-4 text-slate-600">Enjoy your time off! No punch-in required today.</p>
+        </div>
+        {renderPastSevenDays()}
+      </section>
+    );
+  }
+
   if (attendance?.punch_out) {
     const h = Math.floor(attendance.work_hours ?? 0);
     const m = Math.round(((attendance.work_hours ?? 0) - h) * 60);

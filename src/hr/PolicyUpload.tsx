@@ -73,13 +73,18 @@ export default function PolicyUpload() {
         department_filter: visibility === "department-specific" ? department : null,
       }]).select("id").single();
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        await storage.from("hr-policies").remove(filePath);
+        throw insertError;
+      }
 
       // Notify
       const titlePrefix = visibility === "all" ? "New Company Policy:" : `New Policy for ${department}:`;
       const notifType = "new_policy";
       let q = db.from("employees").select("id").eq("tenant_id", tenantId).eq("status", "active");
-      if (visibility === "department-specific" && department) {
+      if (visibility === "hr_only") {
+        q = q.eq("department", "operations");
+      } else if (visibility === "department-specific" && department) {
         q = q.eq("department", department);
       }
       const { data: targets } = await q;
@@ -264,7 +269,11 @@ export default function PolicyUpload() {
               <button onClick={() => setPreviewUrl(null)} className="rounded-lg p-1.5 hover:bg-slate-200"><X className="h-5 w-5" /></button>
             </div>
             <div className="flex-1 bg-slate-100 relative">
-              <iframe src={previewUrl} className="h-full w-full border-none" title="PDF Preview" />
+              <iframe 
+                src={`https://docs.google.com/viewer?url=${encodeURIComponent(previewUrl)}&embedded=true`} 
+                className="h-full w-full border-none" 
+                title="Document Preview" 
+              />
             </div>
           </div>
         </div>
