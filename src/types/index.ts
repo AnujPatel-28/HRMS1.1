@@ -181,6 +181,9 @@ export interface ChatMessage {
   attachment_name: string | null;
   is_deleted: boolean;
   created_at: string;
+  client_message_id?: string;
+  delivery_status?: 'sending' | 'sent' | 'failed';
+  upload_status?: 'none' | 'uploading' | 'success' | 'failed';
 }
 
 export interface Notification {

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Send, Hash, Trash2, Paperclip, X, FileText, MessageSquare, Plus } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, useReducer } from "react";
+import { Send, Hash, Trash2, Paperclip, X, FileText, MessageSquare, Plus, Clock, AlertCircle } from "lucide-react";
 import type { ChatMessage, Employee, ChatChannel } from "../types";
 import { db, storage, realtime } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
@@ -7,6 +7,85 @@ import { useAuth } from "../hooks/useAuth";
 import { useTenant } from "../contexts/TenantContext";
 import { EmptyState } from "./EmptyState";
 import { ConfirmModal } from "./ConfirmModal";
+
+// Helper for generating local optimistic UUIDs
+function uuidv4() {
+  return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c =>
+    (parseInt(c) ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> parseInt(c) / 4).toString(16)
+  );
+}
+
+// 1. Pure Deterministic Reducer for Message Cache
+type MessageAction = 
+  | { type: "INIT_CHANNEL"; channelId: string; messages: ChatMessage[] }
+  | { type: "PAGINATE"; channelId: string; messages: ChatMessage[] }
+  | { type: "UPSERT"; channelId: string; messages: ChatMessage[] }
+  | { type: "DELETE"; channelId: string; messageIds: string[] }
+  | { type: "EVICT"; channelIds: string[] };
+
+function sortMessages(msgs: ChatMessage[]) {
+  // Sort oldest first for chat rendering
+  return [...msgs].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+}
+
+function messageReducer(state: Record<string, ChatMessage[]>, action: MessageAction): Record<string, ChatMessage[]> {
+  switch (action.type) {
+    case "INIT_CHANNEL": {
+      // Reconcile new fetch with existing cache (useful for resync)
+      const existing = state[action.channelId] || [];
+      const merged = [...existing];
+      
+      action.messages.forEach(newMsg => {
+        const idx = merged.findIndex(m => 
+          (m.client_message_id && newMsg.client_message_id && m.client_message_id === newMsg.client_message_id) || 
+          (m.id === newMsg.id)
+        );
+        if (idx !== -1) {
+          merged[idx] = { ...merged[idx], ...newMsg };
+        } else {
+          merged.push(newMsg);
+        }
+      });
+      return { ...state, [action.channelId]: sortMessages(merged) };
+    }
+    case "PAGINATE": {
+      const existing = state[action.channelId] || [];
+      // Just append and sort, deduplication is theoretically handled by cursor pagination
+      // but we do a quick pass to be safe.
+      const map = new Map(existing.map(m => [m.id, m]));
+      action.messages.forEach(m => map.set(m.id, m));
+      return { ...state, [action.channelId]: sortMessages(Array.from(map.values())) };
+    }
+    case "UPSERT": {
+      const existing = state[action.channelId] || [];
+      const updated = [...existing];
+      
+      action.messages.forEach(newMsg => {
+        const idx = updated.findIndex(m => 
+          (m.client_message_id && newMsg.client_message_id && m.client_message_id === newMsg.client_message_id) || 
+          (m.id && newMsg.id && m.id === newMsg.id)
+        );
+        if (idx !== -1) {
+          updated[idx] = { ...updated[idx], ...newMsg };
+        } else {
+          updated.push(newMsg);
+        }
+      });
+      return { ...state, [action.channelId]: sortMessages(updated) };
+    }
+    case "DELETE": {
+      const existing = state[action.channelId] || [];
+      return { ...state, [action.channelId]: existing.filter(m => !action.messageIds.includes(m.id)) };
+    }
+    case "EVICT": {
+      const newState = { ...state };
+      action.channelIds.forEach(id => delete newState[id]);
+      return newState;
+    }
+    default:
+      return state;
+  }
+}
 
 export default function Chat() {
   const { employee } = useEmployee();
@@ -16,26 +95,36 @@ export default function Chat() {
 
   const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [selectedChannel, setSelectedChannel] = useState<ChatChannel | null>(null);
-  const [messages, setMessages] = useState<(ChatMessage & { sender?: Employee })[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [input, setInput] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  
+  // Cache and Draft States
+  const [messagesCache, dispatchMessages] = useReducer(messageReducer, {});
+  const [draftTexts, setDraftTexts] = useState<Record<string, string>>({});
+  const [draftFiles, setDraftFiles] = useState<Record<string, File | null>>({});
+  
+  // LRU Tracking
+  const [accessedChannels, setAccessedChannels] = useState<string[]>([]);
+
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [sending, setSending] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [creating, setCreating] = useState(false);
   const [channelToDelete, setChannelToDelete] = useState<ChatChannel | null>(null);
+  
+  // Modal States
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
   const [newChannelDesc, setNewChannelDesc] = useState("");
   const [newChannelType, setNewChannelType] = useState<"global" | "department" | "custom">("global");
   const [newChannelDepts, setNewChannelDepts] = useState<string[]>([]);
-  const [newChannelMembers, setNewChannelMembers] = useState<string[]>([]); // employee ids
+  const [newChannelMembers, setNewChannelMembers] = useState<string[]>([]);
   
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fetchSequenceRef = useRef<Record<string, number>>({});
 
-  // Fetch Channels
+  // 1. Fetch Channels
   const fetchChannels = useCallback(async () => {
     if (!tenantId) return;
     const { data } = await db.from("chat_channels").select("*").eq("tenant_id", tenantId).order("name", { ascending: true });
@@ -48,10 +137,9 @@ export default function Chat() {
           return allChannels.find(c => c.name === "general") || allChannels[0];
         } else if (prev) {
           const updated = allChannels.find(c => c.id === prev.id);
-          if (updated && JSON.stringify(updated) !== JSON.stringify(prev)) {
-            return updated;
-          }
-          return updated ? prev : null;
+          // Safe fallback if channel is deleted
+          if (!updated) return allChannels.find(c => c.name === "general") || null;
+          return updated;
         }
         return prev;
       });
@@ -71,107 +159,194 @@ export default function Chat() {
     return () => { active = false; };
   }, [tenantId]);
 
-  const fetchMessages = useCallback(async () => {
-    if (!selectedChannel || !tenantId) return;
+  // LRU Update
+  useEffect(() => {
+    if (selectedChannel) {
+      setAccessedChannels(prev => {
+        const filtered = prev.filter(id => id !== selectedChannel.id);
+        return [selectedChannel.id, ...filtered];
+      });
+    }
+  }, [selectedChannel]);
+
+  // LRU Eviction
+  useEffect(() => {
+    if (accessedChannels.length > 5) {
+      const toEvict = accessedChannels.slice(5).filter(id => !draftTexts[id] && !draftFiles[id]);
+      if (toEvict.length > 0) {
+        dispatchMessages({ type: "EVICT", channelIds: toEvict });
+        setAccessedChannels(prev => prev.filter(id => !toEvict.includes(id)));
+      }
+    }
+  }, [accessedChannels, draftTexts, draftFiles]);
+
+  // 2. Fetch Messages with Sequence Ref
+  const fetchMessages = useCallback(async (channelId: string) => {
+    if (!tenantId) return;
+    const seq = (fetchSequenceRef.current[channelId] || 0) + 1;
+    fetchSequenceRef.current[channelId] = seq;
+    
     setLoading(true);
     const { data } = await db.from("chat_messages").select("*")
-      .eq("tenant_id", tenantId).eq("channel", selectedChannel.name).eq("is_deleted", false)
-      .order("created_at", { ascending: false }).limit(50); // Get latest 50
-    
-    if (data) {
-      const msgs = (data as ChatMessage[]).reverse(); // Oldest first for chat view
-      const empMap: Record<string, Employee> = {};
-      employees.forEach((e) => { empMap[e.id] = e; });
-      setMessages(msgs.map((m) => ({ ...m, sender: empMap[m.sender_id] })));
+      .eq("tenant_id", tenantId)
+      .eq("channel_id", channelId)
+      .eq("is_deleted", false)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(50);
+      
+    if (data && fetchSequenceRef.current[channelId] === seq) {
+      dispatchMessages({ type: "INIT_CHANNEL", channelId, messages: data as ChatMessage[] });
     }
     setLoading(false);
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
-  }, [selectedChannel, employees, tenantId]);
+  }, [tenantId]);
 
   useEffect(() => {
-    if (employees.length > 0) void fetchMessages();
-  }, [fetchMessages, employees]);
+    if (selectedChannel && employees.length > 0) {
+      void fetchMessages(selectedChannel.id);
+    }
+  }, [selectedChannel, employees, fetchMessages]);
 
-  // Realtime subscription — subscribe to the global chat_messages channel
-  // The DB trigger publishes INSERT events there for all channels
+  // 3. Stable Realtime Subscription & Resync
   useEffect(() => {
     if (employees.length === 0 || !tenantId) return;
 
     const setupRealtime = async () => {
       await realtime.connect();
       await realtime.subscribe("chat_messages");
+      await realtime.subscribe("chat_channels");
+      await realtime.subscribe("chat_channel_members");
     };
 
     void setupRealtime();
 
-    const handler = (payload: any) => {
-      // payload fields come directly from row_to_json(NEW)
-      const newMsg = payload as ChatMessage & { meta?: any };
-      if (!newMsg.id || !newMsg.channel) return;
-      if (newMsg.tenant_id !== tenantId) return;
+    const handleInsertOrUpdate = (payload: any) => {
+      if (payload.tenant_id !== tenantId) return;
 
-      // Only show messages for the currently selected channel
-      if (newMsg.channel !== selectedChannel?.name) return;
-      if (newMsg.is_deleted) return;
-
-      const empMap: Record<string, Employee> = {};
-      employees.forEach((e) => { empMap[e.id] = e; });
-
-      setMessages(prev => {
-        // Deduplicate — sender already added it locally via sendMessage()
-        if (prev.some(m => m.id === newMsg.id)) return prev;
-        return [...prev, { ...newMsg, sender: empMap[newMsg.sender_id] }];
-      });
-      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
-    };
-
-    const updateHandler = (payload: any) => {
-      const updatedMsg = payload as ChatMessage;
-      if (!updatedMsg.id) return;
-      if (updatedMsg.tenant_id !== tenantId) return;
-      
-      // If it's deleted, remove it from the state
-      if (updatedMsg.is_deleted) {
-        setMessages(prev => prev.filter(m => m.id !== updatedMsg.id));
+      if ("content" in payload && "channel_id" in payload) {
+        const msg = payload as ChatMessage;
+        if (msg.is_deleted) {
+          dispatchMessages({ type: "DELETE", channelId: msg.channel_id!, messageIds: [msg.id] });
+        } else {
+          dispatchMessages({ type: "UPSERT", channelId: msg.channel_id!, messages: [msg] });
+        }
+      } else {
+        // It's a channel or channel member update
+        void fetchChannels();
       }
     };
 
-    realtime.on("INSERT", handler);
-    realtime.on("UPDATE", updateHandler);
+    realtime.on("INSERT", handleInsertOrUpdate);
+    realtime.on("UPDATE", handleInsertOrUpdate);
+
+    // Resynchronization on reconnect
+    const handleOnline = () => {
+      // Refetch for active and top recently active cached channels
+      accessedChannels.slice(0, 3).forEach(id => {
+        void fetchMessages(id);
+      });
+      void fetchChannels();
+    };
+
+    window.addEventListener("online", handleOnline);
 
     return () => {
-      realtime.off("INSERT", handler);
-      realtime.off("UPDATE", updateHandler);
+      realtime.off("INSERT", handleInsertOrUpdate);
+      realtime.off("UPDATE", handleInsertOrUpdate);
       realtime.unsubscribe("chat_messages");
+      realtime.unsubscribe("chat_channels");
+      realtime.unsubscribe("chat_channel_members");
+      window.removeEventListener("online", handleOnline);
     };
-  }, [selectedChannel, employees, tenantId]);
+  }, [employees, tenantId, accessedChannels, fetchMessages, fetchChannels]);
 
+  // Load More (Composite Cursor Pagination)
+  async function loadMore() {
+    if (!selectedChannel || !tenantId) return;
+    const channelMsgs = messagesCache[selectedChannel.id] || [];
+    if (channelMsgs.length === 0) return;
+    
+    // Oldest is first
+    const oldest = channelMsgs[0];
+    
+    setLoadingMore(true);
+    const { data } = await db.from("chat_messages").select("*")
+      .eq("tenant_id", tenantId)
+      .eq("channel_id", selectedChannel.id)
+      .eq("is_deleted", false)
+      .or(`created_at.lt.${oldest.created_at},and(created_at.eq.${oldest.created_at},id.lt.${oldest.id})`)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(50);
+      
+    if (data && data.length > 0) {
+      dispatchMessages({ type: "PAGINATE", channelId: selectedChannel.id, messages: data as ChatMessage[] });
+    }
+    setLoadingMore(false);
+  }
+
+  // 4. Send Message with Delivery/Upload States
   async function sendMessage() {
-    if ((!input.trim() && !file) || !employee?.id || !tenantId) return;
+    if (!selectedChannel || !employee?.id || !tenantId) return;
+    const txt = draftTexts[selectedChannel.id] || "";
+    const f = draftFiles[selectedChannel.id];
+    if (!txt.trim() && !f) return;
+    
     setSending(true);
+
+    const clientId = uuidv4();
+    const now = new Date().toISOString();
+    const optimisticMsg: ChatMessage = {
+      id: clientId, 
+      client_message_id: clientId,
+      tenant_id: tenantId,
+      sender_id: employee.id,
+      channel: selectedChannel.name,
+      channel_id: selectedChannel.id,
+      content: txt.trim() || "Sent an attachment",
+      attachment_url: null,
+      attachment_name: f ? f.name : null,
+      is_deleted: false,
+      created_at: now,
+      delivery_status: 'sending',
+      upload_status: f ? 'uploading' : 'none'
+    };
+
+    dispatchMessages({ type: "UPSERT", channelId: selectedChannel.id, messages: [optimisticMsg] });
+    
+    // Clear drafts for this channel
+    setDraftTexts(prev => ({ ...prev, [selectedChannel.id]: "" }));
+    setDraftFiles(prev => ({ ...prev, [selectedChannel.id]: null }));
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
 
     let attachment_url = null;
     let attachment_name = null;
+    let filePath = "";
 
     try {
-      if (file) {
-        const fileExt = file.name.split(".").pop();
+      if (f) {
+        const fileExt = f.name.includes(".") ? f.name.split(".").pop() : "bin";
         const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
-        const filePath = `chat/${fileName}`;
+        filePath = `chat/${fileName}`;
         
-        const { error: uploadError } = await storage.from("chat-attachments").upload(filePath, file);
+        const { error: uploadError } = await storage.from("chat-attachments").upload(filePath, f);
         if (uploadError) throw uploadError;
         
         attachment_url = storage.from("chat-attachments").getPublicUrl(filePath);
-        attachment_name = file.name;
+        attachment_name = f.name;
+        
+        dispatchMessages({ type: "UPSERT", channelId: selectedChannel.id, messages: [{
+          ...optimisticMsg, upload_status: 'success', attachment_url, attachment_name
+        }] });
       }
 
       const { data, error } = await db.from("chat_messages").insert([{
+        client_message_id: clientId,
         sender_id: employee.id,
         tenant_id: tenantId,
-        channel: selectedChannel?.name || "general",
-        channel_id: selectedChannel?.id,
-        content: input.trim() || "Sent an attachment",
+        channel: selectedChannel.name,
+        channel_id: selectedChannel.id,
+        content: optimisticMsg.content,
         attachment_url,
         attachment_name,
       }]).select();
@@ -179,19 +354,19 @@ export default function Chat() {
       if (error) throw error;
 
       if (data && data.length > 0) {
-        const newMsg = data[0] as ChatMessage;
-        setMessages(prev => {
-          if (prev.some(m => m.id === newMsg.id)) return prev;
-          return [...prev, { ...newMsg, sender: employee }];
-        });
-        setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+        dispatchMessages({ type: "UPSERT", channelId: selectedChannel.id, messages: [{
+          ...(data[0] as ChatMessage), delivery_status: 'sent', upload_status: f ? 'success' : 'none'
+        }] });
       }
-
-      setInput("");
-      setFile(null);
     } catch (err: any) {
       console.error("Failed to send message", err);
-      alert("Failed to send message: " + (err.message || JSON.stringify(err)));
+      dispatchMessages({ type: "UPSERT", channelId: selectedChannel.id, messages: [{
+        ...optimisticMsg, delivery_status: 'failed', upload_status: f ? 'failed' : 'none'
+      }] });
+      
+      if (attachment_url && filePath) {
+         await storage.from("chat-attachments").remove(filePath);
+      }
     } finally {
       setSending(false);
     }
@@ -200,7 +375,6 @@ export default function Chat() {
   async function deleteMessage(id: string) {
     if (!tenantId) return;
     await db.from("chat_messages").update({ is_deleted: true }).eq("tenant_id", tenantId).eq("id", id);
-    setMessages(prev => prev.filter(m => m.id !== id));
   }
 
   function handleKey(e: React.KeyboardEvent) {
@@ -211,7 +385,7 @@ export default function Chat() {
   }
 
   const fmt = (ts: string) => new Date(ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-  const isMine = (m: ChatMessage) => m.sender_id === employee?.id;
+  const isMine = (senderId: string) => senderId === employee?.id;
   const canSend = isHr || (selectedChannel && !selectedChannel.is_announcement);
 
   const DEPARTMENTS = ["sales", "dev", "marketing", "operations", "design", "other"] as const;
@@ -257,15 +431,12 @@ export default function Chat() {
       if (data) {
         const created = data[0] as ChatChannel;
 
-        // For private/custom channels, insert members into chat_channel_members
         if (newChannelType === "custom" && newChannelMembers.length > 0) {
           const memberRows = newChannelMembers.map(empId => ({ tenant_id: tenantId, channel_id: created.id, employee_id: empId }));
-          // Also add the HR creator as a member
           if (employee?.id && !newChannelMembers.includes(employee.id)) {
             memberRows.push({ tenant_id: tenantId, channel_id: created.id, employee_id: employee.id });
           }
-          const { error: membersError } = await db.from("chat_channel_members").insert(memberRows);
-          if (membersError) console.error("Failed to add members", membersError);
+          await db.from("chat_channel_members").insert(memberRows);
         }
 
         setChannels(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
@@ -301,16 +472,17 @@ export default function Chat() {
     }
   }
 
-  // For custom channels, the employee's membership IDs come from the DB-joined channel data
-  // We rely on the RLS SELECT policy on chat_channels which already filters custom channels
-  // by membership — so fetched channels are already the correct visible set.
   const visibleChannels = isHr
     ? channels
     : channels.filter(c =>
         c.type === "global" ||
         (c.type === "department" && c.target_departments.includes(employee?.department || "")) ||
-        c.type === "custom"  // custom channels are already filtered by RLS
+        c.type === "custom"
       );
+
+  const currentMessages = selectedChannel ? (messagesCache[selectedChannel.id] || []) : [];
+  const currentDraftText = selectedChannel ? (draftTexts[selectedChannel.id] || "") : "";
+  const currentDraftFile = selectedChannel ? draftFiles[selectedChannel.id] : null;
 
   return (
     <section className="flex flex-col md:flex-row h-[calc(100svh-180px)] min-h-[500px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -336,7 +508,7 @@ export default function Chat() {
             {isHr && ch.name !== "general" && (
               <button 
                 onClick={(e) => { e.stopPropagation(); setChannelToDelete(ch); }}
-                className={`p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition hover:bg-rose-50 hover:text-rose-600 ${selectedChannel?.id === ch.id ? "text-white/70 hover:bg-white/20 hover:text-white" : "text-slate-400"}`}
+                className="p-1.5 rounded-lg transition text-slate-400 hover:bg-rose-50 hover:text-rose-600"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -359,57 +531,76 @@ export default function Chat() {
             <div className="flex h-full items-center justify-center text-slate-400">
               Select a channel to start chatting
             </div>
-          ) : loading ? (
-            <div className="py-10 text-center text-sm text-slate-400">Loading messages…</div>
-          ) : messages.length === 0 ? (
+          ) : currentMessages.length === 0 && !loading ? (
             <div className="py-10 flex justify-center">
               <EmptyState icon={MessageSquare} title="No messages yet" description={`Start the conversation in #${selectedChannel.name}. Say hello!`} />
             </div>
           ) : (
-            messages.map((m) => {
-              const mine = isMine(m);
-              return (
-                <div key={m.id} className={`group flex gap-3 ${mine ? "flex-row-reverse" : ""}`}>
-                  {/* Avatar */}
-                  {m.sender?.profile_photo_url ? (
-                    <img src={m.sender.profile_photo_url} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover shadow-sm" />
-                  ) : (
-                    <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-bold shadow-sm ${mine ? "bg-brand-100 text-brand-700" : "bg-slate-100 text-slate-600 border border-slate-200"}`}>
-                      {m.sender?.full_name.slice(0, 2).toUpperCase() ?? "?"}
-                    </div>
-                  )}
+            <>
+              {currentMessages.length >= 50 && (
+                <div className="flex justify-center py-2">
+                  <button 
+                    onClick={() => void loadMore()} 
+                    disabled={loadingMore}
+                    className="text-xs font-semibold text-brand-600 bg-brand-50 hover:bg-brand-100 px-4 py-1.5 rounded-full transition disabled:opacity-50"
+                  >
+                    {loadingMore ? "Loading..." : "Load Older Messages"}
+                  </button>
+                </div>
+              )}
+              {currentMessages.map((m) => {
+                const mine = isMine(m.sender_id);
+                const senderEmp = employees.find(e => e.id === m.sender_id);
+                const isFailed = m.delivery_status === 'failed';
+                const isSending = m.delivery_status === 'sending';
 
-                  <div className={`flex max-w-[75%] flex-col gap-1 ${mine ? "items-end" : "items-start"}`}>
-                    <div className="flex items-baseline gap-2 px-1">
-                      {!mine && <span className="text-xs font-semibold text-slate-700">{m.sender?.full_name ?? "Unknown"}</span>}
-                      <span className="text-[10px] font-medium text-slate-400">{fmt(m.created_at)}</span>
-                    </div>
-                    
-                    <div className={`relative rounded-2xl px-4 py-2 text-sm shadow-sm ${mine ? "rounded-tr-sm bg-brand-600 text-white" : "rounded-tl-sm border border-slate-200 bg-white text-slate-800"}`}>
-                      <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                return (
+                  <div key={m.id} className={`group flex gap-3 ${mine ? "flex-row-reverse" : ""}`}>
+                    {/* Avatar */}
+                    {senderEmp?.profile_photo_url ? (
+                      <img src={senderEmp.profile_photo_url} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover shadow-sm" />
+                    ) : (
+                      <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-bold shadow-sm ${mine ? "bg-brand-100 text-brand-700" : "bg-slate-100 text-slate-600 border border-slate-200"}`}>
+                        {senderEmp?.full_name.slice(0, 2).toUpperCase() ?? "?"}
+                      </div>
+                    )}
+
+                    <div className={`flex max-w-[75%] flex-col gap-1 ${mine ? "items-end" : "items-start"}`}>
+                      <div className="flex items-baseline gap-2 px-1">
+                        {!mine && <span className="text-xs font-semibold text-slate-700">{senderEmp?.full_name ?? "Unknown"}</span>}
+                        <span className="text-[10px] font-medium text-slate-400 flex items-center gap-1">
+                          {fmt(m.created_at)}
+                          {mine && isSending && <Clock className="h-2.5 w-2.5 text-brand-400" />}
+                          {mine && isFailed && <AlertCircle className="h-2.5 w-2.5 text-rose-500" />}
+                        </span>
+                      </div>
                       
-                      {/* Attachment Rendering */}
-                      {m.attachment_url && (
-                        <a href={m.attachment_url} target="_blank" rel="noreferrer"
-                          className={`mt-2 flex items-center gap-2 rounded-lg p-2 text-xs transition ${mine ? "bg-brand-700 hover:bg-brand-800" : "bg-slate-50 border border-slate-100 hover:bg-slate-100"}`}>
-                          <div className={`p-1.5 rounded-md ${mine ? "bg-brand-600" : "bg-white border border-slate-200 text-brand-600"}`}>
-                            <FileText className="h-3 w-3" />
-                          </div>
-                          <span className="font-medium truncate max-w-[200px]">{m.attachment_name || "Attachment"}</span>
-                        </a>
-                      )}
+                      <div className={`relative rounded-2xl px-4 py-2 text-sm shadow-sm transition ${isFailed ? "opacity-70 bg-rose-50 border border-rose-200 text-rose-900" : mine ? "rounded-tr-sm bg-brand-600 text-white" : "rounded-tl-sm border border-slate-200 bg-white text-slate-800"}`}>
+                        <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                        
+                        {/* Attachment Rendering */}
+                        {(m.attachment_url || m.upload_status === 'uploading') && (
+                          <a href={m.attachment_url || "#"} target={m.attachment_url ? "_blank" : "_self"} rel="noreferrer"
+                            className={`mt-2 flex items-center gap-2 rounded-lg p-2 text-xs transition ${mine ? (isFailed ? "bg-rose-100" : "bg-brand-700 hover:bg-brand-800") : "bg-slate-50 border border-slate-100 hover:bg-slate-100"}`}>
+                            <div className={`p-1.5 rounded-md ${mine ? (isFailed ? "bg-rose-200" : "bg-brand-600") : "bg-white border border-slate-200 text-brand-600"}`}>
+                              {m.upload_status === 'uploading' ? <Clock className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+                            </div>
+                            <span className="font-medium truncate max-w-[200px]">{m.attachment_name || "Attachment"}</span>
+                          </a>
+                        )}
 
-                      {mine && (
-                        <button onClick={() => deleteMessage(m.id)}
-                          className="absolute -left-8 top-1.5 hidden rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-500 group-hover:flex transition">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
+                        {mine && !isSending && !isFailed && (
+                          <button onClick={() => deleteMessage(m.id)}
+                            className="absolute -left-8 top-1.5 hidden rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-500 group-hover:flex transition">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })}
+            </>
           )}
           <div ref={bottomRef} />
         </div>
@@ -420,21 +611,21 @@ export default function Chat() {
             <p className="text-center text-sm text-slate-500 py-2 font-medium">Only HR can post in #{selectedChannel?.name}.</p>
           ) : (
             <div className="flex flex-col gap-2">
-              {file && (
+              {currentDraftFile && (
                 <div className="flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs text-brand-700 w-fit">
                   <FileText className="h-3.5 w-3.5" />
-                  <span className="font-medium max-w-[200px] truncate">{file.name}</span>
-                  <button onClick={() => setFile(null)} className="ml-1 text-brand-600 hover:text-rose-600"><X className="h-3.5 w-3.5" /></button>
+                  <span className="font-medium max-w-[200px] truncate">{currentDraftFile.name}</span>
+                  <button onClick={() => setDraftFiles(prev => ({ ...prev, [selectedChannel!.id]: null }))} className="ml-1 text-brand-600 hover:text-rose-600"><X className="h-3.5 w-3.5" /></button>
                 </div>
               )}
               <div className="flex items-end gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500 transition shadow-sm">
                 <button onClick={() => fileInputRef.current?.click()} className="shrink-0 text-slate-400 hover:text-brand-600 pb-0.5 transition">
                   <Paperclip className="h-5 w-5" />
                 </button>
-                <input type="file" className="hidden" ref={fileInputRef} onChange={e => setFile(e.target.files?.[0] || null)} />
+                <input type="file" className="hidden" ref={fileInputRef} onChange={e => selectedChannel && setDraftFiles(prev => ({ ...prev, [selectedChannel.id]: e.target.files?.[0] || null }))} />
                 <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  value={currentDraftText}
+                  onChange={(e) => selectedChannel && setDraftTexts(prev => ({ ...prev, [selectedChannel.id]: e.target.value }))}
                   onKeyDown={handleKey}
                   placeholder={`Message #${selectedChannel?.name || "channel"}…`}
                   rows={1}
@@ -442,7 +633,7 @@ export default function Chat() {
                 />
                 <button
                   onClick={() => void sendMessage()}
-                  disabled={(!input.trim() && !file) || sending}
+                  disabled={(!currentDraftText.trim() && !currentDraftFile) || sending}
                   className="shrink-0 rounded-lg bg-brand-600 p-1.5 text-white hover:bg-brand-700 disabled:opacity-40 transition shadow-sm"
                 >
                   <Send className="h-4.5 w-4.5" />
@@ -578,7 +769,7 @@ export default function Chat() {
                   ))}
               </div>
               {newChannelMembers.length === 0 && (
-                <p className="mt-1.5 text-[11px] text-rose-400 font-medium">Please select at least one employee.</p>
+               <p className="mt-1.5 text-[11px] text-rose-400 font-medium">Please select at least one employee.</p>
               )}
               {newChannelMembers.length > 0 && (
                 <p className="mt-1.5 text-[11px] text-brand-600 font-medium">{newChannelMembers.length} member{newChannelMembers.length > 1 ? "s" : ""} selected (+ you)</p>
