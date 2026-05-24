@@ -3,10 +3,11 @@ import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { Attendance, CalendarEvent, Employee, Holiday, Leave, Task } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
+import { formatLocalDate, formatLocalMonthBoundary, parseLocalDate } from "../utils/date";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const DEPT_OPTIONS = ["all","sales","dev","marketing","operations","design","other"] as const;
-const TODAY = new Date().toISOString().slice(0,10);
+const BLOCKING_TASK_STATES = ["assigned", "in_progress", "rejected"];
 
 type EmpDay = {
   emp: Employee;
@@ -33,27 +34,47 @@ export default function HRCalendar() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
   const [popup, setPopup] = useState<DayPopup|null>(null);
+  const [todayStr, setTodayStr] = useState(() => formatLocalDate(new Date()));
 
-  const startDate = useMemo(() => `${year}-${String(month+1).padStart(2,"0")}-01`, [year,month]);
-  const endDate = useMemo(() => {
-    const d = new Date(year, month+1, 0);
-    return `${year}-${String(month+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-  }, [year,month]);
-
+  // Midnight rollover refresh for long-lived sessions
   useEffect(() => {
-    db.from("employees").select("*").eq("tenant_id", tenantId).eq("status","active").order("full_name")
-      .then(({ data }) => { if (data) setEmployees(data as Employee[]); });
-  }, [tenantId]);
+    const interval = setInterval(() => {
+      const newToday = formatLocalDate(new Date());
+      if (newToday !== todayStr) setTodayStr(newToday);
+    }, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, [todayStr]);
+
+  const startDate = useMemo(() => formatLocalMonthBoundary(year, month, "start"), [year, month]);
+  const endDate = useMemo(() => formatLocalMonthBoundary(year, month, "end"), [year, month]);
+
+
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     const [attQ, leaveQ, evtQ, holQ, taskQ] = await Promise.all([
       db.from("attendance").select("*").eq("tenant_id", tenantId).gte("date",startDate).lte("date",endDate),
-      db.from("leaves").select("*").eq("tenant_id", tenantId).eq("status","approved").gte("start_date",startDate).lte("end_date",endDate),
+      db.from("leaves").select("*").eq("tenant_id", tenantId).eq("status","approved").lte("start_date",endDate).gte("end_date",startDate),
       db.from("calendar_events").select("*").eq("tenant_id", tenantId).gte("date",startDate).lte("date",endDate),
       db.from("holidays").select("*").eq("tenant_id", tenantId).gte("date",startDate).lte("date",endDate),
       db.from("tasks").select("*").eq("tenant_id", tenantId).gte("due_date",startDate).lte("due_date",endDate),
     ]);
+    
+    const involvedIds = new Set<string>();
+    (attQ.data ?? []).forEach(r => involvedIds.add(r.employee_id));
+    (leaveQ.data ?? []).forEach(r => involvedIds.add(r.employee_id));
+    (evtQ.data ?? []).forEach(r => involvedIds.add(r.employee_id));
+    (taskQ.data ?? []).forEach(r => involvedIds.add(r.assigned_to));
+
+    let empQuery = db.from("employees").select("*").eq("tenant_id", tenantId);
+    if (involvedIds.size > 0) {
+      empQuery = empQuery.or(`status.eq.active,id.in.(${Array.from(involvedIds).join(",")})`);
+    } else {
+      empQuery = empQuery.eq("status", "active");
+    }
+    const empQ = await empQuery.order("full_name");
+
+    if (empQ.data) setEmployees(empQ.data as Employee[]);
     setAttendance((attQ.data??[]) as Attendance[]);
     setLeaves((leaveQ.data??[]) as Leave[]);
     setEvents((evtQ.data??[]) as CalendarEvent[]);
@@ -74,8 +95,10 @@ export default function HRCalendar() {
   const leaveByDateEmp = useMemo(() => {
     const m: Record<string,Set<string>> = {};
     leaves.forEach(l => {
-      for (let d = new Date(l.start_date); d <= new Date(l.end_date); d.setDate(d.getDate()+1)) {
-        const k = d.toISOString().slice(0,10);
+      const startLocal = parseLocalDate(l.start_date);
+      const endLocal = parseLocalDate(l.end_date);
+      for (let d = startLocal; d <= endLocal; d.setDate(d.getDate()+1)) {
+        const k = formatLocalDate(d);
         (m[k] ??= new Set()).add(l.employee_id);
       }
     });
@@ -104,23 +127,27 @@ export default function HRCalendar() {
     deptFilter === "all" ? employees : employees.filter(e => e.department === deptFilter),
   [employees, deptFilter]);
 
-  function getEmpStatus(empId: string, dateStr: string): EmpDay["status"] {
+  const getEmpStatus = useCallback((empId: string, dateStr: string): EmpDay["status"] => {
     const hol = holByDate[dateStr];
     if (hol) return "holiday";
     if (leaveByDateEmp[dateStr]?.has(empId)) return "leave";
     const evt = eventByDateEmp[dateStr]?.[empId];
     if (evt?.type === "green") return "approved";
+
+    // 1. Task blocks (Incomplete tasks override present attendance)
+    const dayTasks = tasksByDate[dateStr]?.filter(t => t.assigned_to === empId) ?? [];
+    if (dayTasks.some(t => BLOCKING_TASK_STATES.includes(t.status))) return "incomplete";
+
+    // 2. Attendance
     const att = attByDateEmp[dateStr]?.[empId];
     if (att) {
       if (att.status === "present") return "approved";
       if (att.status === "on_leave") return "leave";
     }
-    // Check if they have a task today that's not approved
-    const dayTasks = tasksByDate[dateStr]?.filter(t => t.assigned_to === empId) ?? [];
-    if (dayTasks.some(t => t.status !== "approved")) return "incomplete";
-    if (dayTasks.length > 0 && dayTasks.every(t => t.status === "approved")) return "approved";
+
+    if (dayTasks.length > 0 && dayTasks.every(t => t.status === "approved" || t.status === "submitted")) return "approved";
     return "absent";
-  }
+  }, [holByDate, leaveByDateEmp, eventByDateEmp, tasksByDate, attByDateEmp]);
 
   function getDotClass(status: EmpDay["status"]) {
     switch (status) {
@@ -133,7 +160,7 @@ export default function HRCalendar() {
   }
 
   function openPopup(day: number) {
-    const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+    const dateStr = formatLocalDate(new Date(year, month, day));
     const hol = holByDate[dateStr] ?? null;
     const empDays: EmpDay[] = visibleEmps.map(emp => ({
       emp, status: getEmpStatus(emp.id, dateStr),
@@ -141,23 +168,23 @@ export default function HRCalendar() {
     setPopup({ date: dateStr, empDays, tasks: tasksByDate[dateStr] ?? [], holiday: hol });
   }
 
-  function getDaySummary(day: number) {
-    const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+  const getDaySummary = useCallback((day: number) => {
+    const dateStr = formatLocalDate(new Date(year, month, day));
     const hol = holByDate[dateStr];
     if (hol) return [{ color:"border-2 border-slate-300 bg-white", count: 1 }];
     const counts: Record<EmpDay["status"],number> = { approved:0,incomplete:0,leave:0,absent:0,holiday:0 };
-    visibleEmps.slice(0,8).forEach(e => { counts[getEmpStatus(e.id,dateStr)]++; });
+    visibleEmps.forEach(e => { counts[getEmpStatus(e.id,dateStr)]++; });
     return (Object.entries(counts) as [EmpDay["status"],number][])
       .filter(([,n]) => n>0)
       .map(([s,n]) => ({ color: getDotClass(s as EmpDay["status"]), count: n }));
-  }
+  }, [year, month, holByDate, visibleEmps, getEmpStatus]);
 
   // --- Today stats ---
-  const todayAtt = useMemo(() => attByDateEmp[TODAY] ?? {}, [attByDateEmp]);
+  const todayAtt = useMemo(() => attByDateEmp[todayStr] ?? {}, [attByDateEmp, todayStr]);
   const presentToday = useMemo(() => Object.values(todayAtt).filter(a=>a.status==="present").length, [todayAtt]);
-  const absentToday = useMemo(() => employees.length - presentToday - (leaveByDateEmp[TODAY]?.size??0), [employees,presentToday,leaveByDateEmp]);
-  const pendingTasksToday = useMemo(() => (tasksByDate[TODAY]??[]).filter(t=>t.status!=="approved").length, [tasksByDate]);
-  const approvedTasksToday = useMemo(() => (tasksByDate[TODAY]??[]).filter(t=>t.status==="approved").length, [tasksByDate]);
+  const absentToday = useMemo(() => employees.length - presentToday - (leaveByDateEmp[todayStr]?.size??0), [employees,presentToday,leaveByDateEmp,todayStr]);
+  const pendingTasksToday = useMemo(() => (tasksByDate[todayStr]??[]).filter(t=>BLOCKING_TASK_STATES.includes(t.status)).length, [tasksByDate, todayStr]);
+  const approvedTasksToday = useMemo(() => (tasksByDate[todayStr]??[]).filter(t=>!BLOCKING_TASK_STATES.includes(t.status)).length, [tasksByDate, todayStr]);
 
   const navMonth = (d: number) => {
     const nd = new Date(year, month+d);
@@ -166,8 +193,7 @@ export default function HRCalendar() {
 
   const firstDow = new Date(year,month,1).getDay();
   const daysInMonth = new Date(year,month+1,0).getDate();
-  const isToday = (day: number) =>
-    `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}` === TODAY;
+  const isToday = (day: number) => formatLocalDate(new Date(year, month, day)) === todayStr;
 
   const empName = (id: string) => employees.find(e=>e.id===id)?.full_name ?? "Unknown";
 
@@ -238,8 +264,8 @@ export default function HRCalendar() {
             const day = i+1;
             const summary = getDaySummary(day);
             const today = isToday(day);
-            const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-            const dow = new Date(dateStr).getDay();
+            const dateStr = formatLocalDate(new Date(year, month, day));
+            const dow = new Date(year, month, day).getDay();
             const isWknd = dow===0||dow===6;
             return (
               <div key={day} onClick={()=>openPopup(day)}
@@ -274,7 +300,7 @@ export default function HRCalendar() {
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
               <div>
                 <h3 className="font-semibold text-slate-900">
-                  {new Date(popup.date+"T00:00:00").toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+                  {parseLocalDate(popup.date).toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
                 </h3>
                 {popup.holiday && <p className="text-xs text-purple-600 mt-0.5">🎉 {popup.holiday.name}</p>}
               </div>

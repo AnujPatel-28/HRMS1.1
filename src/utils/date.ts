@@ -85,3 +85,19 @@ export function formatLocalMonthBoundary(year: number, month: number, bound: "st
     return formatLocalDate(new Date(year, month + 1, 0));
   }
 }
+
+/**
+ * Safely parses a YYYY-MM-DD business date string into a local Date object.
+ * 
+ * Prevents timezone-shift bugs that occur when using `new Date("YYYY-MM-DD")`,
+ * which strictly evaluates to UTC midnight and can shift to the previous
+ * day in negative timezone offsets (like the Americas).
+ *
+ * @example
+ *   parseLocalDate("2026-05-01") // → Local Date object at 00:00:00 on May 1st
+ */
+export function parseLocalDate(dateString: string): Date {
+  if (!dateString) return new Date();
+  const [y, m, d] = dateString.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
