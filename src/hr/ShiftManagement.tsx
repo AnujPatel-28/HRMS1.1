@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Clock, Pencil, Plus, Save, Trash2, Users } from "lucide-react";
+import { AlertTriangle, Clock, Pencil, Plus, Save, Trash2, Users } from "lucide-react";
 import { db } from "../insforge/client";
 import { useTenant } from "../contexts/TenantContext";
 import type { Employee, EmployeeShift, Shift } from "../types";
 import { useToast } from "../shared/ToastContext";
+import { useAuditLog } from "../hooks/useAuditLog";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { ConfirmModal } from "../shared/ConfirmModal";
@@ -177,6 +178,7 @@ function ShiftFormFields({
 export default function ShiftManagement() {
   const { tenantId } = useTenant();
   const { success, error: toastError } = useToast();
+  const { logAction } = useAuditLog();
   const [loading, setLoading] = useState(true);
   const [savingShift, setSavingShift] = useState(false);
   const [savingAssignments, setSavingAssignments] = useState(false);
@@ -313,16 +315,47 @@ export default function ShiftManagement() {
 
   async function deleteShift() {
     if (!tenantId || !deleteTarget?.id) return;
+
+    // ── Guard: block deactivating the last active default shift ─────────────────
+    // If the only default shift is removed, employees with no explicit assignment
+    // silently fall back to raw punch_in_start arithmetic — wrong behavior.
+    if (deleteTarget.is_default) {
+      const remainingActiveDefaults = shifts.filter(
+        (s) => s.is_default && s.is_active !== false && s.id !== deleteTarget.id,
+      );
+      if (remainingActiveDefaults.length === 0) {
+        toastError("Cannot remove the only default shift. Set another shift as default first.");
+        return;
+      }
+    }
+
     setSavingShift(true);
     try {
-      const { error: deleteError } = await db.from("shifts").delete().eq("tenant_id", tenantId).eq("id", deleteTarget.id);
-      if (deleteError) throw deleteError;
-      success("Shift deleted.");
+      // ── Soft-delete: set is_active = false instead of hard DELETE ───────────
+      // Hard DELETE cascades to employee_shifts (ON DELETE CASCADE), wiping all
+      // historical assignments and breaking payroll/attendance reproducibility.
+      // Soft-delete hides the shift from all UI dropdowns (they filter is_active)
+      // while keeping the DB row and all foreign key references intact.
+      const { error: softDeleteError } = await db
+        .from("shifts")
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq("tenant_id", tenantId)
+        .eq("id", deleteTarget.id);
+      if (softDeleteError) throw softDeleteError;
+
+      // Audit log — UTC timestamp intentional for audit records.
+      void logAction("shift.deactivated", "shifts", deleteTarget.id, {
+        shift_name: deleteTarget.name,
+        was_default: deleteTarget.is_default,
+        deactivated_at: new Date().toISOString(),
+      });
+
+      success(`"${deleteTarget.name}" has been deactivated and hidden from assignments.`);
       setDeleteTarget(null);
       await fetchData();
     } catch (err) {
       console.error(err);
-      toastError("Failed to delete shift.");
+      toastError("Failed to deactivate shift.");
     } finally {
       setSavingShift(false);
     }
@@ -333,6 +366,7 @@ export default function ShiftManagement() {
     const today = todayString();
     const tomorrow = tomorrowString();
 
+    // ── Step 1: Close the currently active assignment ─────────────────────────
     if (row.explicitAssignment?.id) {
       const { error: closeError } = await db
         .from("employee_shifts")
@@ -342,6 +376,22 @@ export default function ShiftManagement() {
       if (closeError) throw closeError;
     }
 
+    // ── Step 2: Remove any conflicting future assignment for this exact date ───
+    // The DB has a UNIQUE(tenant_id, employee_id, effective_from) constraint.
+    // If HR changes their mind on the same day, a second insert for tomorrow would
+    // violate the constraint. We delete the conflicting row first so this op is
+    // idempotent — retries and concurrent actions won't create duplicates.
+    // We only delete for `effective_from = tomorrow`, not all future rows, to
+    // preserve intentionally pre-scheduled assignments for other future dates.
+    const { error: cleanupError } = await db
+      .from("employee_shifts")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .eq("employee_id", row.employee.id)
+      .eq("effective_from", tomorrow);
+    if (cleanupError) throw cleanupError;
+
+    // ── Step 3: Insert the new assignment effective tomorrow ──────────────────
     const { error: insertError } = await db.from("employee_shifts").insert([{
       tenant_id: tenantId,
       employee_id: row.employee.id,
@@ -355,11 +405,22 @@ export default function ShiftManagement() {
     setSavingAssignments(true);
     try {
       await scheduleShiftChange(row, newShiftId);
+
+      // Audit log — non-blocking, failure never surfaces to user.
+      void logAction("shift.assignment", "employee_shifts", row.employee.id, {
+        employee_name: row.employee.full_name,
+        old_shift_id: row.currentShift?.id ?? null,
+        old_shift_name: row.currentShift?.name ?? null,
+        new_shift_id: newShiftId,
+        effective_from: tomorrowString(),
+        assigned_at: new Date().toISOString(),
+      });
+
       success("Shift change scheduled for tomorrow.");
       await fetchData();
     } catch (err) {
       console.error(err);
-      toastError("Failed to change employee shift.");
+      toastError(err instanceof Error ? err.message : "Failed to change employee shift.");
     } finally {
       setSavingAssignments(false);
     }
@@ -377,18 +438,61 @@ export default function ShiftManagement() {
       return;
     }
 
+    // ── Per-employee error isolation ─────────────────────────────────────────
+    // The previous implementation aborted the entire loop on the first failure,
+    // leaving partial assignments with no visibility into which succeeded or failed.
+    // We now run each employee's assignment in its own try/catch so:
+    //   1. Failures never cancel remaining employees.
+    //   2. HR sees a detailed summary of successes and failures.
+    //   3. Retries are idempotent — scheduleShiftChange cleans up future conflicts.
+    const succeeded: string[] = [];
+    const failed: { name: string; reason: string }[] = [];
+    const effectiveFrom = tomorrowString();
+    const newShift = shifts.find((s) => s.id === bulkShiftId);
+
     setSavingAssignments(true);
     try {
       for (const row of selectedRows) {
-        await scheduleShiftChange(row, bulkShiftId);
+        try {
+          await scheduleShiftChange(row, bulkShiftId);
+          succeeded.push(row.employee.full_name);
+        } catch (err) {
+          console.error(`Bulk assignment failed for ${row.employee.full_name}:`, err);
+          failed.push({
+            name: row.employee.full_name,
+            reason: err instanceof Error ? err.message : "Unknown error",
+          });
+        }
       }
-      success("Bulk shift changes scheduled for tomorrow.");
+
+      // ── Show detailed summary to HR ────────────────────────────────────────
+      if (failed.length === 0) {
+        success(
+          `${succeeded.length} employee${succeeded.length !== 1 ? "s" : ""} scheduled for "${
+            newShift?.name ?? bulkShiftId
+          }" from tomorrow.`,
+        );
+      } else {
+        const failureDetails = failed.map((f) => `${f.name} (${f.reason})`).join("; ");
+        toastError(
+          `${succeeded.length} succeeded, ${failed.length} failed. Failed: ${failureDetails}`,
+        );
+      }
+
+      // ── Audit log for the entire bulk operation ────────────────────────────
+      // Non-blocking. Includes succeeded + failed lists for full traceability.
+      void logAction("shift.bulk_assignment", "shifts", bulkShiftId, {
+        new_shift_id: bulkShiftId,
+        new_shift_name: newShift?.name ?? bulkShiftId,
+        effective_from: effectiveFrom,
+        initiated_at: new Date().toISOString(),
+        succeeded_employees: succeeded,
+        failed_employees: failed,
+      });
+
       setSelectedEmployees({});
       setBulkShiftId("");
       await fetchData();
-    } catch (err) {
-      console.error(err);
-      toastError("Failed to apply bulk shift assignment.");
     } finally {
       setSavingAssignments(false);
     }
@@ -515,6 +619,22 @@ export default function ShiftManagement() {
                         <tr key={`${shift.id}-edit`}>
                           <td colSpan={7} className="bg-slate-50 px-4 py-4">
                             <div className="rounded-xl border border-slate-200 bg-white p-4">
+                              {/* ── Historical shift warning ───────────────────────────────────────
+                                   Editing start/end times retroactively affects how resolveShiftStartTime
+                                   resolves past attendance (it queries shifts live by id, not at-punch-time).
+                                   Show a non-blocking warning so HR is aware before saving. */}
+                              {employeeAssignments.some(
+                                (a) => a.shift_id === shift.id && a.effective_from < todayString(),
+                              ) && (
+                                <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                                  <span>
+                                    <strong>Historical shift:</strong> This shift has been used in past assignments.
+                                    Editing its times or working days may affect how past attendance and lateness
+                                    calculations are displayed. Consider creating a new shift instead.
+                                  </span>
+                                </div>
+                              )}
                               <ShiftFormFields form={editingShiftForm} onChange={setEditingShiftForm} />
                               <div className="mt-4 flex justify-end gap-3">
                                 <button
