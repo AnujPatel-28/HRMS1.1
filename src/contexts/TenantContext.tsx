@@ -70,6 +70,15 @@ const isLocalhost = (hostname: string) =>
 const getSubdomain = (hostname: string): string | null => {
   if (isLocalhost(hostname)) return null;
 
+  // Local development with tenant subdomains (e.g. talentmesh.localhost)
+  if (hostname.endsWith(".localhost")) {
+    const labels = hostname.split(".");
+    if (labels.length === 2) {
+      return labels[0]; // Returns "talentmesh"
+    }
+    return null;
+  }
+
   const labels = hostname.split(".").filter(Boolean);
 
   if (BASE_DOMAIN) {
@@ -92,13 +101,11 @@ const getSubdomain = (hostname: string): string | null => {
     }
     
     if (import.meta.env.DEV) {
-      console.log(`[Tenant Debug] No tenant detected for hostname: "${hostname}". Base domain is: "${BASE_DOMAIN}"`);
+      console.log(`[Tenant Debug] Hostname "${hostname}" does not match exact BASE_DOMAIN "${BASE_DOMAIN}". Trying fallback.`);
     }
-    
-    return null;
   }
 
-  // Fallback if VITE_BASE_DOMAIN is completely missing in .env
+  // Fallback: extract the first label if we have 3 or more (e.g. talentmesh.talentmeshsolutions.com)
   return labels.length >= 3 ? labels[0] : null;
 };
 
