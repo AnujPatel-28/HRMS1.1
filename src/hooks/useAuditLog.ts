@@ -57,6 +57,18 @@ export function useAuditLog() {
       // If still no tenant_id, we can't insert because tenant_id is NOT NULL in the table schema
       if (!currentTenantId) return;
 
+      let currentEmployeeId = details?.actor_employee_id;
+      if (!currentEmployeeId && currentActorId && currentTenantId) {
+        const { data } = await db.from("employees").select("id").eq("user_id", currentActorId).eq("tenant_id", currentTenantId).maybeSingle();
+        if (data) currentEmployeeId = data.id;
+      }
+
+      const enrichedDetails = {
+        ...(details || {}),
+        actor_employee_id: currentEmployeeId || null,
+        actor_role: currentRole || "unknown",
+      };
+
       await db.from("audit_logs").insert([{
         tenant_id: currentTenantId,
         actor_id: currentActorId || null,
@@ -64,7 +76,7 @@ export function useAuditLog() {
         action,
         target_type: targetType || null,
         target_id: targetId || null,
-        details: details || null,
+        details: enrichedDetails,
         ip_address
       }]);
     } catch (err) {

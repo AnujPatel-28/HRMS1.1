@@ -101,3 +101,27 @@ export function parseLocalDate(dateString: string): Date {
   const [y, m, d] = dateString.split("-").map(Number);
   return new Date(y, m - 1, d);
 }
+
+/**
+ * Returns the current date in the given IANA timezone.
+ */
+export function getTenantNow(timezone: string = "UTC"): Date {
+  // A robust way to get current time in a specific timezone as a Date object representing that local time
+  const str = new Date().toLocaleString("en-US", { timeZone: timezone });
+  return new Date(str);
+}
+
+/**
+ * Returns a YYYY-MM-DD string for the current date in the tenant timezone.
+ */
+export function getTenantDate(timezone: string = "UTC"): string {
+  const date = getTenantNow(timezone);
+  return formatLocalDate(date);
+}
+
+/**
+ * Returns the 4-digit year for the current date in the tenant timezone.
+ */
+export function getTenantYear(timezone: string = "UTC"): number {
+  return getTenantNow(timezone).getFullYear();
+}

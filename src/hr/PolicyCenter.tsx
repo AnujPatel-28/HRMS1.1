@@ -7,7 +7,8 @@ import { useAuditLog } from "../hooks/useAuditLog";
 import { Skeleton } from "../shared/Skeleton";
 import { useToast } from "../shared/ToastContext";
 import LocationMap from "../shared/LocationMap";
-import { formatLocalDate } from "../utils/date";
+import { getTenantDate, getTenantYear } from "../utils/date";
+import { validateAttendancePolicy, validateTaskPolicy, validateLeavePolicy, validateSalaryPolicy, validateLeaveType } from "../utils/policyValidation";
 
 type TabKey = "attendance" | "leave" | "salary" | "task" | "company";
 
@@ -22,7 +23,7 @@ type TenantForm = {
   punch_out_gate_enabled: boolean;
 };
 
-type AttendancePolicyForm = {
+export type AttendancePolicyForm = {
   late_mark_enabled: boolean;
   late_mark_grace_minutes: string;
   late_mark_threshold: string;
@@ -38,12 +39,12 @@ type AttendancePolicyForm = {
   regularization_window_days: string;
 };
 
-type LeavePolicyForm = {
+export type LeavePolicyForm = {
   leave_min_notice_days: string;
   leave_carry_forward: boolean;
 };
 
-type SalaryPolicyForm = {
+export type SalaryPolicyForm = {
   lop_calculation_method: "calendar" | "fixed_26" | "working_days";
   pf_wage_ceiling: string;
   esi_gross_ceiling: string;
@@ -51,7 +52,7 @@ type SalaryPolicyForm = {
   professional_tax_manual_amount: string;
 };
 
-type TaskPolicyForm = {
+export type TaskPolicyForm = {
   punch_out_gate_enabled: boolean;
   task_eod_redmark_time: string;
   task_grace_period_minutes: string;
@@ -93,7 +94,7 @@ type SalaryTemplate = {
   esi_applicable: boolean;
 };
 
-type LeaveTypeForm = {
+export type LeaveTypeForm = {
   id: string | null;
   name: string;
   code: string;
@@ -108,6 +109,7 @@ type LeaveTypeForm = {
   minimum_notice_days: string;
   maximum_consecutive_days: string;
   is_active: boolean;
+  updated_at: string | null;
 };
 
 type SalaryTemplateForm = {
@@ -190,6 +192,7 @@ const defaultLeaveTypeForm: LeaveTypeForm = {
   minimum_notice_days: "0",
   maximum_consecutive_days: "",
   is_active: true,
+  updated_at: null,
 };
 
 const defaultSalaryTemplateForm: SalaryTemplateForm = {
@@ -348,6 +351,7 @@ export default function PolicyCenter() {
   const [leaveTypeModalOpen, setLeaveTypeModalOpen] = useState(false);
   const [leaveTypeForm, setLeaveTypeForm] = useState<LeaveTypeForm>(defaultLeaveTypeForm);
   const [salaryTemplateModalOpen, setSalaryTemplateModalOpen] = useState(false);
+  const [salaryTemplateIsEditing, setSalaryTemplateIsEditing] = useState(false);
   const [salaryTemplateForm, setSalaryTemplateForm] = useState<SalaryTemplateForm>(defaultSalaryTemplateForm);
 
   const [baselineTenantForm, setBaselineTenantForm] = useState(defaultTenantForm);
@@ -355,11 +359,14 @@ export default function PolicyCenter() {
   const [baselineLeavePolicy, setBaselineLeavePolicy] = useState(defaultLeavePolicy);
   const [baselineSalaryPolicy, setBaselineSalaryPolicy] = useState(defaultSalaryPolicy);
   const [baselineTaskPolicy, setBaselineTaskPolicy] = useState(defaultTaskPolicy);
+  const [tenantUpdatedAt, setTenantUpdatedAt] = useState<string | null>(null);
+  const [settingUpdatedAtMap, setSettingUpdatedAtMap] = useState<Record<string, string>>({});
+  const [showDryRun, setShowDryRun] = useState(false);
+  const [dryRunStats, setDryRunStats] = useState({ total: 0, existing: 0, new: 0, targetYear: 0 });
 
-  const currentYear = new Date().getFullYear();
   // Business-calendar date for shift assignment queries.
   // Must be local timezone — not toISOString() which returns UTC date.
-  const today = formatLocalDate(new Date());
+  const today = getTenantDate(tenantForm.timezone || "UTC");
 
   const logoPreview = useMemo(() => {
     if (logoFile) return URL.createObjectURL(logoFile);
@@ -398,7 +405,7 @@ export default function PolicyCenter() {
           .lte("effective_from", today)
           .or(`effective_to.is.null,effective_to.gte.${today}`),
         db.from("employees").select("id").eq("tenant_id", tenantId).eq("status", "active"),
-        db.from("leave_balances").select("id,employee_id,leave_type_id,year").eq("tenant_id", tenantId).eq("year", currentYear),
+        db.from("leave_balances").select("id,employee_id,leave_type_id,year").eq("tenant_id", tenantId),
       ]);
 
       if (tenantRes.error) throw tenantRes.error;
@@ -410,7 +417,14 @@ export default function PolicyCenter() {
       if (leaveBalancesRes.error) throw leaveBalancesRes.error;
 
       const tenantData = tenantRes.data as Partial<TenantForm> | null;
-      const settings = settingMap((settingsRes.data ?? []) as { key: string; value: string }[]);
+      const rawSettings = (settingsRes.data ?? []) as { key: string; value: string; updated_at?: string }[];
+      const settings = settingMap(rawSettings);
+      
+      const newSettingUpdatedAtMap: Record<string, string> = {};
+      for (const row of rawSettings) {
+        if (row.updated_at) newSettingUpdatedAtMap[row.key] = row.updated_at;
+      }
+      
       const nextTenantForm: TenantForm = {
         company_name: String(tenantData?.company_name ?? defaultTenantForm.company_name),
         logo_url: String(tenantData?.logo_url ?? ""),
@@ -479,6 +493,8 @@ export default function PolicyCenter() {
       setBaselineLeavePolicy(nextLeavePolicy);
       setBaselineSalaryPolicy(nextSalaryPolicy);
       setBaselineTaskPolicy(nextTaskPolicy);
+      setTenantUpdatedAt((tenantRes.data as any)?.updated_at || null);
+      setSettingUpdatedAtMap(newSettingUpdatedAtMap);
       setLeaveTypes(nextLeaveTypes);
       setShiftCount(shiftRows.length);
       setCustomShiftEmployeeCount(new Set(customAssignments.map((assignment) => assignment.employee_id)).size);
@@ -495,7 +511,7 @@ export default function PolicyCenter() {
     } finally {
       setLoading(false);
     }
-  }, [currentYear, tenantId, toastError, today]);
+  }, [tenantId, toastError, today]);
 
   useEffect(() => {
     void loadPolicyCenter();
@@ -507,16 +523,17 @@ export default function PolicyCenter() {
     if (activeEmployeeIds.length === 0 || activeLeaveTypes.length === 0) {
       return { initializedEmployees: 0, totalEmployees: activeEmployeeIds.length };
     }
+    const displayYear = getTenantYear(tenantForm.timezone || "UTC");
     const balanceKeys = new Set(
       leaveBalanceRows
-        .filter((row) => row.year === currentYear)
+        .filter((row) => row.year === displayYear)
         .map((row) => `${row.employee_id}:${row.leave_type_id}`),
     );
     const initializedEmployees = activeEmployeeIds.filter((employeeId) =>
       activeLeaveTypes.every((leaveType) => balanceKeys.has(`${employeeId}:${leaveType.id}`)),
     ).length;
     return { initializedEmployees, totalEmployees: activeEmployeeIds.length };
-  }, [activeEmployeeIds, activeLeaveTypes, currentYear, leaveBalanceRows]);
+  }, [activeEmployeeIds, activeLeaveTypes, tenantForm.timezone, leaveBalanceRows]);
 
   const attendancePreviewText = useMemo(() => {
     const threshold = Number(attendancePolicy.late_mark_threshold || 0);
@@ -541,9 +558,33 @@ export default function PolicyCenter() {
 
   function handleTabChange(nextTab: TabKey) {
     if (nextTab !== activeTab && dirtyTabs.size > 0) {
+      toastError(`Please save your changes in the ${Array.from(dirtyTabs).join(", ")} tab(s) before switching.`);
       setShowUnsavedBanner(true);
+      return;
     }
     setActiveTab(nextTab);
+  }
+
+  function handleInitializeClick() {
+    const freshYear = getTenantYear(tenantForm.timezone || "UTC");
+    const existingKeys = new Set(
+      leaveBalanceRows
+        .filter((row) => row.year === freshYear)
+        .map((row) => `${row.employee_id}:${row.leave_type_id}`),
+    );
+    let newCount = 0;
+    let existingCount = 0;
+    for (const emp of activeEmployeeIds) {
+      for (const lt of activeLeaveTypes) {
+        if (existingKeys.has(`${emp}:${lt.id}`)) {
+          existingCount++;
+        } else {
+          newCount++;
+        }
+      }
+    }
+    setDryRunStats({ total: activeEmployeeIds.length * activeLeaveTypes.length, existing: existingCount, new: newCount, targetYear: freshYear });
+    setShowDryRun(true);
   }
 
   async function uploadLogo() {
@@ -557,38 +598,80 @@ export default function PolicyCenter() {
 
   async function saveSettingRows(rows: { key: string; value: string }[], section: string, successMessage: string, tab: TabKey) {
     if (!tenantId) return;
-    const payload = rows.map((row) => ({
-      tenant_id: tenantId,
-      key: row.key,
-      value: row.value,
-      updated_at: new Date().toISOString(),
-    }));
-    const { error: upsertError } = await db.from("tenant_settings").upsert(payload, { onConflict: "tenant_id,key" });
-    if (upsertError) throw upsertError;
+    
+    const keys = rows.map((r) => r.key);
+    const { data: currentSettings, error: fetchError } = await db
+      .from("tenant_settings")
+      .select("key, updated_at")
+      .eq("tenant_id", tenantId)
+      .in("key", keys);
+    if (fetchError) throw fetchError;
+
+    const currentMap = new Map((currentSettings || []).map(s => [s.key, s.updated_at]));
+    for (const key of keys) {
+      if (currentMap.has(key) && currentMap.get(key) !== settingUpdatedAtMap[key]) {
+        throw new Error("STALE_WRITE");
+      }
+    }
+
+    const now = new Date().toISOString();
+    for (const row of rows) {
+      if (currentMap.has(row.key)) {
+        const { error: updateError } = await db
+          .from("tenant_settings")
+          .update({ value: row.value, updated_at: now })
+          .eq("tenant_id", tenantId)
+          .eq("key", row.key)
+          .eq("updated_at", settingUpdatedAtMap[row.key] as string);
+        if (updateError) throw updateError;
+      } else {
+        const { error: insertError } = await db
+          .from("tenant_settings")
+          .insert([{ tenant_id: tenantId, key: row.key, value: row.value, updated_at: now }]);
+        if (insertError) throw insertError;
+      }
+    }
+
+    const nextSettingMap = { ...settingUpdatedAtMap };
+    for (const key of keys) nextSettingMap[key] = now;
+    setSettingUpdatedAtMap(nextSettingMap);
+
     void logAction("settings.updated", "tenant", tenantId, { section });
     success(successMessage);
     if (tab === "attendance") setBaselineAttendancePolicy(attendancePolicy);
     if (tab === "leave") setBaselineLeavePolicy(leavePolicy);
     if (tab === "salary") setBaselineSalaryPolicy(salaryPolicy);
     if (tab === "task") setBaselineTaskPolicy(taskPolicy);
+    dirtyTabs.delete(tab);
     setShowUnsavedBanner(false);
   }
 
   async function saveAttendancePolicy() {
     if (!tenantId) return;
+
+    const validation = validateAttendancePolicy(attendancePolicy);
+    if (!validation.valid) {
+      toastError(Object.values(validation.errors)[0]);
+      return;
+    }
+
     setSavingTab("attendance");
     try {
-      const { error: tenantUpdateError } = await db
-        .from("tenants")
-        .update({
-          punch_in_start: tenantForm.punch_in_start,
-          punch_in_cutoff: tenantForm.punch_in_cutoff,
-          work_hours_per_day: Number(tenantForm.work_hours_per_day || defaultTenantForm.work_hours_per_day),
-          lunch_break_minutes: Number(tenantForm.lunch_break_minutes || defaultTenantForm.lunch_break_minutes),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", tenantId);
+      let query = db.from("tenants").update({
+        punch_in_start: tenantForm.punch_in_start,
+        punch_in_cutoff: tenantForm.punch_in_cutoff,
+        work_hours_per_day: Number(tenantForm.work_hours_per_day || defaultTenantForm.work_hours_per_day),
+        lunch_break_minutes: Number(tenantForm.lunch_break_minutes || defaultTenantForm.lunch_break_minutes),
+        updated_at: new Date().toISOString(),
+      }).eq("id", tenantId);
+      
+      if (tenantUpdatedAt) query = query.eq("updated_at", tenantUpdatedAt);
+      
+      const { data: updateData, error: tenantUpdateError } = await query.select("updated_at").maybeSingle();
       if (tenantUpdateError) throw tenantUpdateError;
+      if (tenantUpdatedAt && !updateData) throw new Error("STALE_WRITE");
+      
+      setTenantUpdatedAt(updateData.updated_at);
       await saveSettingRows([
         { key: "late_mark_enabled", value: String(attendancePolicy.late_mark_enabled) },
         { key: "late_mark_grace_minutes", value: attendancePolicy.late_mark_grace_minutes || "0" },
@@ -612,15 +695,24 @@ export default function PolicyCenter() {
         work_hours_per_day: tenantForm.work_hours_per_day,
         lunch_break_minutes: tenantForm.lunch_break_minutes,
       }));
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toastError("Failed to save attendance policy.");
+      if (err.message === "STALE_WRITE") {
+        toastError("Another admin has modified these settings. Please refresh.");
+      } else {
+        toastError("Failed to save attendance policy.");
+      }
     } finally {
       setSavingTab(null);
     }
   }
 
   async function saveLeavePolicy() {
+    const validation = validateLeavePolicy(leavePolicy);
+    if (!validation.valid) {
+      toastError(Object.values(validation.errors)[0]);
+      return;
+    }
     setSavingTab("leave");
     try {
       await saveSettingRows([
@@ -636,6 +728,11 @@ export default function PolicyCenter() {
   }
 
   async function saveSalaryPolicy() {
+    const validation = validateSalaryPolicy(salaryPolicy);
+    if (!validation.valid) {
+      toastError(Object.values(validation.errors)[0]);
+      return;
+    }
     setSavingTab("salary");
     try {
       await saveSettingRows([
@@ -655,25 +752,40 @@ export default function PolicyCenter() {
 
   async function saveTaskPolicy() {
     if (!tenantId) return;
+
+    const validation = validateTaskPolicy(taskPolicy);
+    if (!validation.valid) {
+      toastError(Object.values(validation.errors)[0]);
+      return;
+    }
+
     setSavingTab("task");
     try {
-      const { error: tenantUpdateError } = await db
-        .from("tenants")
-        .update({
-          punch_out_gate_enabled: taskPolicy.punch_out_gate_enabled,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", tenantId);
+      let query = db.from("tenants").update({
+        punch_out_gate_enabled: taskPolicy.punch_out_gate_enabled,
+        updated_at: new Date().toISOString(),
+      }).eq("id", tenantId);
+      
+      if (tenantUpdatedAt) query = query.eq("updated_at", tenantUpdatedAt);
+      
+      const { data: updateData, error: tenantUpdateError } = await query.select("updated_at").maybeSingle();
       if (tenantUpdateError) throw tenantUpdateError;
+      if (tenantUpdatedAt && !updateData) throw new Error("STALE_WRITE");
+      
+      setTenantUpdatedAt(updateData.updated_at);
       await saveSettingRows([
         { key: "task_eod_redmark_time", value: taskPolicy.task_eod_redmark_time || "23:30" },
         { key: "task_grace_period_minutes", value: taskPolicy.task_grace_period_minutes || "0" },
       ], "task-policy", "Task policy saved", "task");
       await refreshTenant();
       setBaselineTenantForm((current) => ({ ...current, punch_out_gate_enabled: taskPolicy.punch_out_gate_enabled }));
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toastError("Failed to save task policy.");
+      if (err.message === "STALE_WRITE") {
+        toastError("Another admin has modified these settings. Please refresh.");
+      } else {
+        toastError("Failed to save task policy.");
+      }
     } finally {
       setSavingTab(null);
     }
@@ -682,18 +794,43 @@ export default function PolicyCenter() {
   async function saveCompanyProfile() {
     if (!tenantId) return;
     setSavingTab("company");
+    const oldLogoUrl = baselineTenantForm.logo_url;
+    let logoUrl: string | null = null;
     try {
-      const logoUrl = await uploadLogo();
-      const { error: tenantUpdateError } = await db
-        .from("tenants")
-        .update({
-          company_name: tenantForm.company_name.trim(),
-          logo_url: logoUrl,
-          timezone: tenantForm.timezone,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", tenantId);
+      logoUrl = await uploadLogo();
+      
+      let query = db.from("tenants").update({
+        company_name: tenantForm.company_name.trim(),
+        logo_url: logoUrl,
+        timezone: tenantForm.timezone,
+        updated_at: new Date().toISOString(),
+      }).eq("id", tenantId);
+      
+      if (tenantUpdatedAt) query = query.eq("updated_at", tenantUpdatedAt);
+      
+      const { data: updateData, error: tenantUpdateError } = await query.select("updated_at").maybeSingle();
       if (tenantUpdateError) throw tenantUpdateError;
+      if (tenantUpdatedAt && !updateData) throw new Error("STALE_WRITE");
+      
+      setTenantUpdatedAt(updateData.updated_at);
+      
+      // Cleanup orphaned logo strictly bounded to this tenant
+      if (logoUrl && oldLogoUrl && oldLogoUrl !== logoUrl) {
+        try {
+          const urlObj = new URL(oldLogoUrl);
+          const pathSegments = urlObj.pathname.split('/');
+          const bucketIndex = pathSegments.indexOf('company-assets');
+          if (bucketIndex !== -1 && bucketIndex < pathSegments.length - 1) {
+            const pathInBucket = pathSegments.slice(bucketIndex + 1).join('/');
+            if (pathInBucket.startsWith(`${tenantId}/`)) {
+              await (storage.from("company-assets").remove as any)([pathInBucket]);
+            }
+          }
+        } catch (cleanupError) {
+          console.error("Non-fatal: failed to clean up old logo", cleanupError);
+        }
+      }
+
       const nextTenantForm = { ...tenantForm, logo_url: logoUrl ?? "" };
       setTenantForm(nextTenantForm);
       setBaselineTenantForm((current) => ({ ...current, company_name: nextTenantForm.company_name, logo_url: nextTenantForm.logo_url, timezone: nextTenantForm.timezone }));
@@ -702,9 +839,31 @@ export default function PolicyCenter() {
       await refreshTenant();
       void logAction("settings.updated", "tenant", tenantId, { section: "company" });
       success("Company profile saved.");
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toastError("Failed to save company profile.");
+      
+      // Cleanup orphaned logo on ANY failure (STALE_WRITE, Network disconnect, 500s)
+      if (typeof logoUrl === 'string' && logoUrl && logoUrl !== oldLogoUrl) {
+        try {
+          const urlObj = new URL(logoUrl);
+          const pathSegments = urlObj.pathname.split('/');
+          const bucketIndex = pathSegments.indexOf('company-assets');
+          if (bucketIndex !== -1 && bucketIndex < pathSegments.length - 1) {
+            const pathInBucket = pathSegments.slice(bucketIndex + 1).join('/');
+            if (pathInBucket.startsWith(`${tenantId}/`)) {
+              await (storage.from("company-assets").remove as any)([pathInBucket]);
+            }
+          }
+        } catch (cleanupError) {
+          console.error("Non-fatal: failed to clean up new logo after failed save", cleanupError);
+        }
+      }
+
+      if (err.message === "STALE_WRITE") {
+        toastError("Another admin has modified these settings. Please refresh.");
+      } else {
+        toastError("Failed to save company profile.");
+      }
     } finally {
       setSavingTab(null);
     }
@@ -727,6 +886,7 @@ export default function PolicyCenter() {
         minimum_notice_days: String(leaveType.min_notice_days ?? 0),
         maximum_consecutive_days: leaveType.max_consecutive_days != null ? String(leaveType.max_consecutive_days) : "",
         is_active: leaveType.is_active,
+        updated_at: leaveType.updated_at || null,
       });
     } else {
       setLeaveTypeForm(defaultLeaveTypeForm);
@@ -736,6 +896,13 @@ export default function PolicyCenter() {
 
   async function saveLeaveType() {
     if (!tenantId) return;
+    
+    const validation = validateLeaveType(leaveTypeForm as any);
+    if (!validation.valid) {
+      toastError(Object.values(validation.errors)[0]);
+      return;
+    }
+
     setSavingTab("leave-type");
     try {
       const payload = {
@@ -756,10 +923,12 @@ export default function PolicyCenter() {
       };
 
       if (leaveTypeForm.id) {
-        const { error: updateError } = await db.from("leave_types").update({ ...payload, updated_at: new Date().toISOString() }).eq("tenant_id", tenantId).eq("id", leaveTypeForm.id);
+        const now = new Date().toISOString();
+        const { data: updateData, error: updateError } = await db.from("leave_types").update({ ...payload, updated_at: now }).eq("tenant_id", tenantId).eq("id", leaveTypeForm.id).eq("updated_at", leaveTypeForm.updated_at as string).select("id").maybeSingle();
         if (updateError) throw updateError;
+        if (leaveTypeForm.updated_at && !updateData) throw new Error("STALE_WRITE");
       } else {
-        const { error: insertError } = await db.from("leave_types").insert([{ ...payload }]);
+        const { error: insertError } = await db.from("leave_types").insert([{ ...payload, updated_at: new Date().toISOString() }]);
         if (insertError) throw insertError;
       }
 
@@ -767,9 +936,13 @@ export default function PolicyCenter() {
       setLeaveTypeModalOpen(false);
       setLeaveTypeForm(defaultLeaveTypeForm);
       void loadPolicyCenter();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toastError("Failed to save leave type.");
+      if (err.message === "STALE_WRITE") {
+        toastError("Another admin has modified this leave type. Please refresh.");
+      } else {
+        toastError("Failed to save leave type.");
+      }
     } finally {
       setSavingTab(null);
     }
@@ -800,7 +973,7 @@ export default function PolicyCenter() {
         { name: "Sick Leave", code: "SL", days_per_year: 6, accrual_type: "lump_sum" as const },
         { name: "Earned Leave", code: "EL", days_per_year: 15, accrual_type: "monthly" as const },
       ];
-      const { error: insertError } = await db.from("leave_types").insert(defaults.map((item) => ({
+      const { error: upsertError } = await db.from("leave_types").upsert(defaults.map((item) => ({
         tenant_id: tenantId,
         ...item,
         carry_forward_enabled: item.code === "EL",
@@ -812,8 +985,8 @@ export default function PolicyCenter() {
         min_notice_days: 0,
         max_consecutive_days: null,
         is_active: true,
-      })));
-      if (insertError) throw insertError;
+      })), { onConflict: "tenant_id,code", ignoreDuplicates: true });
+      if (upsertError) throw upsertError;
       success("Default leave types created.");
       void loadPolicyCenter();
     } catch (err) {
@@ -828,32 +1001,38 @@ export default function PolicyCenter() {
     if (!tenantId) return;
     setSavingTab("leave-balances");
     try {
+      const { data: freshEmployees, error: empError } = await db.from("employees").select("id").eq("tenant_id", tenantId).eq("status", "active");
+      if (empError) throw empError;
+      const liveEmployeeIds = (freshEmployees || []).map(e => e.id);
+
+      const targetYear = dryRunStats.targetYear;
       const existingKeys = new Set(
         leaveBalanceRows
-          .filter((row) => row.year === currentYear)
+          .filter((row) => row.year === targetYear)
           .map((row) => `${row.employee_id}:${row.leave_type_id}`),
       );
-      const rowsToInsert = activeEmployeeIds.flatMap((employeeId) =>
+      const rowsToInsert = liveEmployeeIds.flatMap((employeeId) =>
         activeLeaveTypes
           .filter((leaveType) => !existingKeys.has(`${employeeId}:${leaveType.id}`))
           .map((leaveType) => ({
             tenant_id: tenantId,
             employee_id: employeeId,
             leave_type_id: leaveType.id,
-            year: currentYear,
+            year: targetYear,
             total_allocated: leaveType.days_per_year,
             used_days: 0,
             carried_forward: 0,
-            balance: leaveType.days_per_year,
+            balance: leaveType.accrual_type === "monthly" ? 0 : leaveType.days_per_year,
           })),
       );
 
       if (rowsToInsert.length > 0) {
-        const { error: insertError } = await db.from("leave_balances").insert(rowsToInsert);
+        const { error: insertError } = await db.from("leave_balances").upsert(rowsToInsert, { onConflict: "tenant_id,employee_id,leave_type_id,year", ignoreDuplicates: true });
         if (insertError) throw insertError;
       }
 
       success(`Leave balances set up for ${rowsToInsert.length} employee-leave combinations.`);
+      setShowDryRun(false);
       void loadPolicyCenter();
     } catch (err) {
       console.error(err);
@@ -866,6 +1045,7 @@ export default function PolicyCenter() {
   function openSalaryTemplateModal(department?: string) {
     const template = department ? salaryTemplates[department] : null;
     if (template) {
+      setSalaryTemplateIsEditing(true);
       setSalaryTemplateForm({
         department,
         basic_percent: String(template.basic_percent),
@@ -875,6 +1055,7 @@ export default function PolicyCenter() {
         esi_applicable: template.esi_applicable,
       });
     } else {
+      setSalaryTemplateIsEditing(false);
       setSalaryTemplateForm(defaultSalaryTemplateForm);
     }
     setSalaryTemplateModalOpen(true);
@@ -882,6 +1063,10 @@ export default function PolicyCenter() {
 
   async function saveSalaryTemplate() {
     if (!tenantId) return;
+    if (!salaryTemplateIsEditing && salaryTemplates[salaryTemplateForm.department]) {
+      toastError(`A template for the ${salaryTemplateForm.department} department already exists. Please edit the existing one.`);
+      return;
+    }
     setSavingTab("salary-template");
     try {
       const template: SalaryTemplate = {
@@ -893,20 +1078,41 @@ export default function PolicyCenter() {
         esi_applicable: salaryTemplateForm.esi_applicable,
       };
       const key = `salary_template_${salaryTemplateForm.department}`;
-      const { error: upsertError } = await db.from("tenant_settings").upsert([{
-        tenant_id: tenantId,
-        key,
-        value: JSON.stringify(template),
-        updated_at: new Date().toISOString(),
-      }], { onConflict: "tenant_id,key" });
-      if (upsertError) throw upsertError;
+      if (salaryTemplateIsEditing) {
+        const now = new Date().toISOString();
+        const { data: updateData, error: updateError } = await db.from("tenant_settings").update({
+          value: JSON.stringify(template),
+          updated_at: now,
+        }).eq("tenant_id", tenantId).eq("key", key).eq("updated_at", settingUpdatedAtMap[key] as string).select("key").maybeSingle();
+        if (updateError) throw updateError;
+        if (settingUpdatedAtMap[key] && !updateData) throw new Error("STALE_WRITE");
+        setSettingUpdatedAtMap((current) => ({ ...current, [key]: now }));
+      } else {
+        const { error: insertError } = await db.from("tenant_settings").insert([{
+          tenant_id: tenantId,
+          key,
+          value: JSON.stringify(template),
+          updated_at: new Date().toISOString(),
+        }]);
+        if (insertError) {
+          if (insertError.code === "23505") {
+            toastError("Another administrator already created a template for this department.");
+            return;
+          }
+          throw insertError;
+        }
+      }
       setSalaryTemplates((current) => ({ ...current, [salaryTemplateForm.department]: template }));
       setSalaryTemplateModalOpen(false);
       setSalaryTemplateForm(defaultSalaryTemplateForm);
       success("Salary template saved.");
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toastError("Failed to save salary template.");
+      if (err.message === "STALE_WRITE") {
+        toastError("Another admin has modified this template. Please refresh.");
+      } else {
+        toastError("Failed to save salary template.");
+      }
     } finally {
       setSavingTab(null);
     }
@@ -1140,7 +1346,7 @@ export default function PolicyCenter() {
                 <p className="text-sm font-medium text-slate-700">Leave balances initialized for {leaveBalanceStatus.initializedEmployees} of {leaveBalanceStatus.totalEmployees} employees</p>
                 <p className="mt-1 text-xs text-slate-500">Monthly accrual runs automatically on the 1st of each month for leave types with monthly accrual setting.</p>
               </div>
-              <button type="button" onClick={() => void initializeLeaveBalances()} disabled={savingTab === "leave-balances"} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60">
+              <button type="button" onClick={handleInitializeClick} disabled={savingTab === "leave-balances"} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60">
                 {savingTab === "leave-balances" ? "Processing..." : "Initialize / Refresh Leave Balances"}
               </button>
             </div>
@@ -1389,6 +1595,34 @@ export default function PolicyCenter() {
               <button type="button" onClick={() => setSalaryTemplateModalOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
               <button type="button" onClick={() => void saveSalaryTemplate()} disabled={savingTab === "salary-template"} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60">
                 {savingTab === "salary-template" ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showDryRun ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={() => setShowDryRun(false)}>
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h3 className="text-lg font-semibold text-slate-900">Leave Balance Initialization</h3>
+            </div>
+            <div className="p-5 space-y-4 text-sm text-slate-700">
+              <p>This action will generate missing leave balances for the current year ({dryRunStats.targetYear}). Existing balances or deductions will not be overwritten.</p>
+              <ul className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <li className="flex justify-between font-medium"><span className="text-slate-500">Total combinations:</span> <span>{dryRunStats.total}</span></li>
+                <li className="flex justify-between font-medium"><span className="text-slate-500">Already initialized:</span> <span>{dryRunStats.existing}</span></li>
+                <li className="flex justify-between font-medium"><span className="text-slate-500">New rows to create:</span> <span className="text-brand-600">{dryRunStats.new}</span></li>
+                <li className="flex justify-between font-medium"><span className="text-slate-500">Rows overwritten:</span> <span className="text-emerald-600">0</span></li>
+              </ul>
+              {dryRunStats.new === 0 ? (
+                <p className="text-emerald-600 font-semibold text-center">All leave balances are already up-to-date.</p>
+              ) : null}
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-5 py-4">
+              <button type="button" onClick={() => setShowDryRun(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+              <button type="button" onClick={() => void initializeLeaveBalances()} disabled={savingTab === "leave-balances" || dryRunStats.new === 0} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60">
+                {savingTab === "leave-balances" ? "Processing..." : "Confirm Initialization"}
               </button>
             </div>
           </div>
