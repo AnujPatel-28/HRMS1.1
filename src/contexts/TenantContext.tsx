@@ -50,44 +50,65 @@ const tenantColumns = [
   "logo_url",
 ].join(",");
 
-// The base domain for this SaaS app (the root — not a tenant).
-// Any hostname that ends with this and has exactly ONE extra label
-// before it is a tenant subdomain.
-// e.g. "abc.hrms.talentmeshsolutions.com"  → tenant "abc"
-//      "hrms.talentmeshsolutions.com"       → null (root app, no tenant)
+// --- CENTRALIZED DOMAIN CONFIGURATION ---
+// Preparing for future wildcard migration by centralizing these constants.
+// For now, tenants are added manually to GoDaddy and Vercel.
+// Example Base Domain: hrms.talentmeshsolutions.com
 const BASE_DOMAIN = import.meta.env.VITE_BASE_DOMAIN as string | undefined;
 
 const isLocalhost = (hostname: string) =>
   hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 
+/**
+ * Parses the hostname to extract the tenant subdomain.
+ * Rules for nested subdomain architecture:
+ * - hrms.talentmeshsolutions.com -> null (Super admin portal)
+ * - talentmeshsolutions.com -> null (Landing page)
+ * - localhost -> null (Local development)
+ * - abc.hrms.talentmeshsolutions.com -> "abc" (Tenant portal)
+ */
 const getSubdomain = (hostname: string): string | null => {
-  // Always return null on localhost — dev uses VITE_DEFAULT_TENANT_ID instead.
   if (isLocalhost(hostname)) return null;
 
   const labels = hostname.split(".").filter(Boolean);
 
-  // If a base domain is configured (e.g. "hrms.talentmeshsolutions.com"),
-  // parse it so we know exactly how many labels the root has.
   if (BASE_DOMAIN) {
     const baseLabels = BASE_DOMAIN.split(".").filter(Boolean);
-    // Tenant URL = base domain labels + 1 extra label at the front.
-    // e.g. base = "hrms.talentmeshsolutions.com" (3 labels)
-    //      tenant URL = "abc.hrms.talentmeshsolutions.com" (4 labels)
+    
+    // A valid tenant URL has exactly ONE extra label before the base domain.
+    // e.g. base = hrms.talentmeshsolutions.com (3 labels)
+    // tenant = abc.hrms.talentmeshsolutions.com (4 labels)
     if (labels.length === baseLabels.length + 1) {
-      // Confirm the suffix matches the base domain exactly.
       const suffix = labels.slice(1).join(".");
       if (suffix === BASE_DOMAIN) {
-        return labels[0]; // "abc"
+        const tenant = labels[0]; // e.g. "abc"
+        
+        if (import.meta.env.DEV) {
+          console.log(`[Tenant Debug] Detected tenant: "${tenant}" from hostname: "${hostname}"`);
+        }
+        
+        return tenant;
       }
     }
-    // Root domain itself or unrecognised — no tenant.
+    
+    if (import.meta.env.DEV) {
+      console.log(`[Tenant Debug] No tenant detected for hostname: "${hostname}". Base domain is: "${BASE_DOMAIN}"`);
+    }
+    
     return null;
   }
 
-  // Fallback for environments without VITE_BASE_DOMAIN set:
-  // treat anything with 3+ labels as having a subdomain.
-  // This matches the original behaviour.
+  // Fallback if VITE_BASE_DOMAIN is completely missing in .env
   return labels.length >= 3 ? labels[0] : null;
+};
+
+/**
+ * Helper to check if the current hostname belongs to a specific tenant.
+ * Returns true for company.hrms.talentmeshsolutions.com
+ * Returns false for hrms.talentmeshsolutions.com, talentmeshsolutions.com, localhost
+ */
+export const isTenantSubdomain = (hostname: string = window.location.hostname): boolean => {
+  return getSubdomain(hostname) !== null;
 };
 
 export function TenantProvider({ children }: { children: ReactNode }) {
