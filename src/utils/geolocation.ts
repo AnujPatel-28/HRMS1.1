@@ -54,6 +54,37 @@ export function checkGeofence(lat: number, lng: number, officeLat: number, offic
   return { inside: distance <= radiusMeters, distanceMeters: Math.round(distance) };
 }
 
+export type OfficeLocation = {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  radius_meters: number;
+};
+
+export function checkMultiGeofence(lat: number, lng: number, locations: OfficeLocation[]) {
+  if (locations.length === 0) {
+    return { inside: false, matchedLocation: null, distanceMeters: Infinity };
+  }
+  
+  let bestMatch: OfficeLocation | null = null;
+  let minDistance = Infinity;
+
+  for (const loc of locations) {
+    const distance = calculateDistance(lat, lng, loc.lat, loc.lng);
+    if (distance < minDistance) {
+      minDistance = distance;
+      bestMatch = loc;
+    }
+  }
+
+  if (bestMatch && minDistance <= bestMatch.radius_meters) {
+    return { inside: true, matchedLocation: bestMatch.id, distanceMeters: Math.round(minDistance) };
+  }
+
+  return { inside: false, matchedLocation: null, distanceMeters: Math.round(minDistance) };
+}
+
 export function getLocationStatusText(status: LocationStatus | null | undefined) {
   switch (status) {
     case "captured":

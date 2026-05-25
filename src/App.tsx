@@ -21,6 +21,7 @@ import LeaveManagement from "./hr/LeaveManagement";
 import PolicyCenter from "./hr/PolicyCenter";
 import PolicyUpload from "./hr/PolicyUpload";
 import ShiftManagement from "./hr/ShiftManagement";
+import OfficeLocations from "./hr/OfficeLocations";
 import TaskManagement from "./hr/TaskManagement";
 import PayrollLayout from "./payroll/PayrollLayout";
 import SalaryStructures from "./payroll/hr/SalaryStructures";
@@ -141,6 +142,7 @@ function TenantRoutes() {
           <Route path="calendar" element={<HRCalendar />} />
           <Route path="chat" element={<HRChat />} />
           <Route path="policy-center" element={<PolicyCenter />} />
+          <Route path="office-locations" element={<OfficeLocations />} />
           <Route path="settings" element={<Navigate to="/hr/policy-center" replace />} />
         </Route>
 

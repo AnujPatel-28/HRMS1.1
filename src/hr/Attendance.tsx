@@ -505,6 +505,10 @@ export default function HRAttendance() {
   }, [allEmployees, fetchCorrections, view]);
 
   async function saveEdit(row: AttendanceWithEmployee) {
+    if (tenantSettings.payroll_lock_date && dailyDate <= tenantSettings.payroll_lock_date) {
+      toastError("Payroll is locked for this date. Cannot edit attendance.");
+      return;
+    }
     setSaving(true);
     try {
       let punchIn = null;
@@ -528,8 +532,10 @@ export default function HRAttendance() {
         punchOut = editPunchOut ? new Date(`${dailyDate}T${editPunchOut}:00`).toISOString() : null;
       }
 
+      const finalIsLate = (editStatus === "half_day" || editStatus === "absent") ? false : row.is_late;
+
       if (row.id) {
-        await db.from("attendance").update({ punch_in: punchIn, punch_out: punchOut, status: editStatus, work_hours: workHours }).eq("tenant_id", tenantId).eq("id", row.id);
+        await db.from("attendance").update({ punch_in: punchIn, punch_out: punchOut, status: editStatus, work_hours: workHours, is_late: finalIsLate }).eq("tenant_id", tenantId).eq("id", row.id);
       } else {
         await db.from("attendance").insert([{
           employee_id: row.employee_id,
@@ -539,8 +545,18 @@ export default function HRAttendance() {
           punch_out: punchOut,
           status: editStatus,
           work_hours: workHours,
+          is_late: finalIsLate,
         }]);
       }
+      void logAction("attendance.edited", "attendance", row.id || "new", {
+        employee_id: row.employee_id,
+        date: dailyDate,
+        old_status: row.status,
+        new_status: editStatus,
+        punch_in: punchIn,
+        punch_out: punchOut,
+        severity: "WARNING",
+      });
       success("Attendance updated.");
       setEditId(null);
     } catch (err) {
@@ -595,6 +611,11 @@ export default function HRAttendance() {
   }), [correctionDateFrom, correctionDateTo, correctionDepartmentFilter, correctionRows, correctionStatusFilter]);
 
   async function approveOvertime(recordId: string) {
+    const record = overtimeRows.find(r => r.id === recordId);
+    if (record && tenantSettings.payroll_lock_date && record.date <= tenantSettings.payroll_lock_date) {
+      toastError("Payroll is locked for this date. Cannot approve overtime.");
+      return;
+    }
     try {
       const { error } = await db
         .from("overtime_records")
@@ -602,6 +623,13 @@ export default function HRAttendance() {
         .eq("tenant_id", tenantId)
         .eq("id", recordId);
       if (error) throw error;
+      void logAction("overtime.approved", "overtime_records", recordId, {
+        record_id: recordId,
+        employee_id: record?.employee_id,
+        date: record?.date,
+        hours: record?.overtime_hours,
+        severity: "INFO",
+      });
       success("Overtime approved.");
       void fetchOvertime();
     } catch (err) {
@@ -610,6 +638,11 @@ export default function HRAttendance() {
   }
 
   async function rejectOvertime(recordId: string) {
+    const record = overtimeRows.find(r => r.id === recordId);
+    if (record && tenantSettings.payroll_lock_date && record.date <= tenantSettings.payroll_lock_date) {
+      toastError("Payroll is locked for this date. Cannot reject overtime.");
+      return;
+    }
     try {
       const { error } = await db
         .from("overtime_records")
@@ -625,23 +658,48 @@ export default function HRAttendance() {
   }
 
   async function approveAllOvertime() {
-    try {
-      const pendingIds = overtimeRows.filter((row) => !row.approved).map((row) => row.id);
-      if (pendingIds.length === 0) {
-        success("No pending overtime records to approve.");
-        return;
-      }
-      const { error } = await db
-        .from("overtime_records")
-        .update({ approved: true, approved_by: hrEmployee?.id ?? null })
-        .eq("tenant_id", tenantId)
-        .in("id", pendingIds);
-      if (error) throw error;
-      success("All pending overtime records for this month were approved.");
-      void fetchOvertime();
-    } catch (err) {
-      toastError("Failed to approve all overtime records.");
+    const pendingRows = overtimeRows.filter((row) => !row.approved);
+    if (pendingRows.length === 0) {
+      success("No pending overtime records to approve.");
+      return;
     }
+
+    let successCount = 0;
+    let failCount = 0;
+    let lockedCount = 0;
+
+    for (const row of pendingRows) {
+      if (tenantSettings.payroll_lock_date && row.date <= tenantSettings.payroll_lock_date) {
+        lockedCount++;
+        continue;
+      }
+      try {
+        const { error } = await db
+          .from("overtime_records")
+          .update({ approved: true, approved_by: hrEmployee?.id ?? null })
+          .eq("tenant_id", tenantId)
+          .eq("id", row.id);
+        if (error) throw error;
+        successCount++;
+      } catch (err) {
+        failCount++;
+      }
+    }
+
+    void logAction("overtime.bulk_approved", "overtime_records", "bulk", {
+      count: successCount,
+      succeeded: successCount,
+      failed: failCount,
+      severity: "WARNING",
+    });
+
+    if (successCount > 0) {
+      success(`Approved ${successCount} overtime records.`);
+    }
+    if (failCount > 0 || lockedCount > 0) {
+      toastError(`Failed: ${failCount}, Locked: ${lockedCount}`);
+    }
+    void fetchOvertime();
   }
 
   async function resolveShiftStartTime(employeeId: string, attendanceDate: string) {
@@ -685,6 +743,11 @@ export default function HRAttendance() {
 
   async function approveCorrection(correction: AttendanceCorrectionRow) {
     if (!hrEmployee?.id || !tenant) return;
+
+    if (tenantSettings.payroll_lock_date && correction.attendance_date <= tenantSettings.payroll_lock_date) {
+      toastError("Payroll is locked for this date. Cannot approve correction.");
+      return;
+    }
 
     // ── Guard: reject empty corrections (both sides null) ──────────────────────
     // Prevents HR from accidentally approving a no-op correction that would
@@ -742,9 +805,11 @@ export default function HRAttendance() {
       const workHours = durationResult.hours;
 
       // ── Lateness uses merged punch-in (correction may only fix punch-out) ────
-      const isLate = effectivePunchIn
-        ? calculateLateness(correction.attendance_date, shiftStart, effectivePunchIn, graceMinutes)
-        : (existingAttendance?.is_late ?? false);
+      const isLate = (existingAttendance?.status === "half_day" || existingAttendance?.status === "absent")
+        ? false
+        : effectivePunchIn
+          ? calculateLateness(correction.attendance_date, shiftStart, effectivePunchIn, graceMinutes)
+          : (existingAttendance?.is_late ?? false);
 
       // ── Build ISO timestamps from merged effective times ──────────────────────
       // normalizeShiftTimes handles night shifts (punch-out before punch-in means +1 day).
@@ -851,6 +916,7 @@ export default function HRAttendance() {
             punch_out: correction.requested_punch_out,
           },
           reason: correction.reason,
+          severity: "CRITICAL",
         },
       );
 
@@ -876,6 +942,10 @@ export default function HRAttendance() {
 
   async function rejectCorrectionRequest() {
     if (!rejectCorrection || !hrEmployee?.id) return;
+    if (tenantSettings.payroll_lock_date && rejectCorrection.attendance_date <= tenantSettings.payroll_lock_date) {
+      toastError("Payroll is locked for this date. Cannot reject correction.");
+      return;
+    }
     if (!rejectCorrectionReason.trim()) {
       toastError("Reason for rejection is required.");
       return;
@@ -905,6 +975,12 @@ export default function HRAttendance() {
       }]);
       if (notificationError) throw notificationError;
 
+      void logAction("correction.rejected", "attendance_corrections", rejectCorrection.id, {
+        correction_id: rejectCorrection.id,
+        employee_id: rejectCorrection.employee_id,
+        rejection_reason: rejectCorrectionReason.trim(),
+        severity: "WARNING",
+      });
       success("Attendance correction rejected.");
       setRejectCorrection(null);
       setRejectCorrectionReason("");

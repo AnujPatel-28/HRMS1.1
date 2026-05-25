@@ -16,6 +16,8 @@ type ShiftFormState = {
   end_time: string;
   working_days: number[];
   half_day_cutoff_override: string;
+  punch_in_opens_minutes_before: string;
+  late_mark_grace_override: string;
   is_default: boolean;
 };
 
@@ -41,6 +43,8 @@ const defaultShiftForm: ShiftFormState = {
   end_time: "18:00",
   working_days: [1, 2, 3, 4, 5, 6],
   half_day_cutoff_override: "",
+  punch_in_opens_minutes_before: "60",
+  late_mark_grace_override: "",
   is_default: false,
 };
 
@@ -64,6 +68,8 @@ function toShiftForm(shift: Shift): ShiftFormState {
     end_time: formatTimeValue(shift.end_time),
     working_days: Array.isArray(shift.working_days) ? shift.working_days.map(Number) : [1, 2, 3, 4, 5, 6],
     half_day_cutoff_override: formatTimeValue(shift.half_day_cutoff_override),
+    punch_in_opens_minutes_before: String(shift.punch_in_opens_minutes_before ?? 60),
+    late_mark_grace_override: shift.late_mark_grace_override ? String(shift.late_mark_grace_override) : "",
     is_default: Boolean(shift.is_default),
   };
 }
@@ -74,6 +80,8 @@ function normalizeShift(raw: Shift): Shift {
     start_time: formatTimeValue(raw.start_time),
     end_time: formatTimeValue(raw.end_time),
     half_day_cutoff_override: raw.half_day_cutoff_override ? formatTimeValue(raw.half_day_cutoff_override) : null,
+    punch_in_opens_minutes_before: Number(raw.punch_in_opens_minutes_before ?? 60),
+    late_mark_grace_override: raw.late_mark_grace_override ? Number(raw.late_mark_grace_override) : null,
     working_days: Array.isArray(raw.working_days) ? raw.working_days.map(Number) : [1, 2, 3, 4, 5, 6],
   };
 }
@@ -135,6 +143,36 @@ function ShiftFormFields({
           className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
         />
       </label>
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-semibold text-slate-600">Punch-in opens (minutes before start)</span>
+        <input
+          type="number"
+          min="0"
+          value={form.punch_in_opens_minutes_before}
+          onChange={(event) => onChange({ ...form, punch_in_opens_minutes_before: event.target.value })}
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
+          placeholder="60"
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-semibold text-slate-600">Late mark grace override (minutes)</span>
+        <input
+          type="number"
+          min="0"
+          value={form.late_mark_grace_override}
+          onChange={(event) => onChange({ ...form, late_mark_grace_override: event.target.value })}
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
+          placeholder="Leave empty for default"
+        />
+      </label>
+      {form.end_time < form.start_time && (
+        <div className="md:col-span-2 mb-2 flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" />
+          <span>
+            <strong>Night Shift Detected:</strong> End time is before start time. Attendance systems will automatically cross the midnight boundary.
+          </span>
+        </div>
+      )}
       <div className="md:col-span-2">
         <span className="mb-2 block text-xs font-semibold text-slate-600">Working days</span>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -285,6 +323,8 @@ export default function ShiftManagement() {
         end_time: form.end_time,
         working_days: form.working_days,
         half_day_cutoff_override: form.half_day_cutoff_override || null,
+        punch_in_opens_minutes_before: Number(form.punch_in_opens_minutes_before || 60),
+        late_mark_grace_override: form.late_mark_grace_override ? Number(form.late_mark_grace_override) : null,
         is_default: form.is_default,
         is_active: true,
         updated_at: new Date().toISOString(),
@@ -299,6 +339,16 @@ export default function ShiftManagement() {
         if (insertError) throw insertError;
         success("Shift created.");
       }
+
+      // ── Audit log: shift.override_modified ──────────────────────────────────
+      void logAction("shift.override_modified", "shifts", shiftId ?? "new", {
+        shift_name: form.name.trim(),
+        start_time: form.start_time,
+        end_time: form.end_time,
+        punch_in_opens_minutes_before: form.punch_in_opens_minutes_before,
+        late_mark_grace_override: form.late_mark_grace_override,
+        severity: "INFO",
+      });
 
       setShowAddForm(false);
       setShiftForm(defaultShiftForm);

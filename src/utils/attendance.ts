@@ -53,16 +53,27 @@ export function calculateShiftDuration(punchIn: string | null, punchOut: string 
  * @param actualPunchIn The actual punch in time (HH:MM)
  * @param graceMinutes Allowed grace period in minutes
  */
-export function calculateLateness(attendanceDate: string, shiftStart: string, actualPunchIn: string, graceMinutes: number): boolean {
+export function calculateLateness(attendanceDate: string, shiftStart: string, actualPunchIn: string, graceMinutes: number, shiftEnd?: string): boolean {
   const expectedStart = new Date(`${attendanceDate}T${shiftStart}:00`);
   const actualIn = new Date(`${attendanceDate}T${actualPunchIn}:00`);
 
-  // If the actual punch in is very early in the day (e.g. 00:15) but the shift 
-  // started late the previous day (e.g. 23:00), actualIn could erroneously appear 
-  // to be BEFORE expectedStart by ~23 hours.
-  // We assume if actualIn is > 12 hours before expectedStart, it's actually the next day.
-  if (actualIn.getTime() < expectedStart.getTime() - 12 * 60 * 60 * 1000) {
-    actualIn.setDate(actualIn.getDate() + 1);
+  if (shiftEnd && shiftStart > shiftEnd) {
+    // Night shift Explicit Boundary:
+    // When shiftStart > shiftEnd, the shift crosses midnight.
+    // If actualPunchIn is numerically smaller than shiftStart (e.g. 02:00 < 22:00),
+    // we must decide if it's an early punch on the same day (e.g. 21:30) or a late punch next day (02:00).
+    // We treat anything that is more than 6 hours before the start time as belonging to the next day's window.
+    if (actualPunchIn < shiftStart && actualIn.getTime() < expectedStart.getTime() - 6 * 60 * 60 * 1000) {
+      actualIn.setDate(actualIn.getDate() + 1);
+    }
+  } else {
+    // Backward compatible legacy heuristic
+    // If the actual punch in is very early in the day (e.g. 00:15) but the shift 
+    // started late the previous day (e.g. 23:00), actualIn could erroneously appear 
+    // to be BEFORE expectedStart by ~23 hours.
+    if (actualIn.getTime() < expectedStart.getTime() - 12 * 60 * 60 * 1000) {
+      actualIn.setDate(actualIn.getDate() + 1);
+    }
   }
   
   const lateThresholdMs = expectedStart.getTime() + (graceMinutes * 60000);

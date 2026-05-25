@@ -6,7 +6,6 @@ import { useTenant } from "../contexts/TenantContext";
 import { useAuditLog } from "../hooks/useAuditLog";
 import { Skeleton } from "../shared/Skeleton";
 import { useToast } from "../shared/ToastContext";
-import LocationMap from "../shared/LocationMap";
 import { getTenantDate, getTenantYear } from "../utils/date";
 import { validateAttendancePolicy, validateTaskPolicy, validateLeavePolicy, validateSalaryPolicy, validateLeaveType } from "../utils/policyValidation";
 
@@ -37,6 +36,7 @@ export type AttendancePolicyForm = {
   geofence_mode: "warn" | "strict";
   regularization_enabled: boolean;
   regularization_window_days: string;
+  payroll_lock_date: string;
 };
 
 export type LeavePolicyForm = {
@@ -156,6 +156,7 @@ const defaultAttendancePolicy: AttendancePolicyForm = {
   geofence_mode: "warn",
   regularization_enabled: false,
   regularization_window_days: "7",
+  payroll_lock_date: "",
 };
 
 const defaultLeavePolicy: LeavePolicyForm = {
@@ -234,14 +235,6 @@ function boolValue(value: string | undefined, fallback: boolean) {
   return value === "true";
 }
 
-function toNumber(value: string | number | null | undefined) {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
 
 function formatJson<T>(value: T) {
   return JSON.stringify(value);
@@ -449,6 +442,7 @@ export default function PolicyCenter() {
         geofence_mode: (settings.geofence_mode as "warn" | "strict" | undefined) ?? defaultAttendancePolicy.geofence_mode,
         regularization_enabled: boolValue(settings.regularization_enabled, defaultAttendancePolicy.regularization_enabled),
         regularization_window_days: settings.regularization_window_days ?? defaultAttendancePolicy.regularization_window_days,
+        payroll_lock_date: settings.payroll_lock_date ?? defaultAttendancePolicy.payroll_lock_date,
       };
       const nextLeavePolicy: LeavePolicyForm = {
         leave_min_notice_days: settings.leave_min_notice_days ?? defaultLeavePolicy.leave_min_notice_days,
@@ -548,8 +542,6 @@ export default function PolicyCenter() {
     return "Per-day rate = Monthly gross ÷ 26";
   }, [salaryPolicy.lop_calculation_method]);
 
-  const geofenceLat = toNumber(attendancePolicy.office_lat);
-  const geofenceLng = toNumber(attendancePolicy.office_lng);
 
   const sortedTemplates = useMemo(
     () => Object.entries(salaryTemplates).sort(([a], [b]) => a.localeCompare(b)),
@@ -686,6 +678,7 @@ export default function PolicyCenter() {
         { key: "geofence_mode", value: attendancePolicy.geofence_mode },
         { key: "regularization_enabled", value: String(attendancePolicy.regularization_enabled) },
         { key: "regularization_window_days", value: attendancePolicy.regularization_window_days || "7" },
+        { key: "payroll_lock_date", value: attendancePolicy.payroll_lock_date || "" },
       ], "attendance-policy", "Attendance policy saved", "attendance");
       await refreshTenant();
       setBaselineTenantForm((current) => ({
@@ -1230,25 +1223,15 @@ export default function PolicyCenter() {
               <Toggle checked={attendancePolicy.geofence_enabled} onChange={(checked) => setAttendancePolicy((current) => ({ ...current, geofence_enabled: checked }))} label="Require location on punch-in" />
               {attendancePolicy.geofence_enabled ? (
                 <>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <FieldLabel label="Office latitude">
-                      <input type="number" step="0.0001" value={attendancePolicy.office_lat} onChange={(event) => setAttendancePolicy((current) => ({ ...current, office_lat: event.target.value }))} className={inputClass} />
-                    </FieldLabel>
-                    <FieldLabel label="Office longitude">
-                      <input type="number" step="0.0001" value={attendancePolicy.office_lng} onChange={(event) => setAttendancePolicy((current) => ({ ...current, office_lng: event.target.value }))} className={inputClass} />
-                    </FieldLabel>
-                  </div>
-                  {geofenceLat != null && geofenceLng != null ? (
-                    <div className="overflow-hidden rounded-xl border border-slate-200">
-                      <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700">Office location preview</div>
-                      <div className="p-4">
-                        <LocationMap lat={geofenceLat} lng={geofenceLng} label="Office location" accuracy={null} />
-                      </div>
+                  <div className="flex items-center justify-between gap-4 rounded-xl border border-brand-200 bg-brand-50 p-4">
+                    <div>
+                      <p className="text-sm font-medium text-brand-900">Multi-branch Geo-fencing is active.</p>
+                      <p className="mt-1 text-xs text-brand-700">Employees can punch in from any active office location.</p>
                     </div>
-                  ) : null}
-                  <FieldLabel label="Allowed radius (meters)">
-                    <input type="number" min={0} value={attendancePolicy.geofence_radius_meters} onChange={(event) => setAttendancePolicy((current) => ({ ...current, geofence_radius_meters: event.target.value }))} className={inputClass} />
-                  </FieldLabel>
+                    <Link to="/hr/office-locations" className="shrink-0 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-brand-700 shadow-sm transition hover:bg-slate-50">
+                      Manage Office Locations →
+                    </Link>
+                  </div>
                   <div>
                     <p className="mb-2 text-xs font-semibold text-slate-600">Geo-fence mode</p>
                     <div className="grid gap-3 md:grid-cols-2">
@@ -1278,6 +1261,15 @@ export default function PolicyCenter() {
                 </FieldLabel>
               ) : null}
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">Correction requests appear in Attendance → Corrections tab for HR review.</p>
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Payroll & Audit Settings">
+            <div className="space-y-4">
+              <FieldLabel label="Payroll lock date (YYYY-MM-DD)">
+                <input type="date" value={attendancePolicy.payroll_lock_date} onChange={(event) => setAttendancePolicy((current) => ({ ...current, payroll_lock_date: event.target.value }))} className={inputClass} />
+                <p className="mt-1 text-xs text-slate-500">Attendance and overtime cannot be modified on or before this date.</p>
+              </FieldLabel>
             </div>
           </SectionCard>
 

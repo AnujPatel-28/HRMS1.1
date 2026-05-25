@@ -157,7 +157,7 @@ export default function PunchInOut() {
       recentStart.setDate(today.getDate() - 6);
       const recentStartDate = formatLocalDate(recentStart);
       const [attRes, todayClosedRes, taskRes, settingsRes, recentAttRes, overtimeRes, correctionsRes] = await Promise.all([
-        db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("session_status", "open").order("punch_in", { ascending: false }).limit(1).maybeSingle(),
+        db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("session_status", "open").not("punch_in", "is", null).order("punch_in", { ascending: false }).limit(1).maybeSingle(),
         db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("date", TODAY).eq("session_status", "closed").order("punch_out", { ascending: false }).limit(1).maybeSingle(),
         db.from("tasks").select("*").eq("tenant_id", tenantId).eq("assigned_to", employee.id).eq("due_date", TODAY),
         db.from("tenant_settings").select("key,value").eq("tenant_id", tenantId),
@@ -390,7 +390,12 @@ export default function PunchInOut() {
   }
 
   async function punchOut() {
-    if (!attendance?.id || !attendance.punch_in || !tenant || !tenantId || !employee?.id || acting) return;
+    if (!attendance?.id || !tenant || !tenantId || !employee?.id || acting) return;
+    if (!attendance.punch_in) {
+      void logAction("attendance.corrupted_session_detected", "attendance", attendance.id, { severity: "WARNING" });
+      error("Your attendance session is corrupted. HR has been notified.");
+      return;
+    }
     setActing(true);
     setActionText("Getting your location...");
     try {

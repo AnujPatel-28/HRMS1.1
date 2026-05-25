@@ -52,6 +52,8 @@ export default async function(req: Request): Promise<Response> {
       .eq("tenant_id", tenant_id)
       .eq("employee_id", employee_id)
       .eq("is_late", true)
+      .neq("status", "absent")
+      .neq("status", "half_day")
       .gte("date", startDate)
       .lte("date", endDate);
 
