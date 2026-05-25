@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, Menu } from "lucide-react";
+import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, Menu, LayoutDashboard, Clock, Plane, CheckSquare, ShieldCheck, Palmtree, Calendar, MessageSquare, BookOpen } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
@@ -9,21 +9,22 @@ import { NotificationBell } from "../shared/NotificationBell";
 type NavLinkItem = {
   label: string;
   href: string;
+  icon: React.ElementType;
   indent?: boolean;
 };
 
 const links: readonly NavLinkItem[] = [
-  { label: "Dashboard", href: "/hr/dashboard" },
-  { label: "Employees", href: "/hr/employees" },
-  { label: "Attendance", href: "/hr/attendance" },
-  { label: "Shifts", href: "/hr/shifts" },
-  { label: "Leaves", href: "/hr/leaves" },
-  { label: "Tasks", href: "/hr/tasks" },
-  { label: "Policies", href: "/hr/policies" },
-  { label: "Holidays", href: "/hr/holidays" },
-  { label: "Calendar", href: "/hr/calendar" },
-  { label: "Chat", href: "/hr/chat" },
-  { label: "Policy Center", href: "/hr/policy-center" },
+  { label: "Dashboard", href: "/hr/dashboard", icon: LayoutDashboard },
+  { label: "Employees", href: "/hr/employees", icon: Users },
+  { label: "Attendance", href: "/hr/attendance", icon: CalendarCheck },
+  { label: "Shifts", href: "/hr/shifts", icon: Clock },
+  { label: "Leaves", href: "/hr/leaves", icon: Plane },
+  { label: "Tasks", href: "/hr/tasks", icon: CheckSquare },
+  { label: "Policies", href: "/hr/policies", icon: ShieldCheck },
+  { label: "Holidays", href: "/hr/holidays", icon: Palmtree },
+  { label: "Calendar", href: "/hr/calendar", icon: Calendar },
+  { label: "Chat", href: "/hr/chat", icon: MessageSquare },
+  { label: "Policy Center", href: "/hr/policy-center", icon: BookOpen },
 ];
 
 export default function HRLayout() {
@@ -112,15 +113,16 @@ export default function HRLayout() {
               <ArrowLeft className="h-4 w-4" />
               Switch product
             </Link>
-            {links.map(({ label, href, indent }) => {
+            {links.map(({ label, href, icon: Icon, indent }) => {
               const isActive = location.pathname === href;
               return (
                 <button
                   key={href}
                   type="button"
                   onClick={() => handleMobileNavigate(href)}
-                  className={`block w-full rounded-lg px-3 py-2.5 text-left text-sm font-display transition ${indent ? "ml-3" : ""} ${isActive ? "bg-brand-50 font-semibold text-brand-700" : "text-slate-600 hover:bg-slate-100"}`}
+                  className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-display transition-all duration-200 ease-in-out hover:translate-x-1 ${indent ? "ml-3" : ""} ${isActive ? "bg-brand-50 font-semibold text-brand-700 shadow-sm ring-1 ring-brand-100" : "text-slate-600 hover:bg-slate-50"}`}
                 >
+                  <Icon className={`h-4 w-4 shrink-0 transition-colors ${isActive ? "text-brand-600" : "text-slate-400 group-hover:text-slate-600"}`} />
                   {label}
                 </button>
               );
