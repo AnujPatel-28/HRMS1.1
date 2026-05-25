@@ -50,11 +50,10 @@ const tenantColumns = [
   "logo_url",
 ].join(",");
 
-// The base domain for this SaaS app (the root — not a tenant).
-// Any hostname that ends with this and has exactly ONE extra label
-// before it is a tenant subdomain.
-// e.g. "abc.hrms.talentmeshsolutions.com"  → tenant "abc"
-//      "hrms.talentmeshsolutions.com"       → null (root app, no tenant)
+// The base domain for this SaaS app.
+// e.g. "talentmeshsolutions.com"
+// "hrms.talentmeshsolutions.com" will be treated as the root admin portal.
+// "abc.talentmeshsolutions.com" will be treated as tenant "abc".
 const BASE_DOMAIN = import.meta.env.VITE_BASE_DOMAIN as string | undefined;
 
 const isLocalhost = (hostname: string) =>
@@ -66,21 +65,22 @@ const getSubdomain = (hostname: string): string | null => {
 
   const labels = hostname.split(".").filter(Boolean);
 
-  // If a base domain is configured (e.g. "hrms.talentmeshsolutions.com"),
-  // parse it so we know exactly how many labels the root has.
   if (BASE_DOMAIN) {
     const baseLabels = BASE_DOMAIN.split(".").filter(Boolean);
     // Tenant URL = base domain labels + 1 extra label at the front.
-    // e.g. base = "hrms.talentmeshsolutions.com" (3 labels)
-    //      tenant URL = "abc.hrms.talentmeshsolutions.com" (4 labels)
+    // e.g. base = "talentmeshsolutions.com" (2 labels)
+    //      tenant URL = "abc.talentmeshsolutions.com" (3 labels)
     if (labels.length === baseLabels.length + 1) {
-      // Confirm the suffix matches the base domain exactly.
       const suffix = labels.slice(1).join(".");
       if (suffix === BASE_DOMAIN) {
-        return labels[0]; // "abc"
+        // Reserved subdomains that are NOT tenants
+        if (labels[0] === "hrms" || labels[0] === "www" || labels[0] === "api") {
+          return null; // Treat as root app, no tenant
+        }
+        return labels[0]; // e.g. "abc"
       }
     }
-    // Root domain itself or unrecognised — no tenant.
+    // Root domain itself or unrecognized — no tenant.
     return null;
   }
 
