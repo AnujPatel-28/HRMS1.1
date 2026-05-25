@@ -12,7 +12,6 @@ import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { formatLocalDate } from "../utils/date";
-import TenantDebug from "../shared/TenantDebug";
 
 
 interface KPI {
@@ -124,8 +123,6 @@ export default function HRDashboard() {
 
   return (
     <section className="space-y-6">
-      {/* TEMPORARY: Subdomain detection debug — remove before release */}
-      <TenantDebug />
 
       {/* Welcome */}
       <div
