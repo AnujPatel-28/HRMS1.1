@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Users, CalendarCheck, Clock, AlertCircle,
-  TrendingUp, CheckCircle2, XCircle, ArrowRight, CheckCircle, Bell
+  TrendingUp, CheckCircle2, XCircle, ArrowRight, CheckCircle, Bell, Filter
 } from "lucide-react";
-import type { Attendance, Employee, Leave, Notification } from "../types";
+import type { Attendance, Employee, Leave, Notification, Shift, EmployeeShift } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
 import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
+import { SelectDropdown } from "../shared/components/SelectDropdown";
 import { formatLocalDate } from "../utils/date";
 
 
@@ -36,6 +37,11 @@ export default function HRDashboard() {
   const [pendingLeaves, setPendingLeaves] = useState<(Leave & { employee?: Employee })[]>([]);
   const [todayAttendance, setTodayAttendance] = useState<Attendance[]>([]);
   const [recentNotifs, setRecentNotifs] = useState<Notification[]>([]);
+
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [employeeShifts, setEmployeeShifts] = useState<EmployeeShift[]>([]);
+  const [selectedShift, setSelectedShift] = useState<string>("all");
+
   const [loading, setLoading] = useState(true);
 
   const { error: toastError } = useToast();
@@ -47,17 +53,23 @@ export default function HRDashboard() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [empRes, leaveRes, attRes, notifRes] = await Promise.all([
+      const [empRes, leaveRes, attRes, notifRes, shiftRes, empShiftRes] = await Promise.all([
         db.from("employees").select("*").eq("tenant_id", tenantId).eq("status", "active"),
         db.from("leaves").select("*").eq("tenant_id", tenantId).eq("status", "pending").order("applied_at", { ascending: false }).limit(5),
         db.from("attendance").select("*").eq("tenant_id", tenantId).eq("date", today),
         db.from("notifications").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(6),
+        db.from("shifts").select("*").eq("tenant_id", tenantId).eq("is_active", true),
+        db.from("employee_shifts").select("*").eq("tenant_id", tenantId)
+          .lte("effective_from", today)
+          .or(`effective_to.is.null,effective_to.gte.${today}`),
       ]);
 
       if (empRes.error) throw empRes.error;
       if (leaveRes.error) throw leaveRes.error;
       if (attRes.error) throw attRes.error;
       if (notifRes.error) throw notifRes.error;
+      if (shiftRes.error) throw shiftRes.error;
+      if (empShiftRes.error) throw empShiftRes.error;
 
       const emps = (empRes.data ?? []) as Employee[];
       const empMap: Record<string, Employee> = {};
@@ -67,6 +79,8 @@ export default function HRDashboard() {
       setPendingLeaves(((leaveRes.data ?? []) as Leave[]).map((l) => ({ ...l, employee: empMap[l.employee_id] })));
       setTodayAttendance((attRes.data ?? []) as Attendance[]);
       setRecentNotifs((notifRes.data ?? []) as Notification[]);
+      setShifts((shiftRes.data ?? []) as Shift[]);
+      setEmployeeShifts((empShiftRes.data ?? []) as EmployeeShift[]);
     } catch (err) {
       toastError("Failed to load dashboard data.");
     } finally {
@@ -76,14 +90,37 @@ export default function HRDashboard() {
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
-  const presentCount = todayAttendance.filter((a) => a.status === "present").length;
-  const absentCount = employees.length - todayAttendance.length;
-  const onLeaveCount = todayAttendance.filter((a) => a.status === "on_leave").length;
+  const filteredEmployees = useMemo(() => {
+    if (selectedShift === "all") return employees;
+    const assignedIds = new Set(
+      employeeShifts
+        .filter((es) => es.shift_id === selectedShift)
+        .map((es) => es.employee_id)
+    );
+    const isDefault = shifts.find(s => s.id === selectedShift)?.is_default;
+    const hasAnyAssignment = new Set(employeeShifts.map(es => es.employee_id));
+
+    return employees.filter(emp => {
+      if (assignedIds.has(emp.id)) return true;
+      if (isDefault && !hasAnyAssignment.has(emp.id)) return true;
+      return false;
+    });
+  }, [selectedShift, employees, employeeShifts, shifts]);
+
+  const filteredAttendance = useMemo(() => {
+    if (selectedShift === "all") return todayAttendance;
+    const validEmpIds = new Set(filteredEmployees.map(e => e.id));
+    return todayAttendance.filter(a => validEmpIds.has(a.employee_id));
+  }, [selectedShift, todayAttendance, filteredEmployees]);
+
+  const presentCount = filteredAttendance.filter((a) => a.status === "present").length;
+  const absentCount = filteredEmployees.length - filteredAttendance.length;
+  const onLeaveCount = filteredAttendance.filter((a) => a.status === "on_leave").length;
 
   const kpis: KPI[] = [
     {
       label: "Total Employees",
-      value: employees.length,
+      value: filteredEmployees.length,
       sub: "Active headcount",
       icon: <Users className="h-5 w-5" />,
       color: "text-blue-600",
@@ -92,7 +129,7 @@ export default function HRDashboard() {
     {
       label: "Present Today",
       value: presentCount,
-      sub: `${employees.length > 0 ? Math.round((presentCount / employees.length) * 100) : 0}% attendance rate`,
+      sub: `${filteredEmployees.length > 0 ? Math.round((presentCount / filteredEmployees.length) * 100) : 0}% attendance rate`,
       icon: <CalendarCheck className="h-5 w-5" />,
       color: "text-emerald-600",
       bg: "bg-emerald-50",
@@ -142,23 +179,130 @@ export default function HRDashboard() {
           className="absolute right-4 bottom-0 h-[135%] w-auto object-contain object-bottom hidden min-[912px]:block pointer-events-none z-0"
         />
       </div>
+      {/* Overview Section */}
+      <div className="flex flex-col gap-4 sm:gap-6 lg:bg-white lg:rounded-3xl lg:border lg:border-slate-200 lg:shadow-sm lg:p-6">
+        {/* Overview Header & Shift Selector */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:px-2 lg:px-0">
+          <h3 className="text-lg font-bold text-slate-900">Today's Overview</h3>
+          
+          {/* MOBILE VIEW */}
+          <div className="md:hidden inline-flex items-center gap-2 rounded-lg bg-white px-3 py-1.5 shadow-sm border border-slate-200 w-fit">
+            {!loading && shifts.length === 0 ? (
+              <button
+                onClick={() => navigate("/hr/shifts")}
+                className="inline-flex items-center gap-1 text-sm font-semibold text-amber-600 hover:text-amber-700"
+              >
+                + Add a Shift
+              </button>
+            ) : (
+              <>
+                <Filter className="h-4 w-4 text-slate-400" />
+                <span className="text-sm font-medium text-slate-700">View:</span>
+                <SelectDropdown
+                  value={selectedShift}
+                  onChange={setSelectedShift}
+                  options={[
+                    { value: "all", label: "All Shifts" },
+                    ...shifts.map((s) => ({ value: s.id, label: s.name })),
+                  ]}
+                  containerClassName="min-w-[130px]"
+                  triggerClassName="w-full bg-transparent text-sm font-semibold text-brand-700 py-0 px-1 border-none hover:bg-transparent"
+                />
+              </>
+            )}
+          </div>
+
+        {/* DESKTOP VIEW */}
+        <div className="hidden md:flex items-center">
+          {!loading && shifts.length === 0 ? (
+            <div className="inline-flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2">
+              <span className="text-sm text-amber-700 font-medium">No shifts configured</span>
+              <button
+                onClick={() => navigate("/hr/shifts")}
+                className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-600 transition-colors"
+              >
+                + Add a Shift
+              </button>
+            </div>
+          ) : (
+            <div className="inline-flex items-center rounded-xl bg-white p-1 shadow-sm border border-slate-200">
+              <button
+                onClick={() => setSelectedShift("all")}
+                className={`px-4 py-1.5 text-sm font-semibold rounded-lg transition-all ${selectedShift === "all"
+                    ? "relative z-10 bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-200"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                  }`}
+              >
+                All Shifts
+              </button>
+              {shifts.map((shift) => (
+                <button
+                  key={shift.id}
+                  onClick={() => setSelectedShift(shift.id ?? "")}
+                  className={`px-4 py-1.5 text-sm font-semibold rounded-lg transition-all ${selectedShift === shift.id
+                      ? "relative z-10 bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-200"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                    }`}
+                >
+                  {shift.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {kpis.map((k) => (
-          <div key={k.label} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xl -translate-y-1 lg:min-h-[180px]">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-slate-500">{k.label}</p>
-              <span className={`rounded-xl p-2 ${k.bg} ${k.color}`}>{k.icon}</span>
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        {kpis.map((k) => {
+          const glowMap: Record<string, string> = {
+            "text-brand-600": "bg-blue-400",
+            "text-emerald-600": "bg-emerald-400",
+            "text-rose-600": "bg-rose-400",
+            "text-amber-600": "bg-amber-400",
+          };
+          const glowClass = glowMap[k.color] || "bg-slate-400";
+          return (
+            <div key={k.label} className="h-full">
+              {/* MOBILE VIEW (Hidden on lg) */}
+              <div className="relative h-full overflow-hidden rounded-2xl border border-slate-100 bg-white p-4 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col justify-between lg:hidden">
+                <div className={`absolute -right-6 -top-6 h-24 w-24 rounded-full blur-2xl opacity-20 ${glowClass}`} />
+                <div className="relative z-10 flex items-start justify-between mb-4">
+                  <p className="text-[11px] font-semibold text-slate-500 pr-1 leading-tight">{k.label.replace(' / No Punch', '')}</p>
+                  <span className={`shrink-0 rounded-xl p-2 ${k.bg} ${k.color} shadow-sm ring-1 ring-white/50`}>
+                    {k.icon}
+                  </span>
+                </div>
+                <div className="relative z-10">
+                  <p className={`text-2xl font-black tracking-tight ${k.color}`}>
+                    {loading ? <Skeleton className="h-8 w-12" /> : k.value}
+                  </p>
+                  <div className="mt-1">
+                    {loading ? <Skeleton className="h-3 w-20" /> : <p className="text-[9px] font-medium text-slate-400">{k.sub}</p>}
+                  </div>
+                </div>
+              </div>
+
+              {/* DESKTOP VIEW (Hidden below lg) */}
+              <div className="hidden lg:flex relative overflow-hidden h-full rounded-2xl border border-slate-100 bg-slate-50/50 p-5 lg:min-h-[180px] flex-col justify-between transition-all hover:bg-white hover:shadow-lg hover:-translate-y-1">
+                <div className={`absolute -right-10 -top-10 h-32 w-32 rounded-full blur-3xl opacity-20 ${glowClass}`} />
+                <div className="relative z-10 flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-slate-500">{k.label}</p>
+                  <span className={`rounded-xl p-2 ${k.bg} ${k.color}`}>{k.icon}</span>
+                </div>
+                <div className="relative z-10">
+                  <p className={`text-3xl font-bold ${k.color}`}>
+                    {loading ? <Skeleton className="h-9 w-16" /> : k.value}
+                  </p>
+                  <div className="mt-1">
+                    {loading ? <Skeleton className="h-4 w-24" /> : <p className="text-xs text-slate-400">{k.sub}</p>}
+                  </div>
+                </div>
+              </div>
             </div>
-            <p className={`mt-3 text-3xl font-bold ${k.color}`}>
-              {loading ? <Skeleton className="h-9 w-16" /> : k.value}
-            </p>
-            <div className="mt-1">
-              {loading ? <Skeleton className="h-4 w-24" /> : <p className="text-xs text-slate-400">{k.sub}</p>}
-            </div>
-          </div>
-        ))}
+          );
+        })}
+      </div>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -216,9 +360,9 @@ export default function HRDashboard() {
           {/* Donut-style progress bars */}
           <div className="space-y-3">
             {[
-              { label: "Present", count: presentCount, total: employees.length, color: "bg-emerald-500" },
-              { label: "Absent", count: absentCount, total: employees.length, color: "bg-rose-400" },
-              { label: "On Leave", count: onLeaveCount, total: employees.length, color: "bg-blue-400" },
+              { label: "Present", count: presentCount, total: filteredEmployees.length, color: "bg-emerald-500" },
+              { label: "Absent", count: absentCount, total: filteredEmployees.length, color: "bg-rose-400" },
+              { label: "On Leave", count: onLeaveCount, total: filteredEmployees.length, color: "bg-blue-400" },
             ].map(({ label, count, total, color }) => {
               const pct = total > 0 ? Math.round((count / total) * 100) : 0;
               return (
@@ -236,15 +380,15 @@ export default function HRDashboard() {
           </div>
 
           {/* Employee avatars — present */}
-          {todayAttendance.filter((a) => a.status === "present").length > 0 && (
+          {filteredAttendance.filter((a) => a.status === "present").length > 0 && (
             <div className="mt-5">
               <p className="mb-2 text-xs font-medium text-slate-500">Punched in today</p>
               <div className="flex flex-wrap gap-2">
-                {todayAttendance
+                {filteredAttendance
                   .filter((a) => a.status === "present")
                   .slice(0, 12)
                   .map((a) => {
-                    const emp = employees.find((e) => e.id === a.employee_id);
+                    const emp = filteredEmployees.find((e) => e.id === a.employee_id);
                     return (
                       <div
                         key={a.id}

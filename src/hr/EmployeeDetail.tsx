@@ -277,25 +277,29 @@ export default function EmployeeDetail() {
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           {employee.profile_photo_url ? (
             <img src={employee.profile_photo_url} alt={employee.full_name} className="h-14 w-14 rounded-full object-cover" />
           ) : (
-            <div className="grid h-14 w-14 place-items-center rounded-full bg-slate-200 text-sm font-semibold text-slate-700">
+            <div className="grid h-14 w-14 place-items-center rounded-full bg-slate-200 text-sm font-semibold text-slate-700 shrink-0">
               {employee.full_name.slice(0, 2).toUpperCase()}
             </div>
           )}
-          <div>
-            <h2 className="text-xl font-semibold text-slate-900">{employee.full_name}</h2>
-            <p className="text-sm text-slate-500">{employee.employee_code ?? "No employee code"}</p>
+          <div className="min-w-0">
+            <h2 className="text-xl font-semibold text-slate-900 truncate">{employee.full_name}</h2>
+            <div className="mt-1 flex items-center gap-2 text-sm text-slate-500">
+              <span>{employee.employee_code ?? "No employee code"}</span>
+              <span className="text-slate-300">&bull;</span>
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusBadgeClass(employee.status)}`}>
+                <span className={`h-1 w-1 rounded-full ${employee.status === 'active' ? 'bg-emerald-500' : employee.status === 'inactive' ? 'bg-amber-500' : 'bg-rose-500'}`}></span>
+                {employee.status}
+              </span>
+            </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 relative">
-          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeClass(employee.status)}`}>
-            {employee.status}
-          </span>
+        <div className="flex items-center gap-2 relative shrink-0">
           {isEditing ? (
             <button
               type="button"
@@ -329,17 +333,18 @@ export default function EmployeeDetail() {
             </button>
           ) : null}
           
-          {/* Mobile Action Menu Toggle */}
+          {/* Action Menu Toggle */}
           <button
             type="button"
             onClick={() => setShowActionsMenu(!showActionsMenu)}
-            className="md:hidden rounded-lg border border-slate-300 p-2 text-slate-700 hover:bg-slate-100 transition"
+            className="rounded-lg border border-slate-300 p-2 text-slate-700 hover:bg-slate-100 transition shadow-sm"
+            title="More Actions"
           >
             <MoreVertical className="h-5 w-5" />
           </button>
 
-          {/* Action Buttons (Desktop visible, Mobile dropdown) */}
-          <div className={`absolute right-0 top-full mt-2 w-48 flex-col gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg md:static md:w-auto md:flex-row md:border-none md:bg-transparent md:p-0 md:shadow-none z-10 ${showActionsMenu ? "flex" : "hidden md:flex"}`}>
+          {/* Action Menu Dropdown */}
+          <div className={`absolute left-0 sm:left-auto sm:right-0 top-full mt-2 w-48 flex-col gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-xl z-50 ${showActionsMenu ? "flex" : "hidden"}`}>
             <button
               type="button"
               disabled={saving || resetLoading || resetStep !== null}
@@ -347,7 +352,7 @@ export default function EmployeeDetail() {
                 openPasswordReset();
                 setShowActionsMenu(false);
               }}
-              className="w-full text-left md:w-auto rounded-lg border-0 md:border md:border-violet-300 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-60 transition"
+              className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 transition"
             >
               Reset Password
             </button>
@@ -359,7 +364,7 @@ export default function EmployeeDetail() {
                   void updateStatus("active");
                   setShowActionsMenu(false);
                 }}
-                className="w-full text-left md:w-auto rounded-lg border-0 md:border md:border-emerald-300 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 transition"
+                className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 transition"
               >
                 Reactivate
               </button>
@@ -371,7 +376,7 @@ export default function EmployeeDetail() {
                 void updateStatus("inactive");
                 setShowActionsMenu(false);
               }}
-              className="w-full text-left md:w-auto rounded-lg border-0 md:border md:border-amber-300 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-60 transition"
+              className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-60 transition"
             >
               Deactivate
             </button>
@@ -382,7 +387,7 @@ export default function EmployeeDetail() {
                 void updateStatus("terminated");
                 setShowActionsMenu(false);
               }}
-              className="w-full text-left md:w-auto rounded-lg border-0 md:border md:border-rose-300 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-60 transition"
+              className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-60 transition"
             >
               Terminate
             </button>
@@ -460,88 +465,88 @@ export default function EmployeeDetail() {
       </div>
 
       {activeTab === "personal" ? (
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="mt-4 grid gap-5 md:grid-cols-2">
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Full Name</span>
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Full Name</span>
             <input
               value={editForm.full_name ?? ""}
               onChange={(event) => updateField("full_name", event.target.value)}
               disabled={!isEditing}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Email (Cannot be changed after creation)</span>
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Email</span>
             <input
               value={editForm.email ?? ""}
               onChange={(event) => updateField("email", event.target.value)}
               disabled={true} // Hard-disabled to prevent Auth desync
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500 cursor-not-allowed"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-500 outline-none transition-all disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100 cursor-not-allowed"
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Phone</span>
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Phone</span>
             <input
               value={editForm.phone ?? ""}
               onChange={(event) => updateField("phone", event.target.value)}
               disabled={!isEditing}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Date of Joining</span>
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Date of Joining</span>
             <input
               type="date"
               value={editForm.date_of_joining ?? ""}
               onChange={(event) => updateField("date_of_joining", event.target.value)}
               disabled={!isEditing}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Department</span>
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Department</span>
             <input
               value={editForm.department ?? ""}
               onChange={(event) => updateField("department", event.target.value)}
               disabled={!isEditing}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+              className="w-full capitalize rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Designation</span>
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Designation</span>
             <input
               value={editForm.designation ?? ""}
               onChange={(event) => updateField("designation", event.target.value)}
               disabled={!isEditing}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+              className="w-full capitalize rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
             />
           </label>
           <label className="text-sm md:col-span-2">
-            <span className="mb-1 block text-slate-600">Address</span>
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Address</span>
             <textarea
               value={editForm.address ?? ""}
               onChange={(event) => updateField("address", event.target.value)}
               disabled={!isEditing}
               rows={2}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:resize-none disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Emergency Contact Name</span>
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Emergency Contact Name</span>
             <input
               value={editForm.emergency_contact_name ?? ""}
               onChange={(event) => updateField("emergency_contact_name", event.target.value)}
               disabled={!isEditing}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Emergency Contact Phone</span>
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Emergency Contact Phone</span>
             <input
               value={editForm.emergency_contact_phone ?? ""}
               onChange={(event) => updateField("emergency_contact_phone", event.target.value)}
               disabled={!isEditing}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
             />
           </label>
         </div>
@@ -552,30 +557,30 @@ export default function EmployeeDetail() {
           <button
             type="button"
             onClick={() => setShowSensitive((value) => !value)}
-            className="mb-3 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+            className="mb-5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
           >
             {showSensitive ? "Hide" : "Show"} sensitive fields
           </button>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-              <p className="text-slate-500">Aadhaar Number</p>
+          <div className="grid gap-5 md:grid-cols-2">
+            <div>
+              <p className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Aadhaar Number</p>
               <p className="font-semibold text-slate-900">{maskValue(employee.aadhaar_number, showSensitive)}</p>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-              <p className="text-slate-500">PAN Number</p>
+            <div>
+              <p className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">PAN Number</p>
               <p className="font-semibold text-slate-900">{maskValue(employee.pan_number, showSensitive)}</p>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-              <p className="text-slate-500">Bank Name</p>
+            <div>
+              <p className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Bank Name</p>
               <p className="font-semibold text-slate-900">{employee.bank_name ?? "—"}</p>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-              <p className="text-slate-500">Account Number</p>
+            <div>
+              <p className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Account Number</p>
               <p className="font-semibold text-slate-900">{maskValue(employee.account_number, showSensitive)}</p>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm md:col-span-2">
-              <p className="text-slate-500">IFSC Code</p>
+            <div className="md:col-span-2">
+              <p className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">IFSC Code</p>
               <p className="font-semibold text-slate-900">{maskValue(employee.ifsc_code, showSensitive, 2)}</p>
             </div>
           </div>
@@ -583,21 +588,26 @@ export default function EmployeeDetail() {
       ) : null}
 
       {activeTab === "documents" ? (
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 space-y-3">
           {documents.length === 0 ? (
             <div className="py-4"><EmptyState icon={File} title="No documents" description="No uploaded documents found in storage." /></div>
           ) : (
             documents.map((doc) => (
-              <div key={doc.key} className="flex flex-wrap items-center justify-between rounded-lg border border-slate-200 p-3">
-                <div>
-                  <p className="text-sm font-medium text-slate-900">{doc.key.split("/").pop()}</p>
-                  <p className="text-xs text-slate-500">{new Date(doc.uploadedAt).toLocaleString()} — {(doc.size / 1024).toFixed(1)} KB</p>
+              <div key={doc.key} className="flex flex-wrap items-center justify-between rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-slate-300 transition-colors">
+                <div className="flex items-center gap-4">
+                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600 ring-1 ring-brand-500/20">
+                     <File className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{doc.key.split("/").pop()}</p>
+                    <p className="text-xs font-medium text-slate-500 mt-0.5">{new Date(doc.uploadedAt).toLocaleString()} — {(doc.size / 1024).toFixed(1)} KB</p>
+                  </div>
                 </div>
                 <a
                   href={doc.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                  className="mt-3 md:mt-0 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-brand-600 transition-colors shadow-sm"
                 >
                   Download
                 </a>
@@ -609,29 +619,29 @@ export default function EmployeeDetail() {
 
       {activeTab === "attendance" ? (
         <div className="mt-4">
-          <p className="mb-3 text-sm text-slate-600">Last 30 days mini calendar</p>
-          <div className="grid grid-cols-6 gap-2 sm:grid-cols-10">
+          <p className="mb-4 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Last 30 days mini calendar</p>
+          <div className="grid grid-cols-5 gap-2 sm:grid-cols-7 md:grid-cols-10">
             {lastThirtyDays.map((day) => {
               const dateKey = formatLocalDate(day);
               const status = attendanceMap[dateKey];
               const isFuture = day > new Date();
 
               const colorClass = isFuture
-                ? "bg-slate-50 text-slate-400 border border-slate-100"
+                ? "bg-slate-50 text-slate-400 border border-slate-100 opacity-60"
                 : status === "present"
-                  ? "bg-emerald-100 text-emerald-700"
+                  ? "bg-emerald-50 text-emerald-700 border border-emerald-100 ring-1 ring-emerald-500/20 shadow-sm"
                   : status === "half_day"
-                    ? "bg-amber-100 text-amber-700"
+                    ? "bg-amber-50 text-amber-700 border border-amber-100 ring-1 ring-amber-500/20 shadow-sm"
                     : status === "on_leave"
-                      ? "bg-cyan-100 text-cyan-700"
+                      ? "bg-cyan-50 text-cyan-700 border border-cyan-100 ring-1 ring-cyan-500/20 shadow-sm"
                       : status === "absent"
-                        ? "bg-rose-100 text-rose-700"
-                        : "bg-slate-100 text-slate-500 border border-slate-200";
+                        ? "bg-rose-50 text-rose-700 border border-rose-100 ring-1 ring-rose-500/20 shadow-sm"
+                        : "bg-white text-slate-500 border border-slate-200 shadow-sm";
 
               return (
-                <div key={dateKey} className={`rounded-lg p-2 text-center text-xs font-medium ${colorClass}`} title={`${dateKey} - ${isFuture ? "Future" : status || "No Record"}`}>
-                  <div>{day.getDate()}</div>
-                  <div className="mt-1 uppercase">
+                <div key={dateKey} className={`rounded-xl p-2 text-center transition-transform hover:scale-105 cursor-default ${colorClass}`} title={`${dateKey} - ${isFuture ? "Future" : status || "No Record"}`}>
+                  <div className="text-[10px] font-bold opacity-70">{day.getDate()}</div>
+                  <div className="mt-1 text-sm font-bold uppercase">
                     {isFuture ? "—" : status === "on_leave" ? "L" : status === "present" ? "P" : status === "half_day" ? "H" : status === "absent" ? "A" : "—"}
                   </div>
                 </div>

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Clock, Pencil, Plus, Save, Trash2, Users } from "lucide-react";
+import { AlertTriangle, Clock, Pencil, Plus, Save, Search, Trash2, Users } from "lucide-react";
 import { db } from "../insforge/client";
 import { useTenant } from "../contexts/TenantContext";
 import type { Employee, EmployeeShift, Shift } from "../types";
 import { useToast } from "../shared/ToastContext";
 import { useAuditLog } from "../hooks/useAuditLog";
 import { Skeleton } from "../shared/Skeleton";
+import { SelectDropdown } from "../shared/components/SelectDropdown";
 import { EmptyState } from "../shared/EmptyState";
 import { ConfirmModal } from "../shared/ConfirmModal";
 import { formatLocalDate } from "../utils/date";
@@ -25,6 +26,7 @@ type EmployeeAssignmentRow = {
   employee: Employee;
   explicitAssignment: EmployeeShift | null;
   currentShift: Shift | null;
+  nextShift?: Shift | null;
 };
 
 const DAY_OPTIONS = [
@@ -230,6 +232,7 @@ export default function ShiftManagement() {
   const [employeeAssignments, setEmployeeAssignments] = useState<EmployeeShift[]>([]);
   const [selectedEmployees, setSelectedEmployees] = useState<Record<string, boolean>>({});
   const [bulkShiftId, setBulkShiftId] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const fetchData = useCallback(async () => {
     if (!tenantId) return;
@@ -242,7 +245,6 @@ export default function ShiftManagement() {
         db.from("employee_shifts")
           .select("*")
           .eq("tenant_id", tenantId)
-          .lte("effective_from", today)
           .or(`effective_to.is.null,effective_to.gte.${today}`)
           .order("effective_from", { ascending: false }),
       ]);
@@ -269,19 +271,35 @@ export default function ShiftManagement() {
   const defaultShift = useMemo(() => shifts.find((shift) => shift.is_default && shift.is_active !== false) ?? null, [shifts]);
 
   const assignmentRows = useMemo<EmployeeAssignmentRow[]>(() => {
+    const today = todayString();
     const assignmentMap = new Map<string, EmployeeShift>();
+    const futureAssignmentMap = new Map<string, EmployeeShift>();
+    
     employeeAssignments.forEach((assignment) => {
-      if (!assignmentMap.has(assignment.employee_id)) {
-        assignmentMap.set(assignment.employee_id, assignment);
+      if (assignment.effective_from > today) {
+        if (!futureAssignmentMap.has(assignment.employee_id)) {
+          futureAssignmentMap.set(assignment.employee_id, assignment);
+        }
+      } else {
+        if (!assignmentMap.has(assignment.employee_id)) {
+          assignmentMap.set(assignment.employee_id, assignment);
+        }
       }
     });
 
     return employees.map((employee) => {
       const explicitAssignment = assignmentMap.get(employee.id) ?? null;
+      const futureAssignment = futureAssignmentMap.get(employee.id) ?? null;
+      
       const currentShift = explicitAssignment
         ? shifts.find((shift) => shift.id === explicitAssignment.shift_id) ?? null
         : defaultShift;
-      return { employee, explicitAssignment, currentShift };
+        
+      const nextShift = futureAssignment
+        ? shifts.find((shift) => shift.id === futureAssignment.shift_id) ?? null
+        : null;
+
+      return { employee, explicitAssignment, currentShift, nextShift };
     });
   }, [defaultShift, employeeAssignments, employees, shifts]);
 
@@ -293,6 +311,16 @@ export default function ShiftManagement() {
       return acc;
     }, {});
   }, [assignmentRows]);
+
+  const filteredAssignmentRows = useMemo(() => {
+    if (!searchQuery.trim()) return assignmentRows;
+    const query = searchQuery.toLowerCase();
+    return assignmentRows.filter((row) => 
+      row.employee.full_name.toLowerCase().includes(query) ||
+      (row.employee.employee_code && row.employee.employee_code.toLowerCase().includes(query)) ||
+      (row.employee.department && row.employee.department.toLowerCase().includes(query))
+    );
+  }, [assignmentRows, searchQuery]);
 
   async function saveShift(form: ShiftFormState, shiftId?: string) {
     if (!tenantId) return;
@@ -412,7 +440,7 @@ export default function ShiftManagement() {
   }
 
   async function scheduleShiftChange(row: EmployeeAssignmentRow, newShiftId: string) {
-    if (!tenantId || !newShiftId || !row.currentShift?.id || row.currentShift.id === newShiftId) return;
+    if (!tenantId || !newShiftId || row.currentShift?.id === newShiftId) return;
     const today = todayString();
     const tomorrow = tomorrowString();
 
@@ -606,7 +634,8 @@ export default function ShiftManagement() {
       ) : null}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="overflow-x-auto rounded-xl border border-slate-200">
+        {/* DESKTOP VIEW */}
+        <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-slate-600">
               <tr>
@@ -669,19 +698,11 @@ export default function ShiftManagement() {
                         <tr key={`${shift.id}-edit`}>
                           <td colSpan={7} className="bg-slate-50 px-4 py-4">
                             <div className="rounded-xl border border-slate-200 bg-white p-4">
-                              {/* ── Historical shift warning ───────────────────────────────────────
-                                   Editing start/end times retroactively affects how resolveShiftStartTime
-                                   resolves past attendance (it queries shifts live by id, not at-punch-time).
-                                   Show a non-blocking warning so HR is aware before saving. */}
-                              {employeeAssignments.some(
-                                (a) => a.shift_id === shift.id && a.effective_from < todayString(),
-                              ) && (
+                              {employeeAssignments.some((a) => a.shift_id === shift.id && a.effective_from < todayString()) && (
                                 <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                                   <span>
-                                    <strong>Historical shift:</strong> This shift has been used in past assignments.
-                                    Editing its times or working days may affect how past attendance and lateness
-                                    calculations are displayed. Consider creating a new shift instead.
+                                    <strong>Historical shift:</strong> This shift has been used in past assignments. Editing its times or working days may affect how past attendance and lateness calculations are displayed. Consider creating a new shift instead.
                                   </span>
                                 </div>
                               )}
@@ -717,52 +738,128 @@ export default function ShiftManagement() {
             </tbody>
           </table>
         </div>
+
+        {/* MOBILE VIEW */}
+        <div className="md:hidden grid gap-3">
+          {shifts.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+              <EmptyState icon={Clock} title="No shifts found" description="Create the first shift for this tenant." />
+            </div>
+          ) : (
+            shifts.map((shift) => {
+              const assignedEmployees = employeesPerShift[shift.id ?? ""] ?? 0;
+              const isEditing = editingShiftId === shift.id;
+              return (
+                <div key={shift.id} className="rounded-2xl border border-slate-100 bg-white shadow-sm overflow-hidden">
+                  {isEditing ? (
+                    <div className="p-4 bg-slate-50">
+                      {employeeAssignments.some((a) => a.shift_id === shift.id && a.effective_from < todayString()) && (
+                        <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" />
+                          <span><strong>Historical shift:</strong> Past assignments exist.</span>
+                        </div>
+                      )}
+                      <ShiftFormFields form={editingShiftForm} onChange={setEditingShiftForm} />
+                      <div className="mt-4 flex justify-end gap-2">
+                        <button onClick={() => { setEditingShiftId(null); setEditingShiftForm(defaultShiftForm); }} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+                        <button onClick={() => void saveShift(editingShiftForm, shift.id)} disabled={savingShift} className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"><Save className="h-4 w-4" /> Save</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-bold text-slate-900">{shift.name}</h4>
+                        {shift.is_default && <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-700">Default</span>}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-sm mb-4">
+                        <div className="rounded-lg bg-slate-50 p-2">
+                          <p className="text-[10px] font-semibold text-slate-500 uppercase">Start Time</p>
+                          <p className="font-medium text-slate-900">{formatTimeValue(shift.start_time)}</p>
+                        </div>
+                        <div className="rounded-lg bg-slate-50 p-2">
+                          <p className="text-[10px] font-semibold text-slate-500 uppercase">End Time</p>
+                          <p className="font-medium text-slate-900">{formatTimeValue(shift.end_time)}</p>
+                        </div>
+                        <div className="rounded-lg bg-slate-50 p-2">
+                          <p className="text-[10px] font-semibold text-slate-500 uppercase">Working Days</p>
+                          <p className="font-medium text-slate-900 truncate">{formatWorkingDays(shift.working_days)}</p>
+                        </div>
+                        <div className="rounded-lg bg-slate-50 p-2">
+                          <p className="text-[10px] font-semibold text-slate-500 uppercase">Employees</p>
+                          <p className="font-medium text-slate-900">{assignedEmployees}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button onClick={() => { setEditingShiftId(shift.id ?? null); setEditingShiftForm(toShiftForm(shift)); setShowAddForm(false); }} className="flex-1 justify-center inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"><Pencil className="h-3.5 w-3.5" /> Edit</button>
+                        <button onClick={() => setDeleteTarget(shift)} disabled={assignedEmployees > 0} className="flex-1 justify-center inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /> Delete</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-lg font-semibold text-slate-900">Assign Employees to Shifts</h3>
             <p className="text-sm text-slate-500">Shift changes are scheduled for the next day to preserve today’s attendance rules.</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={bulkShiftId}
-              onChange={(event) => setBulkShiftId(event.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
-            >
-              <option value="">Select shift</option>
-              {shifts.filter((shift) => shift.is_active !== false).map((shift) => (
-                <option key={shift.id} value={shift.id}>{shift.name}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => void handleBulkAssignment()}
-              disabled={savingAssignments}
-              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
-            >
-              {savingAssignments ? "Applying..." : "Assign selected employees to shift"}
-            </button>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search employees..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full sm:w-64 rounded-lg border border-slate-300 pl-9 pr-4 py-2 text-sm outline-none transition-shadow focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <SelectDropdown
+                value={bulkShiftId}
+                onChange={setBulkShiftId}
+                options={[
+                  { value: "", label: "Select shift" },
+                  ...shifts.filter((shift) => shift.is_active !== false).map((shift) => ({ value: shift.id, label: shift.name })),
+                ]}
+                containerClassName="min-w-[150px] flex-1 sm:flex-none"
+                triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              />
+              <button
+                type="button"
+                onClick={() => void handleBulkAssignment()}
+                disabled={savingAssignments}
+                className="whitespace-nowrap rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+              >
+                {savingAssignments ? "Applying..." : "Assign"}
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="overflow-x-auto rounded-xl border border-slate-200">
+        {/* DESKTOP VIEW */}
+        <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-slate-600">
               <tr>
                 <th className="px-4 py-3 font-semibold">
                   <input
                     type="checkbox"
-                    checked={assignmentRows.length > 0 && assignmentRows.every((row) => selectedEmployees[row.employee.id])}
+                    checked={filteredAssignmentRows.length > 0 && filteredAssignmentRows.every((row) => selectedEmployees[row.employee.id])}
                     onChange={(event) => {
                       const checked = event.target.checked;
-                      setSelectedEmployees(
-                        assignmentRows.reduce<Record<string, boolean>>((acc, row) => {
-                          acc[row.employee.id] = checked;
-                          return acc;
-                        }, {}),
-                      );
+                      setSelectedEmployees((current) => {
+                        const next = { ...current };
+                        filteredAssignmentRows.forEach(row => {
+                          next[row.employee.id] = checked;
+                        });
+                        return next;
+                      });
                     }}
                     className="rounded border-slate-300 text-brand-600 focus:ring-brand-600"
                   />
@@ -774,14 +871,18 @@ export default function ShiftManagement() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 bg-white">
-              {assignmentRows.length === 0 ? (
+              {filteredAssignmentRows.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="p-10">
-                    <EmptyState icon={Users} title="No active employees" description="Active employees will appear here for shift assignment." />
+                    <EmptyState 
+                      icon={Users} 
+                      title={searchQuery ? "No employees found" : "No active employees"} 
+                      description={searchQuery ? `No employees match "${searchQuery}"` : "Active employees will appear here for shift assignment."} 
+                    />
                   </td>
                 </tr>
               ) : (
-                assignmentRows.map((row) => (
+                filteredAssignmentRows.map((row) => (
                   <tr key={row.employee.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3">
                       <input
@@ -793,25 +894,110 @@ export default function ShiftManagement() {
                     </td>
                     <td className="px-4 py-3 font-medium text-slate-900">{row.employee.full_name}</td>
                     <td className="px-4 py-3 text-slate-700 capitalize">{row.employee.department ?? "-"}</td>
-                    <td className="px-4 py-3 text-slate-700">{row.currentShift?.name ?? "Standard shift"}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      <div>{row.currentShift?.name ?? "Standard shift"}</div>
+                      {row.nextShift && row.nextShift.id !== row.currentShift?.id && (
+                        <div className="mt-1">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-700 ring-1 ring-inset ring-brand-600/20">
+                            Changes to {row.nextShift.name} tomorrow
+                          </span>
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
-                      <select
-                        value={row.currentShift?.id ?? ""}
-                        onChange={(event) => void handleSingleAssignment(row, event.target.value)}
-                        disabled={savingAssignments}
-                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
-                      >
-                        <option value="">Select shift</option>
-                        {shifts.filter((shift) => shift.is_active !== false).map((shift) => (
-                          <option key={shift.id} value={shift.id}>{shift.name}</option>
-                        ))}
-                      </select>
+                      <SelectDropdown
+                        value={row.nextShift?.id ?? row.currentShift?.id ?? ""}
+                        onChange={(value) => void handleSingleAssignment(row, value)}
+                        options={[
+                          { value: "", label: "Select shift" },
+                          ...shifts.filter((shift) => shift.is_active !== false).map((shift) => ({ value: shift.id, label: shift.name })),
+                        ]}
+                        containerClassName="w-full min-w-[140px]"
+                        triggerClassName="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:opacity-50"
+                      />
                     </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* MOBILE VIEW */}
+        <div className="md:hidden grid gap-3">
+          {filteredAssignmentRows.length > 0 && (
+            <label className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 text-sm font-semibold text-slate-700 border border-slate-200 shadow-sm cursor-pointer active:bg-slate-100 transition-colors">
+              <input
+                type="checkbox"
+                checked={filteredAssignmentRows.every((row) => selectedEmployees[row.employee.id])}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setSelectedEmployees((current) => {
+                    const next = { ...current };
+                    filteredAssignmentRows.forEach(row => {
+                      next[row.employee.id] = checked;
+                    });
+                    return next;
+                  });
+                }}
+                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+              />
+              Select All Employees
+            </label>
+          )}
+          {filteredAssignmentRows.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+              <EmptyState 
+                icon={Users} 
+                title={searchQuery ? "No employees found" : "No active employees"} 
+                description={searchQuery ? `No employees match "${searchQuery}"` : "Active employees will appear here for shift assignment."} 
+              />
+            </div>
+          ) : (
+            filteredAssignmentRows.map((row) => (
+              <label
+                key={row.employee.id}
+                className={`flex flex-col gap-3 rounded-2xl border ${selectedEmployees[row.employee.id] ? 'border-brand-500 ring-1 ring-brand-500 bg-brand-50/20' : 'border-slate-100 bg-white'} p-4 shadow-sm transition-all cursor-pointer`}
+              >
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(selectedEmployees[row.employee.id])}
+                    onChange={(e) => setSelectedEmployees((current) => ({ ...current, [row.employee.id]: e.target.checked }))}
+                    className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-bold text-slate-900 truncate">{row.employee.full_name}</p>
+                    <p className="text-xs font-medium text-slate-500 capitalize">{row.employee.department ?? "No Dept"}</p>
+                  </div>
+                </div>
+                <div className="pl-7 space-y-3 text-sm">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider">Current Shift</span>
+                    <span className="font-semibold text-slate-700">{row.currentShift?.name ?? "Standard shift"}</span>
+                  </div>
+                  {row.nextShift && row.nextShift.id !== row.currentShift?.id && (
+                    <div className="rounded-lg bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700 border border-brand-100">
+                      Changes to <strong className="font-bold">{row.nextShift.name}</strong> tomorrow
+                    </div>
+                  )}
+                  <div onClick={(e) => e.preventDefault()} className="pt-2 border-t border-slate-100">
+                    <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider block mb-1">Change Shift (Effective Tomorrow)</span>
+                    <SelectDropdown
+                      value={row.nextShift?.id ?? row.currentShift?.id ?? ""}
+                      onChange={(value) => void handleSingleAssignment(row, value)}
+                      options={[
+                        { value: "", label: "Select shift" },
+                        ...shifts.filter((shift) => shift.is_active !== false).map((shift) => ({ value: shift.id, label: shift.name })),
+                      ]}
+                      containerClassName="w-full"
+                      triggerClassName="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:opacity-50"
+                    />
+                  </div>
+                </div>
+              </label>
+            ))
+          )}
         </div>
       </div>
 

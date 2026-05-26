@@ -6,11 +6,12 @@ interface EmptyStateProps {
   title: string;
   description: string;
   action?: ReactNode;
+  minimal?: boolean;
 }
 
-export function EmptyState({ icon: Icon, title, description, action }: EmptyStateProps) {
+export function EmptyState({ icon: Icon, title, description, action, minimal = false }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center p-12 text-center border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
+    <div className={`flex flex-col items-center justify-center p-12 text-center ${minimal ? "" : "border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50"}`}>
       <div className="grid h-16 w-16 place-items-center rounded-2xl bg-white shadow-sm ring-1 ring-slate-100 mb-4">
         <Icon className="h-8 w-8 text-slate-400" />
       </div>

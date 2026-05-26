@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Calendar, ChevronLeft, ChevronRight, Download, Users, BarChart3, Clock, Pencil, Check, X, ClipboardList, MapPin, FileEdit } from "lucide-react";
-import type { Attendance, Employee } from "../types";
+import type { Attendance, Employee, Shift, EmployeeShift } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
@@ -8,6 +8,7 @@ import { useAuditLog } from "../hooks/useAuditLog";
 import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
+import { SelectDropdown } from "../shared/components/SelectDropdown";
 import LocationMap from "../shared/LocationMap";
 import { calculateDistance, getLocationStatusText, type LocationStatus } from "../utils/geolocation";
 import { functions } from "../insforge/client";
@@ -182,6 +183,9 @@ export default function HRAttendance() {
   const [dailyDate, setDailyDate] = useState(fmt(new Date()));
   const [dailyRows, setDailyRows] = useState<AttendanceWithEmployee[]>([]);
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [employeeShifts, setEmployeeShifts] = useState<EmployeeShift[]>([]);
+  const [selectedShift, setSelectedShift] = useState<string>("all");
   const [dailyLoading, setDailyLoading] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editPunchIn, setEditPunchIn] = useState("");
@@ -252,13 +256,22 @@ export default function HRAttendance() {
   const fetchDaily = useCallback(async () => {
     setDailyLoading(true);
     try {
-      const { data: attData, error: fetchErr } = await db
-        .from("attendance")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .eq("date", dailyDate);
-      if (fetchErr) throw fetchErr;
-      const att = (attData ?? []) as AttendanceWithEmployee[];
+      const [attRes, shiftRes, empShiftRes] = await Promise.all([
+        db.from("attendance").select("*").eq("tenant_id", tenantId).eq("date", dailyDate),
+        db.from("shifts").select("*").eq("tenant_id", tenantId).eq("is_active", true),
+        db.from("employee_shifts").select("*").eq("tenant_id", tenantId)
+          .lte("effective_from", dailyDate)
+          .or(`effective_to.is.null,effective_to.gte.${dailyDate}`),
+      ]);
+
+      if (attRes.error) throw attRes.error;
+      if (shiftRes.error) throw shiftRes.error;
+      if (empShiftRes.error) throw empShiftRes.error;
+
+      setShifts((shiftRes.data ?? []) as Shift[]);
+      setEmployeeShifts((empShiftRes.data ?? []) as EmployeeShift[]);
+
+      const att = (attRes.data ?? []) as AttendanceWithEmployee[];
       const merged: AttendanceWithEmployee[] = allEmployees.map((emp) => {
         const rec = att.find((row) => row.employee_id === emp.id);
         if (rec) return { ...rec, employee: emp };
@@ -993,9 +1006,26 @@ export default function HRAttendance() {
     }
   }
 
+  const filteredDailyRows = useMemo(() => {
+    if (selectedShift === "all") return dailyRows;
+    const assignedIds = new Set(
+      employeeShifts
+        .filter((es) => es.shift_id === selectedShift)
+        .map((es) => es.employee_id)
+    );
+    const isDefault = shifts.find(s => s.id === selectedShift)?.is_default;
+    const hasAnyAssignment = new Set(employeeShifts.map(es => es.employee_id));
+
+    return dailyRows.filter(row => {
+      if (assignedIds.has(row.employee_id)) return true;
+      if (isDefault && !hasAnyAssignment.has(row.employee_id)) return true;
+      return false;
+    });
+  }, [selectedShift, dailyRows, employeeShifts, shifts]);
+
   function exportDaily() {
     const header = ["Employee", "Punch In", "Punch Out", "Work Hours", "Status"];
-    const rows = dailyRows.map((row) => [
+    const rows = filteredDailyRows.map((row) => [
       row.employee?.full_name ?? row.employee_id,
       fmtTime(row.punch_in),
       fmtTime(row.punch_out),
@@ -1041,9 +1071,8 @@ export default function HRAttendance() {
             <button
               key={key}
               onClick={() => setView(key as ViewMode)}
-              className={`whitespace-nowrap snap-start inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                view === key ? "bg-brand-600 text-white shadow-sm" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-              }`}
+              className={`whitespace-nowrap snap-start inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${view === key ? "bg-brand-600 text-white shadow-sm" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
             >
               <Icon className="h-4 w-4" />
               {label}
@@ -1055,14 +1084,29 @@ export default function HRAttendance() {
       {view === "daily" ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-5 shadow-sm">
           <div className="mb-6 md:mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-6 md:gap-3">
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <label className="text-sm font-medium text-slate-700 whitespace-nowrap">Date:</label>
-              <input
-                type="date"
-                value={dailyDate}
-                onChange={(event) => setDailyDate(event.target.value)}
-                className="w-full sm:w-auto rounded-lg border border-slate-300 px-3 py-2 sm:py-1.5 text-sm outline-none ring-brand-600 focus:ring"
-              />
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full sm:w-auto">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <label className="text-sm font-medium text-slate-700 whitespace-nowrap">Date:</label>
+                <input
+                  type="date"
+                  value={dailyDate}
+                  onChange={(event) => setDailyDate(event.target.value)}
+                  className="w-full sm:w-auto rounded-lg border border-slate-300 px-3 py-2 sm:py-1.5 text-sm outline-none ring-brand-600 focus:ring"
+                />
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <label className="text-sm font-medium text-slate-700 whitespace-nowrap">Shift:</label>
+                <SelectDropdown
+                  value={selectedShift}
+                  onChange={setSelectedShift}
+                  options={[
+                    { value: "all", label: "All Shifts" },
+                    ...shifts.map((s) => ({ value: s.id, label: s.name })),
+                  ]}
+                  containerClassName="w-full sm:w-auto min-w-[140px]"
+                  triggerClassName="w-full sm:w-auto rounded-lg border border-slate-300 bg-white px-3 py-2 sm:py-1.5 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                />
+              </div>
             </div>
             <button
               onClick={exportDaily}
@@ -1072,32 +1116,35 @@ export default function HRAttendance() {
             </button>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-full divide-y divide-slate-200 text-sm block md:table">
-              <thead className="hidden md:table-header-group bg-slate-50 text-left text-slate-600">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">Employee</th>
-                  <th className="px-4 py-3 font-semibold">Punch In</th>
-                  <th className="px-4 py-3 font-semibold">Punch Out</th>
-                  <th className="px-4 py-3 font-semibold">Work Hours</th>
-                  <th className="px-4 py-3 font-semibold">Status</th>
-                  <th className="px-4 py-3 font-semibold">Location</th>
-                  <th className="px-4 py-3 font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 bg-white block md:table-row-group">
-                {dailyLoading ? (
-                  [...Array(5)].map((_, index) => (
-                    <tr key={index}>
-                      {[...Array(7)].map((__, cellIndex) => (
-                        <td key={cellIndex} className="px-4 py-3"><Skeleton className="h-4 w-full max-w-[100px]" /></td>
-                      ))}
-                    </tr>
-                  ))
-                ) : dailyRows.length === 0 ? (
-                  <tr><td colSpan={7} className="p-10"><EmptyState icon={Users} title="No employees found" description="There are no employees to display attendance for." /></td></tr>
-                ) : (
-                  dailyRows.map((row) => {
+          {!dailyLoading && filteredDailyRows.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-10">
+              <EmptyState icon={Users} title="No employees found" description="There are no employees to display attendance for." minimal />
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="min-w-full divide-y divide-slate-200 text-sm block md:table">
+                <thead className="hidden md:table-header-group bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3">Employee</th>
+                    <th className="px-4 py-3">Punch In</th>
+                    <th className="px-4 py-3">Punch Out</th>
+                    <th className="px-4 py-3">Work Hours</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Location</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 bg-white block md:table-row-group">
+                  {dailyLoading ? (
+                    [...Array(5)].map((_, index) => (
+                      <tr key={index}>
+                        {[...Array(7)].map((__, cellIndex) => (
+                          <td key={cellIndex} className="px-4 py-3"><Skeleton className="h-4 w-full max-w-[100px]" /></td>
+                        ))}
+                      </tr>
+                    ))
+                  ) : (
+                  filteredDailyRows.map((row) => {
                     const isEditing = editId === row.employee_id;
                     const { cls, label } = statusBadge(row.status as AttendanceStatus);
                     const punchInLat = toNumber(row.punch_in_lat);
@@ -1140,7 +1187,10 @@ export default function HRAttendance() {
                               <option value="on_leave">On Leave</option>
                             </select>
                           ) : (
-                            <span className={`inline-flex rounded-md px-2 py-1 text-xs font-bold uppercase tracking-wide ${cls}`}>{label}</span>
+                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${cls}`}>
+                              <span className={`h-1.5 w-1.5 rounded-full ${row.status === 'present' ? 'bg-emerald-500' : row.status === 'absent' ? 'bg-rose-500' : row.status === 'half_day' ? 'bg-amber-500' : 'bg-blue-500'}`}></span>
+                              {label}
+                            </span>
                           )}
                         </td>
                         <td className="px-0 py-1.5 md:px-4 md:py-3 flex md:table-cell items-center justify-between md:justify-start">
@@ -1149,20 +1199,19 @@ export default function HRAttendance() {
                             <button
                               type="button"
                               onClick={() => setSelectedLocationRow(row)}
-                              className={`inline-flex h-8 w-8 items-center justify-center rounded-xl border transition-all hover:scale-105 active:scale-95 ${
-                                row.punch_in_location_status === "outside_fence"
+                              className={`inline-flex h-8 w-8 items-center justify-center rounded-xl border transition-all hover:scale-105 active:scale-95 ${row.punch_in_location_status === "outside_fence"
                                   ? "border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 shadow-[0_2px_8px_-2px_rgba(225,29,72,0.2)]"
                                   : "border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 shadow-[0_2px_8px_-2px_rgba(16,185,129,0.2)]"
-                              }`}
+                                }`}
                               title="View location details"
                             >
                               <MapPin className="h-4 w-4" />
                             </button>
                           ) : "-"}
                         </td>
-                        <td className="px-0 py-2 md:px-4 md:py-3 flex md:table-cell items-center justify-end md:justify-start mt-3 md:mt-0 pt-4 md:pt-0 border-t border-slate-100 md:border-0">
+                        <td className="px-0 py-2 md:px-4 md:py-3 flex md:table-cell items-center justify-end md:justify-end mt-3 md:mt-0 pt-4 md:pt-0 border-t border-slate-100 md:border-0 md:text-right">
                           {isEditing ? (
-                            <div className="flex gap-2 w-full md:w-auto">
+                            <div className="flex gap-2 w-full md:w-auto md:justify-end">
                               <button onClick={() => saveEdit(row)} disabled={saving} className="flex-1 md:flex-none justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 transition-all active:scale-95 flex items-center gap-1.5 shadow-sm hover:shadow-md hover:shadow-emerald-600/20">
                                 <Check className="h-4 w-4" /> Save
                               </button>
@@ -1171,8 +1220,8 @@ export default function HRAttendance() {
                               </button>
                             </div>
                           ) : (
-                            <button onClick={() => startEdit(row)} className="w-full md:w-auto justify-center inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all active:scale-95 shadow-sm hover:shadow">
-                              <Pencil className="h-4 w-4 text-slate-400" /> Edit
+                            <button onClick={() => startEdit(row)} className="w-full md:w-auto justify-center inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-brand-600 hover:bg-brand-50 transition-colors active:scale-95">
+                              <Pencil className="h-3.5 w-3.5" /> Edit
                             </button>
                           )}
                         </td>
@@ -1183,20 +1232,24 @@ export default function HRAttendance() {
               </tbody>
             </table>
           </div>
+          )}
         </div>
       ) : null}
 
       {view === "employee" ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-5 shadow-sm">
           <div className="mb-6 md:mb-5 flex flex-col sm:flex-row sm:items-center gap-6 md:gap-3">
-            <select
+            <SelectDropdown
               value={empViewEmployee}
-              onChange={(event) => setEmpViewEmployee(event.target.value)}
-              className="w-full sm:w-auto rounded-lg border border-slate-300 px-3 py-2.5 sm:py-2 text-sm outline-none ring-brand-600 focus:ring"
-            >
-              <option value="">Select Employee</option>
-              {allEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.full_name}</option>)}
-            </select>
+              onChange={setEmpViewEmployee}
+              options={[
+                { value: "", label: "Select Employee" },
+                ...allEmployees.map((employee) => ({ value: employee.id, label: employee.full_name }))
+              ]}
+              containerClassName="w-full sm:w-auto sm:min-w-[200px]"
+              triggerClassName="w-full sm:w-auto rounded-lg border border-slate-300 bg-white px-3 py-2.5 sm:py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              searchable
+            />
             <div className="flex items-center justify-between sm:justify-start gap-2 w-full sm:w-auto">
               <button onClick={() => { const date = new Date(empViewYear, empViewMonth - 1); setEmpViewYear(date.getFullYear()); setEmpViewMonth(date.getMonth()); }} className="rounded-lg border border-slate-200 p-2 sm:p-1.5 hover:bg-slate-100 transition flex items-center justify-center"><ChevronLeft className="h-5 w-5 sm:h-4 sm:w-4" /></button>
               <span className="min-w-[130px] text-center text-sm font-semibold text-slate-700">{monthNames[empViewMonth]} {empViewYear}</span>
@@ -1246,9 +1299,9 @@ export default function HRAttendance() {
                     <div key={day} className={`flex h-14 flex-col items-center justify-center gap-1 border-b border-r border-slate-100 ${isWeekend ? "bg-slate-50" : ""}`}>
                       <span className="text-xs text-slate-500">{day}</span>
                       {isFuture ? (
-                         <span className="text-xs font-semibold text-slate-300">—</span>
+                        <span className="text-xs font-semibold text-slate-300">—</span>
                       ) : (
-                         <span className={`h-3 w-3 rounded-full ${isWeekend && !record ? "bg-slate-200" : dotColor}`} title={record?.status ?? (isWeekend ? "weekend" : "no record")} />
+                        <span className={`h-3 w-3 rounded-full ${isWeekend && !record ? "bg-slate-200" : dotColor}`} title={record?.status ?? (isWeekend ? "weekend" : "no record")} />
                       )}
                     </div>
                   );
@@ -1272,38 +1325,56 @@ export default function HRAttendance() {
             </button>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-slate-600">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">Employee</th>
-                  <th className="px-4 py-3 font-semibold text-center">Days Present</th>
-                  <th className="px-4 py-3 font-semibold text-center">Days Absent</th>
-                  <th className="px-4 py-3 font-semibold text-center">Days On Leave</th>
-                  <th className="px-4 py-3 font-semibold text-center">Avg Work Hours</th>
-                  <th className="px-4 py-3 font-semibold text-center">Late Marks</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 bg-white">
-                {summaryLoading ? (
-                  [...Array(5)].map((_, index) => (
-                    <tr key={index}>
-                      {[...Array(6)].map((__, cellIndex) => (
-                        <td key={cellIndex} className="px-4 py-3"><Skeleton className="h-4 w-full max-w-[80px]" /></td>
-                      ))}
-                    </tr>
-                  ))
-                ) : summaryRows.length === 0 ? (
-                  <tr><td colSpan={6} className="p-10"><EmptyState icon={ClipboardList} title="No summary data" description="No attendance records available for the selected period." /></td></tr>
-                ) : (
+          {!summaryLoading && summaryRows.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-10">
+              <EmptyState icon={ClipboardList} title="No summary data" description="No attendance records available for the selected period." minimal />
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3">Employee</th>
+                    <th className="px-4 py-3 text-center">Days Present</th>
+                    <th className="px-4 py-3 text-center">Days Absent</th>
+                    <th className="px-4 py-3 text-center">Days On Leave</th>
+                    <th className="px-4 py-3 text-center">Avg Work Hours</th>
+                    <th className="px-4 py-3 text-center">Late Marks</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 bg-white">
+                  {summaryLoading ? (
+                    [...Array(5)].map((_, index) => (
+                      <tr key={index}>
+                        {[...Array(6)].map((__, cellIndex) => (
+                          <td key={cellIndex} className="px-4 py-3"><Skeleton className="h-4 w-full max-w-[80px]" /></td>
+                        ))}
+                      </tr>
+                    ))
+                  ) : (
                   summaryRows.map((row) => (
                     <tr key={row.employee.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-medium text-slate-900">{row.employee.full_name}</td>
-                      <td className="px-4 py-3 text-center"><span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">{row.daysPresent}</span></td>
-                      <td className="px-4 py-3 text-center"><span className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">{row.daysAbsent}</span></td>
-                      <td className="px-4 py-3 text-center"><span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">{row.daysOnLeave}</span></td>
                       <td className="px-4 py-3 text-center">
-                        <span className="inline-flex items-center gap-1 text-slate-700"><Clock className="h-3.5 w-3.5" />{row.avgWorkHours.toFixed(1)}h</span>
+                        <span className={`inline-flex items-center justify-center min-w-[2rem] rounded-full px-2 py-0.5 text-xs font-bold ${row.daysPresent > 0 ? 'bg-emerald-50 text-emerald-600 border border-emerald-200/50' : 'text-slate-400'}`}>
+                          {row.daysPresent}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex items-center justify-center min-w-[2rem] rounded-full px-2 py-0.5 text-xs font-bold ${row.daysAbsent > 0 ? 'bg-rose-50 text-rose-600 border border-rose-200/50' : 'text-slate-400'}`}>
+                          {row.daysAbsent}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex items-center justify-center min-w-[2rem] rounded-full px-2 py-0.5 text-xs font-bold ${row.daysOnLeave > 0 ? 'bg-blue-50 text-blue-600 border border-blue-200/50' : 'text-slate-400'}`}>
+                          {row.daysOnLeave}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex items-center gap-1 font-semibold ${row.avgWorkHours > 0 ? 'text-slate-700' : 'text-slate-400'}`}>
+                          <Clock className={`h-3.5 w-3.5 ${row.avgWorkHours > 0 ? 'text-slate-400' : 'text-slate-300'}`} />
+                          {row.avgWorkHours.toFixed(1)}h
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-center">
                         {(() => {
@@ -1314,9 +1385,7 @@ export default function HRAttendance() {
                           return (
                             <span
                               title={`${lateCount} late arrivals this month. Threshold: ${threshold}. Deduction: ${deductionHours} hours.`}
-                              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                                lateCount >= threshold && threshold > 0 ? "bg-rose-100 font-bold text-rose-700" : "bg-slate-100 text-slate-600"
-                              }`}
+                              className={`inline-flex items-center justify-center min-w-[2rem] rounded-full px-2 py-0.5 text-xs font-bold ${lateCount >= threshold && threshold > 0 ? "bg-rose-50 text-rose-600 border border-rose-200/50" : lateCount > 0 ? "bg-amber-50 text-amber-600 border border-amber-200/50" : "text-slate-400"}`}
                             >
                               {lateCount}
                             </span>
@@ -1325,10 +1394,11 @@ export default function HRAttendance() {
                       </td>
                     </tr>
                   ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -1361,16 +1431,17 @@ export default function HRAttendance() {
             </div>
 
             <div className="mb-4 grid gap-3 md:grid-cols-4">
-              <select
+              <SelectDropdown
                 value={overtimeEmployeeFilter}
-                onChange={(event) => setOvertimeEmployeeFilter(event.target.value)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
-              >
-                <option value="all">All employees</option>
-                {allEmployees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>{employee.full_name}</option>
-                ))}
-              </select>
+                onChange={setOvertimeEmployeeFilter}
+                options={[
+                  { value: "all", label: "All employees" },
+                  ...allEmployees.map((employee) => ({ value: employee.id, label: employee.full_name }))
+                ]}
+                containerClassName="w-full"
+                triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                searchable
+              />
               <input
                 type="date"
                 value={overtimeDateFrom}
@@ -1383,90 +1454,93 @@ export default function HRAttendance() {
                 onChange={(event) => setOvertimeDateTo(event.target.value)}
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
               />
-              <select
+              <SelectDropdown
                 value={overtimeStatusFilter}
-                onChange={(event) => setOvertimeStatusFilter(event.target.value as "all" | "approved" | "pending")}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
-              >
-                <option value="all">All statuses</option>
-                <option value="approved">Approved</option>
-                <option value="pending">Pending</option>
-              </select>
+                onChange={(val) => setOvertimeStatusFilter(val as "all" | "approved" | "pending")}
+                options={[
+                  { value: "all", label: "All statuses" },
+                  { value: "approved", label: "Approved" },
+                  { value: "pending", label: "Pending" }
+                ]}
+                containerClassName="w-full"
+                triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              />
             </div>
 
-            <div className="overflow-x-auto rounded-xl border border-slate-200">
-              <table className="min-w-[1100px] divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50 text-left text-slate-600">
-                  <tr>
-                    {["Employee", "Date", "Regular hours", "Overtime hours", "Rate", "Est. amount", "Approved", "Actions"].map((heading) => (
-                      <th key={heading} className="px-4 py-3 font-semibold">{heading}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 bg-white">
-                  {overtimeLoading ? (
-                    [...Array(5)].map((_, index) => (
-                      <tr key={index}>
-                        {[...Array(8)].map((__, cellIndex) => (
-                          <td key={cellIndex} className="px-4 py-3"><Skeleton className="h-4 w-full max-w-[120px]" /></td>
-                        ))}
-                      </tr>
-                    ))
-                  ) : filteredOvertimeRows.length === 0 ? (
+            {!overtimeLoading && filteredOvertimeRows.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-white p-10">
+                <EmptyState icon={Clock} title="No overtime records" description="No overtime records match the selected filters for this month." minimal />
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="min-w-[1100px] divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-200">
                     <tr>
-                      <td colSpan={8} className="p-10">
-                        <EmptyState icon={Clock} title="No overtime records" description="No overtime records match the selected filters for this month." />
-                      </td>
+                      {["Employee", "Date", "Regular hours", "Overtime hours", "Rate", "Est. amount", "Approved", "Actions"].map((heading) => (
+                        <th key={heading} className="px-4 py-3">{heading}</th>
+                      ))}
                     </tr>
-                  ) : (
-                    filteredOvertimeRows.map((row) => (
-                      <tr key={row.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-medium text-slate-900">{row.employee?.full_name ?? row.employee_id}</td>
-                        <td className="px-4 py-3 text-slate-700">{new Date(row.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</td>
-                        <td className="px-4 py-3 text-slate-700">{row.regular_hours.toFixed(2)}h</td>
-                        <td className="px-4 py-3 font-semibold text-purple-700">{row.overtime_hours.toFixed(2)}h</td>
-                        <td className="px-4 py-3 text-slate-700">{row.overtime_rate.toFixed(2)}x</td>
-                        <td className="px-4 py-3 text-slate-700">
-                          {row.overtime_amount == null ? (
-                            <div>
-                              <span>—</span>
-                              {row.estimatedAmount != null ? (
-                                <p className="text-xs text-slate-500">Preview {formatCurrency(row.estimatedAmount)}</p>
-                              ) : null}
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white">
+                    {overtimeLoading ? (
+                      [...Array(5)].map((_, index) => (
+                        <tr key={index}>
+                          {[...Array(8)].map((__, cellIndex) => (
+                            <td key={cellIndex} className="px-4 py-3"><Skeleton className="h-4 w-full max-w-[120px]" /></td>
+                          ))}
+                        </tr>
+                      ))
+                    ) : (
+                      filteredOvertimeRows.map((row) => (
+                        <tr key={row.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-medium text-slate-900">{row.employee?.full_name ?? row.employee_id}</td>
+                          <td className="px-4 py-3 text-slate-700">{new Date(row.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</td>
+                          <td className="px-4 py-3 text-slate-700">{row.regular_hours.toFixed(2)}h</td>
+                          <td className="px-4 py-3 font-semibold text-purple-700">{row.overtime_hours.toFixed(2)}h</td>
+                          <td className="px-4 py-3 text-slate-700">{row.overtime_rate.toFixed(2)}x</td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {row.overtime_amount == null ? (
+                              <div>
+                                <span>—</span>
+                                {row.estimatedAmount != null ? (
+                                  <p className="text-xs text-slate-500">Preview {formatCurrency(row.estimatedAmount)}</p>
+                                ) : null}
+                              </div>
+                            ) : formatCurrency(row.overtime_amount)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${row.approved ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-amber-50 text-amber-700 border border-amber-200"}`}>
+                              <span className={`h-1.5 w-1.5 rounded-full ${row.approved ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                              {row.approved ? "Approved" : "Pending"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void approveOvertime(row.id)}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 transition hover:bg-emerald-200"
+                                title="Approve overtime"
+                              >
+                                <Check className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void rejectOvertime(row.id)}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-rose-100 text-rose-700 transition hover:bg-rose-200"
+                                title="Reject overtime"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
                             </div>
-                          ) : formatCurrency(row.overtime_amount)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${row.approved ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                            {row.approved ? "Approved" : "Pending"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => void approveOvertime(row.id)}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 transition hover:bg-emerald-200"
-                              title="Approve overtime"
-                            >
-                              <Check className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void rejectOvertime(row.id)}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-rose-100 text-rose-700 transition hover:bg-rose-200"
-                              title="Reject overtime"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       ) : null}
@@ -1481,16 +1555,18 @@ export default function HRAttendance() {
           </div>
 
           <div className="mb-4 grid gap-3 md:grid-cols-4">
-            <select
+            <SelectDropdown
               value={correctionStatusFilter}
-              onChange={(event) => setCorrectionStatusFilter(event.target.value as "all" | "pending" | "approved" | "rejected")}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
-            >
-              <option value="all">All statuses</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-            </select>
+              onChange={(val) => setCorrectionStatusFilter(val as "all" | "pending" | "approved" | "rejected")}
+              options={[
+                { value: "all", label: "All statuses" },
+                { value: "pending", label: "Pending" },
+                { value: "approved", label: "Approved" },
+                { value: "rejected", label: "Rejected" }
+              ]}
+              containerClassName="w-full"
+              triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            />
             <input
               type="date"
               value={correctionDateFrom}
@@ -1503,44 +1579,43 @@ export default function HRAttendance() {
               onChange={(event) => setCorrectionDateTo(event.target.value)}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
             />
-            <select
+            <SelectDropdown
               value={correctionDepartmentFilter}
-              onChange={(event) => setCorrectionDepartmentFilter(event.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm capitalize outline-none ring-brand-600 focus:ring"
-            >
-              <option value="all">All departments</option>
-              {Array.from(new Set(allEmployees.map((employee) => employee.department).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b)).map((department) => (
-                <option key={department} value={department}>{department}</option>
-              ))}
-            </select>
+              onChange={setCorrectionDepartmentFilter}
+              options={[
+                { value: "all", label: "All departments" },
+                ...Array.from(new Set(allEmployees.map((employee) => employee.department).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b)).map((department) => ({ value: department, label: department }))
+              ]}
+              containerClassName="w-full"
+              triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm capitalize text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            />
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-[1400px] divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-slate-600">
-                <tr>
-                  {["Employee", "Date", "Current punch-in", "Current punch-out", "Requested punch-in", "Requested punch-out", "Reason", "Submitted", "Status", "Actions"].map((heading) => (
-                    <th key={heading} className="px-4 py-3 font-semibold">{heading}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 bg-white">
-                {correctionsLoading ? (
-                  [...Array(5)].map((_, index) => (
-                    <tr key={index}>
-                      {[...Array(10)].map((__, cellIndex) => (
-                        <td key={cellIndex} className="px-4 py-3"><Skeleton className="h-4 w-full max-w-[120px]" /></td>
-                      ))}
-                    </tr>
-                  ))
-                ) : filteredCorrectionRows.length === 0 ? (
+          {!correctionsLoading && filteredCorrectionRows.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-10">
+              <EmptyState icon={FileEdit} title="No correction requests" description="No attendance corrections match the selected filters." minimal />
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="min-w-[1400px] divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-200">
                   <tr>
-                    <td colSpan={10} className="p-10">
-                      <EmptyState icon={FileEdit} title="No correction requests" description="No attendance corrections match the selected filters." />
-                    </td>
+                    {["Employee", "Date", "Current punch-in", "Current punch-out", "Requested punch-in", "Requested punch-out", "Reason", "Submitted", "Status", "Actions"].map((heading) => (
+                      <th key={heading} className="px-4 py-3">{heading}</th>
+                    ))}
                   </tr>
-                ) : (
-                  filteredCorrectionRows.map((row) => (
+                </thead>
+                <tbody className="divide-y divide-slate-200 bg-white">
+                  {correctionsLoading ? (
+                    [...Array(5)].map((_, index) => (
+                      <tr key={index}>
+                        {[...Array(10)].map((__, cellIndex) => (
+                          <td key={cellIndex} className="px-4 py-3"><Skeleton className="h-4 w-full max-w-[120px]" /></td>
+                        ))}
+                      </tr>
+                    ))
+                  ) : (
+                    filteredCorrectionRows.map((row) => (
                     <tr key={row.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3">
                         <p className="font-medium text-slate-900">{row.employee?.full_name ?? row.employee_id}</p>
@@ -1554,11 +1629,11 @@ export default function HRAttendance() {
                       <td className="max-w-xs px-4 py-3 text-slate-700">{row.reason}</td>
                       <td className="px-4 py-3 text-slate-700">{row.created_at ? new Date(row.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                          row.status === "approved" ? "bg-emerald-100 text-emerald-700" :
-                          row.status === "rejected" ? "bg-rose-100 text-rose-700" :
-                          "bg-amber-100 text-amber-700"
-                        }`}>
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${row.status === "approved" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
+                            row.status === "rejected" ? "bg-rose-50 text-rose-700 border border-rose-200" :
+                              "bg-amber-50 text-amber-700 border border-amber-200"
+                          }`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${row.status === 'approved' ? 'bg-emerald-500' : row.status === 'rejected' ? 'bg-rose-500' : 'bg-amber-500'}`}></span>
                           {row.status}
                         </span>
                         {row.status === "rejected" && row.rejection_reason ? (
@@ -1593,10 +1668,11 @@ export default function HRAttendance() {
                       </td>
                     </tr>
                   ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       ) : null}
 

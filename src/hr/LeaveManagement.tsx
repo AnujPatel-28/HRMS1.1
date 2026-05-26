@@ -11,6 +11,7 @@ import { useToast } from "../shared/ToastContext";
 import { ConfirmModal } from "../shared/ConfirmModal";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
+import { SelectDropdown } from "../shared/components/SelectDropdown";
 import { formatLocalMonthBoundary } from "../utils/date";
 import { calculateBusinessDays } from "../utils/leave";
 
@@ -485,21 +486,39 @@ export default function LeaveManagement() {
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
           <div className="flex flex-wrap items-center gap-3">
             <Filter className="h-4 w-4 text-slate-400" />
-            <select value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring sm:flex-none">
-              <option value="all">All Employees</option>
-              {employees.map((e) => <option key={e.id} value={e.id}>{e.full_name}</option>)}
-            </select>
-            <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring sm:flex-none">
-              <option value="all">All Types</option>
-              {leaveTypes.map((t) => <option key={t.id} value={t.id} className="capitalize">{t.name}</option>)}
-              {["casual","sick","earned","unpaid","maternity","paternity","other"].map((t) => <option key={t} value={t} className="capitalize">{t}</option>)}
-            </select>
-            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring sm:flex-none">
-              <option value="all">All Statuses</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-            </select>
+            <SelectDropdown
+              value={filterEmp}
+              onChange={setFilterEmp}
+              options={[
+                { value: "all", label: "All Employees" },
+                ...employees.map((e) => ({ value: e.id, label: e.full_name })),
+              ]}
+              containerClassName="min-w-0 flex-1 sm:flex-none sm:min-w-[150px]"
+              triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            />
+            <SelectDropdown
+              value={filterType}
+              onChange={setFilterType}
+              options={[
+                { value: "all", label: "All Types" },
+                ...leaveTypes.map((t) => ({ value: t.id, label: t.name })),
+                ...["casual","sick","earned","unpaid","maternity","paternity","other"].map((t) => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) }))
+              ]}
+              containerClassName="min-w-0 flex-1 sm:flex-none sm:min-w-[150px]"
+              triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            />
+            <SelectDropdown
+              value={filterStatus}
+              onChange={setFilterStatus}
+              options={[
+                { value: "all", label: "All Statuses" },
+                { value: "pending", label: "Pending" },
+                { value: "approved", label: "Approved" },
+                { value: "rejected", label: "Rejected" },
+              ]}
+              containerClassName="min-w-0 flex-1 sm:flex-none sm:min-w-[150px]"
+              triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            />
             <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring sm:flex-none" />
             <input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring sm:flex-none" />
             <button onClick={() => void fetchAll()} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700">Apply</button>
@@ -629,11 +648,17 @@ export default function LeaveManagement() {
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <input value={holName} onChange={(e) => setHolName(e.target.value)} placeholder="Holiday Name" className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring col-span-2 md:col-span-1" />
                 <input type="date" value={holDate} onChange={(e) => setHolDate(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring" />
-                <select value={holType ?? "national"} onChange={(e) => setHolType(e.target.value as Holiday["type"])} className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring">
-                  <option value="national">National</option>
-                  <option value="company">Company</option>
-                  <option value="optional">Optional</option>
-                </select>
+                <SelectDropdown
+                  value={holType ?? "national"}
+                  onChange={(val) => setHolType(val as Holiday["type"])}
+                  options={[
+                    { value: "national", label: "National" },
+                    { value: "company", label: "Company" },
+                    { value: "optional", label: "Optional" },
+                  ]}
+                  containerClassName="col-span-1"
+                  triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                />
                 <input value={holDesc} onChange={(e) => setHolDesc(e.target.value)} placeholder="Description (optional)" className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring col-span-2 md:col-span-1" />
               </div>
               <div className="mt-3 flex gap-2">

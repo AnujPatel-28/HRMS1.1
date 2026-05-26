@@ -9,6 +9,7 @@ import { useToast } from "../shared/ToastContext";
 import { ConfirmModal } from "../shared/ConfirmModal";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
+import { SelectDropdown } from "../shared/components/SelectDropdown";
 
 type Tab = "active" | "inbox" | "all" | "assign";
 type StatusFilter = "all" | Task["status"];
@@ -409,25 +410,45 @@ export default function TaskManagement() {
       {(tab === "active" || tab === "all") && (
         <>
           <div className="flex flex-wrap gap-2">
-            <select value={empFilter} onChange={e => setEmpFilter(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring">
-              <option value="all">All Employees</option>
-              {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
-            </select>
-            <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring">
-              {DEPT_OPTIONS.map(d => <option key={d} value={d} className="capitalize">{d==="all"?"All Departments":d}</option>)}
-            </select>
+            <SelectDropdown
+              value={empFilter}
+              onChange={setEmpFilter}
+              options={[
+                { value: "all", label: "All Employees" },
+                ...employees.map(e => ({ value: e.id, label: e.full_name }))
+              ]}
+              containerClassName="min-w-0 flex-1 sm:flex-none sm:min-w-[150px]"
+              triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            />
+            <SelectDropdown
+              value={deptFilter}
+              onChange={setDeptFilter}
+              options={DEPT_OPTIONS.map(d => ({ value: d, label: d === "all" ? "All Departments" : d.charAt(0).toUpperCase() + d.slice(1) }))}
+              containerClassName="min-w-0 flex-1 sm:flex-none sm:min-w-[150px]"
+              triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            />
             {tab==="all" && (
-              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as StatusFilter)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring">
-                <option value="all">All Statuses</option>
-                {(["assigned","in_progress","submitted","approved","rejected"] as const).map(s =>
-                  <option key={s} value={s}>{s.replace("_"," ")}</option>
-                )}
-              </select>
+              <SelectDropdown
+                value={statusFilter}
+                onChange={(val) => setStatusFilter(val as StatusFilter)}
+                options={[
+                  { value: "all", label: "All Statuses" },
+                  ...(["assigned","in_progress","submitted","approved","rejected"] as const).map(s => ({ value: s, label: s.replace("_"," ").replace(/\b\w/g, l => l.toUpperCase()) }))
+                ]}
+                containerClassName="min-w-0 flex-1 sm:flex-none sm:min-w-[150px]"
+                triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              />
             )}
-            <select value={priorityFilter} onChange={e => setPriorityFilter(e.target.value as PriorityFilter)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring">
-              <option value="all">All Priorities</option>
-              {(["low","medium","high","urgent"] as const).map(p => <option key={p} value={p} className="capitalize">{p}</option>)}
-            </select>
+            <SelectDropdown
+              value={priorityFilter}
+              onChange={(val) => setPriorityFilter(val as PriorityFilter)}
+              options={[
+                { value: "all", label: "All Priorities" },
+                ...(["low","medium","high","urgent"] as const).map(p => ({ value: p, label: p.charAt(0).toUpperCase() + p.slice(1) }))
+              ]}
+              containerClassName="min-w-0 flex-1 sm:flex-none sm:min-w-[150px]"
+              triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            />
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
