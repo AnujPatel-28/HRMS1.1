@@ -190,9 +190,9 @@ export default function HRDashboard() {
             {!loading && shifts.length === 0 ? (
               <button
                 onClick={() => navigate("/hr/shifts")}
-                className="inline-flex items-center gap-1 text-sm font-semibold text-amber-600 hover:text-amber-700"
+                className="inline-flex items-center gap-1 text-sm font-semibold text-brand-600 hover:text-brand-700"
               >
-                + Add a Shift
+                + Add Shift
               </button>
             ) : (
               <>
@@ -215,13 +215,13 @@ export default function HRDashboard() {
         {/* DESKTOP VIEW */}
         <div className="hidden md:flex items-center">
           {!loading && shifts.length === 0 ? (
-            <div className="inline-flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2">
-              <span className="text-sm text-amber-700 font-medium">No shifts configured</span>
+            <div className="inline-flex items-center rounded-xl bg-white p-1 shadow-sm border border-slate-200">
+              <span className="px-3 py-1.5 text-sm text-slate-400">No shifts yet</span>
               <button
                 onClick={() => navigate("/hr/shifts")}
-                className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-600 transition-colors"
+                className="px-4 py-1.5 text-sm font-semibold rounded-lg transition-all relative z-10 bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-200 hover:bg-brand-100"
               >
-                + Add a Shift
+                + Add Shift
               </button>
             </div>
           ) : (
