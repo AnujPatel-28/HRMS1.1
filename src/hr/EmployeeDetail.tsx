@@ -278,9 +278,9 @@ export default function EmployeeDetail() {
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           {employee.profile_photo_url ? (
-            <img src={employee.profile_photo_url} alt={employee.full_name} className="h-14 w-14 rounded-full object-cover" />
+            <img src={employee.profile_photo_url} alt={employee.full_name} className="h-14 w-14 shrink-0 rounded-full object-cover" />
           ) : (
             <div className="grid h-14 w-14 place-items-center rounded-full bg-slate-200 text-sm font-semibold text-slate-700 shrink-0">
               {employee.full_name.slice(0, 2).toUpperCase()}
@@ -288,10 +288,10 @@ export default function EmployeeDetail() {
           )}
           <div className="min-w-0">
             <h2 className="text-xl font-semibold text-slate-900 truncate">{employee.full_name}</h2>
-            <div className="mt-1 flex items-center gap-2 text-sm text-slate-500">
-              <span>{employee.employee_code ?? "No employee code"}</span>
-              <span className="text-slate-300">&bull;</span>
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusBadgeClass(employee.status)}`}>
+            <div className="mt-1 flex items-center gap-2 text-sm text-slate-500 min-w-0">
+              <span className="truncate">{employee.employee_code ?? "No employee code"}</span>
+              <span className="text-slate-300 shrink-0">&bull;</span>
+              <span className={`shrink-0 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusBadgeClass(employee.status)}`}>
                 <span className={`h-1 w-1 rounded-full ${employee.status === 'active' ? 'bg-emerald-500' : employee.status === 'inactive' ? 'bg-amber-500' : 'bg-rose-500'}`}></span>
                 {employee.status}
               </span>
@@ -344,7 +344,7 @@ export default function EmployeeDetail() {
           </button>
 
           {/* Action Menu Dropdown */}
-          <div className={`absolute left-0 sm:left-auto sm:right-0 top-full mt-2 w-48 flex-col gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-xl z-50 ${showActionsMenu ? "flex" : "hidden"}`}>
+          <div className={`absolute right-0 top-full mt-2 w-48 flex-col gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-xl z-50 ${showActionsMenu ? "flex" : "hidden"}`}>
             <button
               type="button"
               disabled={saving || resetLoading || resetStep !== null}
