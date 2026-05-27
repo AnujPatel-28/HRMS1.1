@@ -9,7 +9,8 @@ export type PayslipPdfData = {
   workingDays: number;
   daysPresent: number;
   daysAbsent: number;
-  daysOnLeave: number;
+  paidLeaveDays: number;
+  unpaidLeaveDays: number;
   halfDays: number;
   basicMonthly: number;
   hraMonthly: number;
@@ -144,7 +145,7 @@ export function buildPayslipTemplateHtml(
           <table style="width:100%;border-collapse:collapse;font-size:12px">
             <tr><td style="padding:5px 0;color:#64748b">Days in Month</td><td style="padding:5px 0;text-align:right;font-weight:700">${slip.daysInMonth}</td></tr>
             <tr><td style="padding:5px 0;color:#64748b">Working Days</td><td style="padding:5px 0;text-align:right;font-weight:700">${slip.workingDays}</td></tr>
-            <tr><td style="padding:5px 0;color:#64748b">Paid Days</td><td style="padding:5px 0;text-align:right;font-weight:700">${slip.daysPresent + slip.daysOnLeave + slip.halfDays * 0.5}</td></tr>
+            <tr><td style="padding:5px 0;color:#64748b">Paid Days</td><td style="padding:5px 0;text-align:right;font-weight:700">${slip.daysPresent + slip.paidLeaveDays + slip.halfDays * 0.5}</td></tr>
             <tr><td style="padding:5px 0;color:#64748b">Absent / Half Days</td><td style="padding:5px 0;text-align:right;font-weight:700">${slip.daysAbsent} / ${slip.halfDays}</td></tr>
           </table>
         </td>
@@ -163,7 +164,7 @@ export function buildPayslipTemplateHtml(
               ${moneyRow("Other Allowances", slip.otherAllowances)}
               ${overtime > 0 ? moneyRow("Overtime", overtime) : ""}
               <tr><td colspan="2" style="height:1px;background:#e2e8f0"></td></tr>
-              ${moneyRow("Gross Earnings", slip.grossSalary, true)}
+              ${moneyRow("Gross Earnings", slip.grossSalary + overtime, true)}
             </table>
           </td>
           <td style="width:50%;vertical-align:top;padding:18px 22px">

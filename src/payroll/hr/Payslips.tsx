@@ -42,7 +42,7 @@ interface Payslip {
   working_days: number;
   days_present: number;
   days_absent: number;
-  days_on_leave: number;
+  days_on_leave: number;  // stored total (paid+unpaid) — DB column kept as-is
   half_days: number;
   basic_monthly: number;
   hra_monthly: number;
@@ -175,7 +175,9 @@ function pdfDataFromPayslip(slip: Payslip): PayslipPdfData {
     workingDays: slip.working_days,
     daysPresent: slip.days_present,
     daysAbsent: slip.days_absent,
-    daysOnLeave: slip.days_on_leave,
+    // DB stores combined days_on_leave; split as all-paid for display (no LOP breakdown in legacy DB column)
+    paidLeaveDays: slip.days_on_leave,
+    unpaidLeaveDays: 0,
     halfDays: slip.half_days,
     basicMonthly: slip.basic_monthly,
     hraMonthly: slip.hra_monthly,
@@ -234,7 +236,8 @@ const templatePreviewSlip: PayslipPdfData = {
   workingDays: 26,
   daysPresent: 24,
   daysAbsent: 1,
-  daysOnLeave: 1,
+  paidLeaveDays: 1,
+  unpaidLeaveDays: 0,
   halfDays: 0,
   basicMonthly: 40000,
   hraMonthly: 20000,

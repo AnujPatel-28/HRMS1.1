@@ -8,7 +8,8 @@ import { useToast } from "../../shared/ToastContext";
 import { Skeleton } from "../../shared/Skeleton";
 import type { Employee } from "../../types";
 import type { SalaryStructure } from "./SalaryStructures";
-import { MONTH_NAMES, formatCurrency, calcPayslip, getWorkingDays, type PayslipCalc } from "./payroll-calc";
+import { MONTH_NAMES, formatCurrency, roundCurrency, calcPayslip, getWorkingDays, type PayslipCalc, type SalaryPolicySnapshot } from "./payroll-calc";
+import { PayrollError } from "../../utils/errors";
 import { uploadPayslipPdf } from "./payslip-pdf";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -34,7 +35,6 @@ interface RowCalc extends PayslipCalc {
   lateMarkDeductionHours?: number;
   lateMarkDeductionAmount?: number;
   overtimeHours?: number;
-  overtimeAmount?: number;
   overtimeBreakdown?: { id: string; amount: number }[];
 }
 
@@ -66,7 +66,7 @@ function Stepper({ step }: { step: number }) {
 
 // ─── Summary Card ─────────────────────────────────────────────────────────────
 function SummaryCard({ rows }: { rows: (RowCalc & { finalNet: number })[] }) {
-  const totalGross = rows.reduce((s, r) => s + r.grossSalary, 0);
+  const totalGross = rows.reduce((s, r) => s + r.grossSalary + r.overtimeAmount, 0);
   const totalDed = rows.reduce((s, r) => s + r.totalDeductions, 0);
   const totalNet = rows.reduce((s, r) => s + r.finalNet, 0);
   const stats = [
@@ -133,10 +133,10 @@ export default function RunPayroll() {
       const startDate = `${monthStr}-01`;
       const endDate = `${monthStr}-${new Date(year, month, 0).getDate().toString().padStart(2, "0")}`;
 
-      const [empRes, structRes, attRes, holRes, overtimeRes] = await Promise.all([
+      const [empRes, structRes, attRes, holRes, overtimeRes, settingsRes, leavesRes] = await Promise.all([
         db.from("employees").select("*").eq("tenant_id", tenantId).eq("status", "active").order("full_name"),
         db.from("salary_structures").select("*").eq("tenant_id", tenantId).order("effective_from", { ascending: false }),
-        db.from("attendance").select("employee_id,status").eq("tenant_id", tenantId).gte("date", startDate).lte("date", endDate),
+        db.from("attendance").select("employee_id,status,date").eq("tenant_id", tenantId).gte("date", startDate).lte("date", endDate),
         db.from("holidays").select("date").eq("tenant_id", tenantId).gte("date", startDate).lte("date", endDate),
         db
           .from("overtime_records")
@@ -145,6 +145,8 @@ export default function RunPayroll() {
           .eq("approved", true)
           .gte("date", startDate)
           .lte("date", endDate),
+        db.from("tenant_settings").select("key,value").eq("tenant_id", tenantId),
+        db.from("leaves").select("employee_id,start_date,end_date,leave_types!inner(is_paid)").eq("tenant_id", tenantId).eq("status", "approved").lte("start_date", endDate).gte("end_date", startDate),
       ]);
 
       if (empRes.error) throw empRes.error;
@@ -152,9 +154,11 @@ export default function RunPayroll() {
       if (attRes.error) throw attRes.error;
       if (holRes.error) throw holRes.error;
       if (overtimeRes.error) throw overtimeRes.error;
+      if (settingsRes.error) throw settingsRes.error;
+      if (leavesRes.error) throw leavesRes.error;
       const employees = (empRes.data ?? []) as Employee[];
       const allStructures = (structRes.data ?? []) as SalaryStructure[];
-      const attendances = (attRes.data ?? []) as { employee_id: string; status: string }[];
+      const attendances = (attRes.data ?? []) as { employee_id: string; status: string; date: string }[];
       const holidayDates = ((holRes.data ?? []) as { date: string }[]).map((h) => h.date);
       const overtimeRecords = (overtimeRes.data ?? []) as {
         id: string;
@@ -165,6 +169,30 @@ export default function RunPayroll() {
         approved: boolean;
         date: string;
       }[];
+      
+      const settingsRows = (settingsRes.data ?? []) as { key: string; value: string }[];
+      const settings = settingsRows.reduce<Record<string, string>>((acc, row) => {
+        acc[row.key] = row.value;
+        return acc;
+      }, {});
+
+      const lockDateStr = settings.payroll_lock_date;
+      if (lockDateStr) {
+        const lockDate = new Date(lockDateStr);
+        const currentPeriodDate = new Date(year, month - 1, 1);
+        if (currentPeriodDate <= lockDate) {
+          throw new PayrollError("PAYROLL_LOCKED", `Payroll is locked for periods on or before ${lockDateStr}`);
+        }
+      }
+
+      const policy: SalaryPolicySnapshot = {
+        snapshot_version: 2,
+        lopCalculationMethod: (settings.lop_calculation_method as any) || "working_days",
+        pfWageCeiling: settings.pf_wage_ceiling ? Number(settings.pf_wage_ceiling) : 15000,
+        esiGrossCeiling: settings.esi_gross_ceiling ? Number(settings.esi_gross_ceiling) : 21000,
+        professionalTaxState: settings.professional_tax_state || "",
+        professionalTaxManualAmount: settings.professional_tax_manual_amount ? Number(settings.professional_tax_manual_amount) : null,
+      };
 
       // Latest structure per employee (effective_from ≤ last day of month)
       const effectiveCutoff = endDate;
@@ -175,14 +203,37 @@ export default function RunPayroll() {
         }
       });
 
+      // Unpaid leaves mapping
+      const approvedLeaves = (leavesRes.data ?? []) as any[];
+      const unpaidLeaveMap = new Map<string, Set<string>>(); // employee_id -> set of unpaid date strings
+      
+      approvedLeaves.forEach(leave => {
+        if (leave.leave_types && leave.leave_types.is_paid === false) {
+          const clampStart = new Date(Math.max(new Date(leave.start_date).getTime(), new Date(startDate).getTime()));
+          const clampEnd = new Date(Math.min(new Date(leave.end_date).getTime(), new Date(endDate).getTime()));
+          if (clampStart > clampEnd) return; // leave doesn't overlap this payroll period
+          const current = unpaidLeaveMap.get(leave.employee_id) || new Set<string>();
+          const iter = new Date(clampStart);
+          while (iter <= clampEnd) {
+            current.add(iter.toISOString().split('T')[0]);
+            iter.setDate(iter.getDate() + 1);
+          }
+          unpaidLeaveMap.set(leave.employee_id, current);
+        }
+      });
+
       // Attendance counts per employee
-      const attMap = new Map<string, { daysPresent: number; daysAbsent: number; daysOnLeave: number; halfDays: number }>();
-      attendances.forEach(({ employee_id, status }) => {
-        const cur = attMap.get(employee_id) ?? { daysPresent: 0, daysAbsent: 0, daysOnLeave: 0, halfDays: 0 };
+      const attMap = new Map<string, { daysPresent: number; daysAbsent: number; paidLeaveDays: number; unpaidLeaveDays: number; halfDays: number }>();
+      attendances.forEach(({ employee_id, status, date }) => {
+        const cur = attMap.get(employee_id) ?? { daysPresent: 0, daysAbsent: 0, paidLeaveDays: 0, unpaidLeaveDays: 0, halfDays: 0 };
         if (status === "present") cur.daysPresent++;
         else if (status === "absent") cur.daysAbsent++;
-        else if (status === "on_leave") cur.daysOnLeave++;
         else if (status === "half_day") cur.halfDays++;
+        else if (status === "on_leave") {
+          const isUnpaid = unpaidLeaveMap.get(employee_id)?.has(date);
+          if (isUnpaid) cur.unpaidLeaveDays++;
+          else cur.paidLeaveDays++;
+        }
         attMap.set(employee_id, cur);
       });
 
@@ -208,8 +259,14 @@ export default function RunPayroll() {
       for (const emp of employees) {
         const struct = structMap.get(emp.id);
         if (!struct) { newSkipped.push(emp); continue; }
-        const att = attMap.get(emp.id) ?? { daysPresent: workingDays, daysAbsent: 0, daysOnLeave: 0, halfDays: 0 };
-        const calc = calcPayslip(struct, att, year, month, holidayDates);
+        
+        const overtimeSummary = overtimeByEmployee.get(emp.id);
+        const overtimeAmount = overtimeSummary?.totalAmount ?? 0;
+        
+        // No attendance records: treat as zero presence (do not default to full pay)
+        const att = attMap.get(emp.id) ?? { daysPresent: 0, daysAbsent: workingDays, paidLeaveDays: 0, unpaidLeaveDays: 0, halfDays: 0 };
+        const calc = calcPayslip(struct, att, overtimeAmount, year, month, holidayDates, policy);
+        
         const { data: lateData, error: lateError } = await functions.invoke("calculate-late-marks", {
           body: {
             tenant_id: tenantId,
@@ -224,20 +281,15 @@ export default function RunPayroll() {
           threshold?: number;
           deduction_hours?: number;
         };
-        const grossMonthly = buildGrossMonthly(struct);
-        const hourlyRate = grossMonthly / (Number(tenant?.work_hours_per_day ?? 8) * workingDays);
-        const lateDeductionAmount = (lateSummary.deduction_hours ?? 0) * hourlyRate;
-        const overtimeSummary = overtimeByEmployee.get(emp.id);
-        const overtimeAmount = overtimeSummary?.totalAmount ?? 0;
-        const otherDeductions = calc.otherDeductions + lateDeductionAmount;
-        const totalDeductions = calc.totalDeductions + lateDeductionAmount;
-        const grossSalary = calc.grossSalary + overtimeAmount;
-        const netPayable = Math.max(grossSalary - totalDeductions, 0);
+        const hourlyRate = calc.grossSalary / (Number(tenant?.work_hours_per_day ?? 8) * workingDays);
+        const lateDeductionAmount = roundCurrency((lateSummary.deduction_hours ?? 0) * hourlyRate);
+        const otherDeductions = roundCurrency(calc.otherDeductions + lateDeductionAmount);
+        const totalDeductions = roundCurrency(calc.totalDeductions + lateDeductionAmount);
+        const netPayable = Math.max(roundCurrency(calc.grossSalary - totalDeductions), 0);
         newRows.push({
           ...calc,
           employee: emp,
           structure: struct,
-          grossSalary,
           otherDeductions,
           totalDeductions,
           netPayable,
@@ -254,8 +306,13 @@ export default function RunPayroll() {
       setRows(newRows);
       setSkipped(newSkipped);
       setOverrides({});
-    } catch {
-      toastError("Failed to calculate payroll. Please try again.");
+    } catch (err: any) {
+      if (err instanceof PayrollError && err.code === "PAYROLL_LOCKED") {
+        toastError(err.message);
+        void logAction("payroll.lock_violation", "tenant", tenantId, { month, year, message: err.message });
+      } else {
+        toastError("Failed to calculate payroll. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -265,12 +322,15 @@ export default function RunPayroll() {
     if (step === 2) void calculate();
   }, [step, calculate]);
 
-  // ── Rows with final net ────────────────────────────────────────────────────
   const rowsWithFinal = useMemo(() =>
-    rows.map((r) => ({
-      ...r,
-      finalNet: overrides[r.employeeId] !== undefined ? Number(overrides[r.employeeId]) || r.netPayable : r.netPayable,
-    })), [rows, overrides]);
+    rows.map((r) => {
+      const calculatedNet = Math.max(roundCurrency(r.netPayable + r.overtimeAmount), 0);
+      const overrideRaw = overrides[r.employeeId];
+      const finalNet = overrideRaw !== undefined
+        ? Math.max(roundCurrency(Number(overrideRaw) || 0), 0)
+        : calculatedNet;
+      return { ...r, calculatedNet, finalNet };
+    }), [rows, overrides]);
 
   // ── Save ───────────────────────────────────────────────────────────────────
   const handleSave = useCallback(async (approve: boolean) => {
@@ -278,9 +338,9 @@ export default function RunPayroll() {
     setSaving(true);
     try {
       const status: RunStatus = approve ? "approved" : "draft";
-      const totalGross = rowsWithFinal.reduce((s, r) => s + r.grossSalary, 0);
-      const totalDed = rowsWithFinal.reduce((s, r) => s + r.totalDeductions, 0);
-      const totalNet = rowsWithFinal.reduce((s, r) => s + r.finalNet, 0);
+      const totalGross = roundCurrency(rowsWithFinal.reduce((s, r) => s + r.grossSalary + r.overtimeAmount, 0));
+      const totalDed = roundCurrency(rowsWithFinal.reduce((s, r) => s + r.totalDeductions, 0));
+      const totalNet = roundCurrency(rowsWithFinal.reduce((s, r) => s + r.finalNet, 0));
 
       // Upsert payroll_run
       let runId = existingRun?.id ?? null;
@@ -320,7 +380,7 @@ export default function RunPayroll() {
           working_days: r.workingDays,
           days_present: r.daysPresent,
           days_absent: r.daysAbsent,
-          days_on_leave: r.daysOnLeave,
+          days_on_leave: r.paidLeaveDays + r.unpaidLeaveDays,
           half_days: r.halfDays,
           basic_monthly: r.basicMonthly,
           hra_monthly: r.hraMonthly,
@@ -336,14 +396,31 @@ export default function RunPayroll() {
           total_deductions: r.totalDeductions,
           net_payable: r.finalNet,
           pdf_url: pdfUrl,
+          policy_snapshot: {
+            ...r.policySnapshot,
+            paid_leave_days: r.paidLeaveDays,
+            unpaid_leave_days: r.unpaidLeaveDays,
+            effective_unpaid_days: r.effectiveUnpaidDays,
+            working_days: r.workingDays,
+            paid_days: r.paidDays,
+            lop_ratio: r.lopRatio,
+            lop_divisor: r.lopDivisor,
+            overtime_amount: r.overtimeAmount,
+            esi_base: r.esiBase,
+            pf_base: r.pfBase,
+            calculated_net: r.calculatedNet,
+            override_net: overrides[r.employeeId] !== undefined ? r.finalNet : null,
+          },
         };
         const { error: slipErr } = await db.from("payslips").upsert([payload], { onConflict: "tenant_id,payroll_run_id,employee_id" });
-        if (slipErr) console.error("Payslip upsert error:", slipErr);
+        if (slipErr) throw slipErr;
       }
 
       success(approve ? "Payroll approved and payslips saved!" : "Payroll saved as draft.");
       if (approve) {
-        void logAction("payroll.approved", "payroll_run", runId, { month, year, total_net: totalNet });
+        const policyHash = rowsWithFinal.length > 0 ? JSON.stringify(rowsWithFinal[0].policySnapshot) : "";
+        const actionType = runId && existingRun ? "payroll.regenerated" : "payroll.generated";
+        void logAction(actionType, "payroll_run", runId, { month, year, total_net: totalNet, employee_count: rowsWithFinal.length, policy_hash: policyHash });
       }
       setStep(1);
       setExistingRun(null);
@@ -452,7 +529,7 @@ export default function RunPayroll() {
                           </td>
                           <td className="px-0 py-1.5 md:px-4 md:py-3 text-right md:text-center md:table-cell flex items-center justify-between md:justify-center">
                             <span className="md:hidden text-xs font-semibold text-slate-500">Leave</span>
-                            <span>{r.daysOnLeave}</span>
+                            <span>{r.paidLeaveDays + r.unpaidLeaveDays}</span>
                           </td>
                           <td className="px-0 py-1.5 md:px-4 md:py-3 text-right md:text-center md:table-cell flex items-center justify-between md:justify-center">
                             <span className="md:hidden text-xs font-semibold text-slate-500">Half</span>
@@ -461,9 +538,9 @@ export default function RunPayroll() {
                           <td className="px-0 py-1.5 md:px-4 md:py-3 font-medium md:table-cell flex items-center justify-between md:justify-start text-right md:text-left">
                             <span className="md:hidden text-xs font-semibold text-slate-500">Gross</span>
                             <div>
-                              <p>{formatCurrency(r.grossSalary)}</p>
-                              {r.overtimeAmount && r.overtimeAmount > 0 ? (
-                                <p className="text-xs font-medium text-purple-700">Includes OT</p>
+                              <p>{formatCurrency(r.grossSalary + r.overtimeAmount)}</p>
+                              {r.overtimeAmount > 0 ? (
+                                <p className="text-xs font-medium text-purple-700">Incl. OT: {formatCurrency(r.overtimeAmount)}</p>
                               ) : null}
                             </div>
                           </td>
@@ -477,7 +554,7 @@ export default function RunPayroll() {
                               <span className="text-xs text-slate-400">₹</span>
                               <input
                                 type="number"
-                                value={overrides[r.employeeId] ?? r.netPayable.toFixed(0)}
+                                value={overrides[r.employeeId] ?? r.finalNet.toFixed(0)}
                                 onChange={(e) => setOverrides((prev) => ({ ...prev, [r.employeeId]: e.target.value }))}
                                 className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-sm font-semibold text-emerald-700 outline-none focus:ring-1 ring-purple-400"
                               />

@@ -74,6 +74,7 @@ type LeaveTypeRow = {
   min_notice_days: number;
   max_consecutive_days: number | null;
   is_active: boolean;
+  is_paid: boolean;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -109,6 +110,7 @@ export type LeaveTypeForm = {
   minimum_notice_days: string;
   maximum_consecutive_days: string;
   is_active: boolean;
+  is_paid: boolean;
   updated_at: string | null;
 };
 
@@ -193,6 +195,7 @@ const defaultLeaveTypeForm: LeaveTypeForm = {
   minimum_notice_days: "0",
   maximum_consecutive_days: "",
   is_active: true,
+  is_paid: true,
   updated_at: null,
 };
 
@@ -388,7 +391,7 @@ export default function PolicyCenter() {
     try {
       const [tenantRes, settingsRes, leaveTypesRes, shiftsRes, shiftAssignmentsRes, employeesRes, leaveBalancesRes] = await Promise.all([
         db.from("tenants").select(tenantColumns).eq("id", tenantId).maybeSingle(),
-        db.from("tenant_settings").select("key,value").eq("tenant_id", tenantId),
+        db.from("tenant_settings").select("key,value,updated_at").eq("tenant_id", tenantId),
         db.from("leave_types").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: true }),
         db.from("shifts").select("id,is_default").eq("tenant_id", tenantId),
         db
@@ -735,9 +738,13 @@ export default function PolicyCenter() {
         { key: "professional_tax_state", value: salaryPolicy.professional_tax_state },
         { key: "professional_tax_manual_amount", value: salaryPolicy.professional_tax_manual_amount.trim() },
       ], "salary-policy", "Salary policy saved", "salary");
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toastError("Failed to save salary policy.");
+      if (err.message === "STALE_WRITE") {
+        toastError("Another admin has modified these settings. Please refresh.");
+      } else {
+        toastError("Failed to save salary policy.");
+      }
     } finally {
       setSavingTab(null);
     }
@@ -879,6 +886,7 @@ export default function PolicyCenter() {
         minimum_notice_days: String(leaveType.min_notice_days ?? 0),
         maximum_consecutive_days: leaveType.max_consecutive_days != null ? String(leaveType.max_consecutive_days) : "",
         is_active: leaveType.is_active,
+        is_paid: leaveType.is_paid,
         updated_at: leaveType.updated_at || null,
       });
     } else {
@@ -913,6 +921,7 @@ export default function PolicyCenter() {
         min_notice_days: Number(leaveTypeForm.minimum_notice_days || 0),
         max_consecutive_days: leaveTypeForm.maximum_consecutive_days.trim() ? Number(leaveTypeForm.maximum_consecutive_days) : null,
         is_active: leaveTypeForm.is_active,
+        is_paid: leaveTypeForm.is_paid,
       };
 
       if (leaveTypeForm.id) {
@@ -1316,6 +1325,9 @@ export default function PolicyCenter() {
                         <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${leaveType.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
                           {leaveType.is_active ? "Active" : "Inactive"}
                         </span>
+                        {!leaveType.is_paid ? (
+                          <span className="ml-2 inline-flex rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">Unpaid</span>
+                        ) : null}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex gap-2">
@@ -1533,6 +1545,7 @@ export default function PolicyCenter() {
               ) : null}
               <div className="md:col-span-2 grid gap-4 md:grid-cols-2">
                 <Toggle checked={leaveTypeForm.encashment_allowed} onChange={(checked) => setLeaveTypeForm((current) => ({ ...current, encashment_allowed: checked }))} label="Encashment allowed" />
+                <Toggle checked={leaveTypeForm.is_paid} onChange={(checked) => setLeaveTypeForm((current) => ({ ...current, is_paid: checked }))} label="Paid leave" description="If unchecked, leave days will be deducted as Loss of Pay" />
                 <Toggle checked={leaveTypeForm.restrict_during_probation} onChange={(checked) => setLeaveTypeForm((current) => ({ ...current, restrict_during_probation: checked }))} label="Restrict during probation" />
                 <Toggle checked={leaveTypeForm.requires_document} onChange={(checked) => setLeaveTypeForm((current) => ({ ...current, requires_document: checked }))} label="Requires document" description="Employee must upload a document when applying (e.g. medical certificate)" />
               </div>

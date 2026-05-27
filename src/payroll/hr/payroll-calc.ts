@@ -1,15 +1,36 @@
 import type { SalaryStructure } from "./SalaryStructures";
 
 export const MONTH_NAMES = [
-  "January","February","March","April","May","June",
-  "July","August","September","October","November","December",
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
 ];
+
+export interface SalaryPolicySnapshot {
+  snapshot_version: 2;
+  lopCalculationMethod: "calendar" | "fixed_26" | "working_days";
+  pfWageCeiling: number;
+  esiGrossCeiling: number;
+  professionalTaxState: string;
+  professionalTaxManualAmount: number | null;
+}
 
 export function formatCurrency(n: number) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Math.round(n));
 }
 
-/** Count Sundays in a given month/year */
+export function roundCurrency(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+const DEFAULT_PROFESSIONAL_TAX_BY_STATE: Record<string, number> = {
+  karnataka: 200,
+  maharashtra: 200,
+  telangana: 200,
+  andhra_pradesh: 200,
+  gujarat: 200,
+  tamil_nadu: 209,
+};
+
 function countSundays(year: number, month: number) {
   const days = new Date(year, month, 0).getDate();
   let sundays = 0;
@@ -19,7 +40,6 @@ function countSundays(year: number, month: number) {
   return sundays;
 }
 
-/** Working days = total days − Sundays − holidays (that are not on Sundays) */
 export function getWorkingDays(year: number, month: number, holidayDates: string[]) {
   const total = new Date(year, month, 0).getDate();
   const sundays = countSundays(year, month);
@@ -38,7 +58,12 @@ export interface PayslipCalc {
   workingDays: number;
   daysPresent: number;
   daysAbsent: number;
-  daysOnLeave: number;
+  paidLeaveDays: number;
+  unpaidLeaveDays: number;
+  effectiveUnpaidDays: number;
+  paidDays: number;
+  lopRatio: number;
+  lopDivisor: number;
   halfDays: number;
   basicMonthly: number;
   hraMonthly: number;
@@ -53,37 +78,93 @@ export interface PayslipCalc {
   otherDeductions: number;
   totalDeductions: number;
   netPayable: number;
-  netOverride: number | null; // HR manual override
+  netOverride: number | null;
+  overtimeAmount: number;
+  esiBase: number;
+  pfBase: number;
+  policySnapshot: SalaryPolicySnapshot;
 }
 
 export function calcPayslip(
   struct: SalaryStructure,
-  att: { daysPresent: number; daysAbsent: number; daysOnLeave: number; halfDays: number },
+  att: { daysPresent: number; daysAbsent: number; paidLeaveDays: number; unpaidLeaveDays: number; halfDays: number },
+  overtimeAmount: number,
   year: number,
   month: number,
   holidayDates: string[],
+  policy: SalaryPolicySnapshot
 ): PayslipCalc {
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const workingDays = getWorkingDays(year, month, holidayDates);
+  const daysInMonth = Math.max(new Date(year, month, 0).getDate(), 1);
+  const workingDays = Math.max(getWorkingDays(year, month, holidayDates), 1);
 
   const monthlyCtc = struct.ctc_annual / 12;
-  const basicMonthly = monthlyCtc * (struct.basic_percent / 100);
-  const hraMonthly = basicMonthly * (struct.hra_percent / 100);
+  const basicMonthly = roundCurrency(monthlyCtc * (struct.basic_percent / 100));
+  const hraMonthly = roundCurrency(basicMonthly * (struct.hra_percent / 100));
   const grossMonthly = basicMonthly + hraMonthly + struct.special_allowance + struct.other_allowances;
 
-  const perDay = grossMonthly / workingDays;
-  const paidDays = att.daysPresent + att.halfDays * 0.5 + att.daysOnLeave;
-  const adjustedGross = Math.min(paidDays * perDay, grossMonthly);
+  let lopDivisor = workingDays;
+  if (policy.lopCalculationMethod === "calendar") {
+    lopDivisor = daysInMonth;
+  } else if (policy.lopCalculationMethod === "fixed_26") {
+    lopDivisor = 26;
+  }
 
-  const daysRatio = paidDays / workingDays;
-  const pfEmployee = struct.pf_applicable ? basicMonthly * daysRatio * 0.12 : 0;
-  const pfEmployer = struct.pf_applicable ? basicMonthly * daysRatio * 0.12 : 0;
-  const esiEmployee = struct.esi_applicable && adjustedGross < 21000 ? adjustedGross * 0.0075 : 0;
-  const esiEmployer = struct.esi_applicable && adjustedGross < 21000 ? adjustedGross * 0.0325 : 0;
+  const paidDays = att.daysPresent + att.halfDays * 0.5 + att.paidLeaveDays;
+  const effectiveUnpaidDays = Math.max(0, workingDays - paidDays);
+  
+  let daysRatio = 1;
+  if (policy.lopCalculationMethod === "working_days") {
+    daysRatio = (workingDays - effectiveUnpaidDays) / workingDays;
+  } else if (policy.lopCalculationMethod === "calendar") {
+    daysRatio = (daysInMonth - effectiveUnpaidDays) / daysInMonth;
+  } else {
+    daysRatio = (26 - effectiveUnpaidDays) / 26;
+  }
+  
+  const boundedDaysRatio = Math.max(0, Math.min(daysRatio, 1));
+
+  const proratedBasic = roundCurrency(basicMonthly * boundedDaysRatio);
+  const proratedHra = roundCurrency(hraMonthly * boundedDaysRatio);
+  const proratedSpecial = roundCurrency(struct.special_allowance * boundedDaysRatio);
+  const proratedOther = roundCurrency(struct.other_allowances * boundedDaysRatio);
+  const proratedGross = proratedBasic + proratedHra + proratedSpecial + proratedOther;
+
+  // Defend against nulls/undefined values in policy
+  const pfWageCeiling = policy.pfWageCeiling ?? 15000;
+  const esiGrossCeiling = policy.esiGrossCeiling ?? 21000;
+
+  // PF Calculation (Excludes Overtime)
+  const proratedPfCeiling = roundCurrency(pfWageCeiling * boundedDaysRatio);
+  const pfEligibleWage = Math.min(proratedBasic, proratedPfCeiling);
+  const pfBase = struct.pf_applicable ? pfEligibleWage : 0;
+  const pfEmployee = struct.pf_applicable ? roundCurrency(pfBase * 0.12) : 0;
+  const pfEmployer = struct.pf_applicable ? roundCurrency(pfBase * 0.12) : 0;
+
+  // ESI Eligibility based on full normal gross; deduction base includes overtime
+  const esiApplicable = struct.esi_applicable && (grossMonthly <= esiGrossCeiling);
+  const esiBase = esiApplicable ? (proratedGross + overtimeAmount) : 0;
+  
+  let esiEmployee = 0;
+  let esiEmployer = 0;
+  if (esiApplicable) {
+    esiEmployee = roundCurrency(esiBase * 0.0075);
+    esiEmployer = roundCurrency(esiBase * 0.0325);
+  }
+
   const tds = struct.tds_monthly;
-  const otherDeductions = struct.other_allowances > 0 ? 0 : 0; // other_deductions not in struct
-  const totalDeductions = pfEmployee + esiEmployee + tds + otherDeductions;
-  const netPayable = Math.max(adjustedGross - totalDeductions, 0);
+  
+  // Professional Tax
+  let professionalTax = 0;
+  if (policy.professionalTaxManualAmount !== null && policy.professionalTaxManualAmount !== undefined) {
+    professionalTax = policy.professionalTaxManualAmount;
+  } else if (policy.professionalTaxState) {
+    professionalTax = DEFAULT_PROFESSIONAL_TAX_BY_STATE[policy.professionalTaxState] || 0;
+  }
+  
+  const otherDeductions = professionalTax; // Add other struct deductions here if needed
+  
+  const totalDeductions = roundCurrency(pfEmployee + esiEmployee + tds + otherDeductions);
+  const netPayable = Math.max(roundCurrency(proratedGross - totalDeductions), 0);
 
   return {
     employeeId: struct.employee_id,
@@ -92,13 +173,14 @@ export function calcPayslip(
     workingDays,
     daysPresent: att.daysPresent,
     daysAbsent: att.daysAbsent,
-    daysOnLeave: att.daysOnLeave,
+    paidLeaveDays: att.paidLeaveDays,
+    unpaidLeaveDays: att.unpaidLeaveDays,
     halfDays: att.halfDays,
-    basicMonthly,
-    hraMonthly,
-    specialAllowance: struct.special_allowance,
-    otherAllowances: struct.other_allowances,
-    grossSalary: adjustedGross,
+    basicMonthly: proratedBasic,
+    hraMonthly: proratedHra,
+    specialAllowance: proratedSpecial,
+    otherAllowances: proratedOther,
+    grossSalary: proratedGross,
     pfEmployee,
     pfEmployer,
     esiEmployee,
@@ -108,5 +190,13 @@ export function calcPayslip(
     totalDeductions,
     netPayable,
     netOverride: null,
+    overtimeAmount,
+    esiBase,
+    pfBase,
+    effectiveUnpaidDays,
+    paidDays,
+    lopRatio: boundedDaysRatio,
+    lopDivisor,
+    policySnapshot: policy,
   };
 }

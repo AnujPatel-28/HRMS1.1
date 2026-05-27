@@ -63,7 +63,9 @@ function pdfDataFromPayslip(slip: Payslip): PayslipPdfData {
     workingDays: slip.working_days,
     daysPresent: slip.days_present,
     daysAbsent: slip.days_absent,
-    daysOnLeave: slip.days_on_leave,
+    // DB stores combined days_on_leave; treat all as paid for display purposes
+    paidLeaveDays: slip.days_on_leave,
+    unpaidLeaveDays: 0,
     halfDays: slip.half_days,
     basicMonthly: slip.basic_monthly,
     hraMonthly: slip.hra_monthly,
