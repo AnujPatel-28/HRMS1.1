@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Users, Search, ChevronRight } from "lucide-react";
+import { Users, Search, ChevronRight, UserPlus } from "lucide-react";
 import type { Employee } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
@@ -71,58 +71,61 @@ export default function EmployeeList() {
   };
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <section className="rounded-2xl border border-slate-200 bg-white p-3 md:p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">Employees</h2>
-          <p className="text-sm text-slate-500">Manage employee records and profiles.</p>
+          <p className="hidden text-sm text-slate-500 sm:block">Manage employee records and profiles.</p>
         </div>
         <button
           type="button"
           onClick={() => navigate("/hr/employees/create")}
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+          className="flex shrink-0 items-center gap-2 rounded-lg bg-brand-600 px-3 py-2 md:px-4 text-sm font-semibold text-white transition hover:bg-brand-700"
         >
-          Add Employee
+          <span className="hidden sm:inline">Add Employee</span>
+          <UserPlus className="h-4 w-4 sm:hidden" />
         </button>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
+      <div className="mt-4 flex flex-col gap-3 md:grid md:grid-cols-3">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by name or employee code"
+            placeholder="Search by name or code"
             className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
           />
         </div>
 
-        <SelectDropdown
-          value={departmentFilter}
-          onChange={setDepartmentFilter}
-          options={[
-            { value: "all", label: "All Departments" },
-            { value: "sales", label: "Sales" },
-            { value: "dev", label: "Development" },
-            { value: "marketing", label: "Marketing" },
-            { value: "operations", label: "Operations" },
-            { value: "design", label: "Design" },
-            { value: "other", label: "Other" },
-          ]}
-          triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-        />
+        <div className="grid grid-cols-2 gap-3 md:col-span-2 md:grid-cols-2">
+          <SelectDropdown
+            value={departmentFilter}
+            onChange={setDepartmentFilter}
+            options={[
+              { value: "all", label: "All Departments" },
+              { value: "sales", label: "Sales" },
+              { value: "dev", label: "Development" },
+              { value: "marketing", label: "Marketing" },
+              { value: "operations", label: "Operations" },
+              { value: "design", label: "Design" },
+              { value: "other", label: "Other" },
+            ]}
+            triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+          />
 
-        <SelectDropdown
-          value={statusFilter}
-          onChange={setStatusFilter}
-          options={[
-            { value: "all", label: "All Statuses" },
-            { value: "active", label: "Active" },
-            { value: "inactive", label: "Inactive" },
-            { value: "terminated", label: "Terminated" },
-          ]}
-          triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-        />
+          <SelectDropdown
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={[
+              { value: "all", label: "All Statuses" },
+              { value: "active", label: "Active" },
+              { value: "inactive", label: "Inactive" },
+              { value: "terminated", label: "Terminated" },
+            ]}
+            triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+          />
+        </div>
       </div>
 
       {/* DESKTOP VIEW */}
@@ -215,7 +218,7 @@ export default function EmployeeList() {
             </div>
           ))
         ) : filteredEmployees.length === 0 ? (
-          <div className="rounded-xl border border-slate-100 bg-white p-6 shadow-sm">
+          <div className="rounded-xl border border-slate-100 bg-slate-50 p-6 shadow-inner">
             <EmptyState 
               icon={Users} 
               title="No employees found" 
