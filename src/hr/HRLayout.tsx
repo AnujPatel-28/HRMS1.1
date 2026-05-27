@@ -95,7 +95,7 @@ export default function HRLayout() {
         )}
 
         {/* Sidebar (Desktop) / Slide-up Menu (Mobile) */}
-        <aside className={`fixed inset-y-0 left-0 z-50 w-[88vw] max-w-sm transform bg-white p-4 shadow-xl transition-transform duration-300 ease-in-out md:sticky md:top-24 md:z-30 md:w-56 md:max-w-none md:translate-x-0 md:self-start md:bg-transparent md:p-0 md:shadow-none ${mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
+        <aside className={`fixed inset-y-0 left-0 z-50 w-[88vw] max-w-sm transform overflow-y-auto pb-24 md:pb-0 md:overflow-visible bg-white p-4 shadow-xl transition-transform duration-300 ease-in-out md:sticky md:top-24 md:z-30 md:w-56 md:max-w-none md:translate-x-0 md:self-start md:bg-transparent md:p-0 md:shadow-none ${mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
           <div className="mb-6 flex items-start justify-between gap-3 md:hidden">
             <div>
               <span className="font-semibold text-slate-900">Navigation</span>
