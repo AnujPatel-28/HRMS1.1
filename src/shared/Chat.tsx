@@ -485,48 +485,59 @@ export default function Chat() {
   const currentDraftFile = selectedChannel ? draftFiles[selectedChannel.id] : null;
 
   return (
-    <section className="flex flex-col md:flex-row h-[calc(100svh-180px)] min-h-[500px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <section className="flex flex-col md:flex-row h-[calc(100svh-200px)] md:h-[calc(100svh-180px)] min-h-[400px] md:min-h-[500px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm mb-16 md:mb-0">
       {/* Sidebar */}
-      <aside className="w-full md:w-48 shrink-0 border-b md:border-b-0 md:border-r border-slate-200 bg-slate-50 p-3 flex flex-row overflow-x-auto md:flex-col gap-1">
-        <div className="flex items-center justify-between mb-1 px-2">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Channels</p>
+      <aside className="w-full md:w-64 shrink-0 border-b md:border-b-0 md:border-r border-slate-200 bg-slate-50/50 p-2 md:p-4 flex flex-row overflow-x-auto md:overflow-x-hidden md:flex-col gap-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <div className="flex items-center justify-between mb-1 md:mb-2 px-2">
+          <p className="text-[10px] md:text-xs font-bold uppercase tracking-wider text-slate-500">Channels</p>
           {isHr && (
-            <button onClick={() => setShowCreateModal(true)} className="p-1 text-slate-400 hover:text-brand-600 hover:bg-white rounded transition">
-              <Plus className="h-3.5 w-3.5" />
+            <button onClick={() => setShowCreateModal(true)} className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors">
+              <Plus className="h-4 w-4" />
             </button>
           )}
         </div>
-        {visibleChannels.map((ch) => (
-          <div key={ch.id} className="group flex items-center gap-1">
-            <button onClick={() => setSelectedChannel(ch)}
-              className={`flex flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
-                selectedChannel?.id === ch.id ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-200"
-              }`}>
-              <Hash className="h-3.5 w-3.5 shrink-0 opacity-70" />
-              <span className="capitalize font-medium truncate">{ch.name}</span>
-            </button>
-            {isHr && ch.name !== "general" && (
-              <button 
-                onClick={(e) => { e.stopPropagation(); setChannelToDelete(ch); }}
-                className="p-1.5 rounded-lg transition text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
+        <div className="flex flex-row md:flex-col gap-1 overflow-y-auto overflow-x-visible md:overflow-x-hidden pr-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          {visibleChannels.map((ch) => (
+            <div key={ch.id} className="group flex items-center gap-1">
+              <button onClick={() => setSelectedChannel(ch)}
+                className={`flex shrink-0 md:w-full items-center gap-2 md:gap-2.5 rounded-xl px-3 py-1.5 md:py-2.5 text-left text-sm transition-all ${
+                  selectedChannel?.id === ch.id 
+                    ? "bg-white text-brand-700 font-semibold shadow-sm ring-1 ring-slate-200/50" 
+                    : "text-slate-600 hover:bg-slate-200/50 font-medium"
+                }`}>
+                <Hash className={`h-4 w-4 shrink-0 ${selectedChannel?.id === ch.id ? "text-brand-500" : "opacity-60"}`} />
+                <span className="capitalize truncate">{ch.name}</span>
               </button>
-            )}
-          </div>
-        ))}
+              {isHr && ch.name !== "general" && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setChannelToDelete(ch); }}
+                  className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all text-slate-400 hover:bg-rose-50 hover:text-rose-600 shrink-0"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
       </aside>
 
       {/* Main */}
-      <div className="flex flex-1 flex-col overflow-hidden bg-white">
+      <div className="flex flex-1 flex-col overflow-hidden bg-[#F8FAFC]">
         {/* Header */}
-        <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-3.5 bg-white z-10 shadow-sm">
-          <Hash className="h-5 w-5 text-slate-400" />
-          <h3 className="font-semibold capitalize text-slate-800 text-lg">{selectedChannel?.name || "Select Channel"}</h3>
+        <div className="flex items-center justify-between border-b border-slate-200/70 px-4 md:px-6 py-2 md:py-4 bg-white/80 backdrop-blur-md z-10">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-brand-50 text-brand-600">
+              <Hash className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="font-bold capitalize text-slate-800 text-base md:text-lg leading-tight">{selectedChannel?.name || "Select Channel"}</h3>
+              <p className="hidden md:block text-xs text-slate-500 font-medium">{selectedChannel?.description || "Company communication channel"}</p>
+            </div>
+          </div>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto px-3 md:px-6 py-4 md:py-6 space-y-4 md:space-y-6">
           {!selectedChannel ? (
             <div className="flex h-full items-center justify-center text-slate-400">
               Select a channel to start chatting
@@ -538,11 +549,11 @@ export default function Chat() {
           ) : (
             <>
               {currentMessages.length >= 50 && (
-                <div className="flex justify-center py-2">
+                <div className="flex justify-center pb-4">
                   <button 
                     onClick={() => void loadMore()} 
                     disabled={loadingMore}
-                    className="text-xs font-semibold text-brand-600 bg-brand-50 hover:bg-brand-100 px-4 py-1.5 rounded-full transition disabled:opacity-50"
+                    className="text-xs font-semibold text-brand-600 bg-brand-50 hover:bg-brand-100 px-5 py-2 rounded-full transition-colors shadow-sm border border-brand-100 disabled:opacity-50"
                   >
                     {loadingMore ? "Loading..." : "Load Older Messages"}
                   </button>
@@ -555,44 +566,50 @@ export default function Chat() {
                 const isSending = m.delivery_status === 'sending';
 
                 return (
-                  <div key={m.id} className={`group flex gap-3 ${mine ? "flex-row-reverse" : ""}`}>
+                  <div key={m.id} className={`group flex gap-4 ${mine ? "flex-row-reverse" : ""}`}>
                     {/* Avatar */}
                     {senderEmp?.profile_photo_url ? (
-                      <img src={senderEmp.profile_photo_url} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover shadow-sm" />
+                      <img src={senderEmp.profile_photo_url} alt="" className="h-10 w-10 shrink-0 rounded-full object-cover shadow-sm ring-2 ring-white" />
                     ) : (
-                      <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-bold shadow-sm ${mine ? "bg-brand-100 text-brand-700" : "bg-slate-100 text-slate-600 border border-slate-200"}`}>
+                      <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-bold shadow-sm ring-2 ring-white ${mine ? "bg-brand-100 text-brand-700" : "bg-slate-200 text-slate-700"}`}>
                         {senderEmp?.full_name.slice(0, 2).toUpperCase() ?? "?"}
                       </div>
                     )}
 
-                    <div className={`flex max-w-[75%] flex-col gap-1 ${mine ? "items-end" : "items-start"}`}>
+                    <div className={`flex max-w-[85%] md:max-w-[70%] flex-col gap-1 md:gap-1.5 ${mine ? "items-end" : "items-start"}`}>
                       <div className="flex items-baseline gap-2 px-1">
-                        {!mine && <span className="text-xs font-semibold text-slate-700">{senderEmp?.full_name ?? "Unknown"}</span>}
-                        <span className="text-[10px] font-medium text-slate-400 flex items-center gap-1">
+                        {!mine && <span className="text-sm font-bold text-slate-700">{senderEmp?.full_name ?? "Unknown"}</span>}
+                        <span className="text-[11px] font-medium text-slate-400 flex items-center gap-1">
                           {fmt(m.created_at)}
-                          {mine && isSending && <Clock className="h-2.5 w-2.5 text-brand-400" />}
-                          {mine && isFailed && <AlertCircle className="h-2.5 w-2.5 text-rose-500" />}
+                          {mine && isSending && <Clock className="h-3 w-3 text-brand-400" />}
+                          {mine && isFailed && <AlertCircle className="h-3 w-3 text-rose-500" />}
                         </span>
                       </div>
                       
-                      <div className={`relative rounded-2xl px-4 py-2 text-sm shadow-sm transition ${isFailed ? "opacity-70 bg-rose-50 border border-rose-200 text-rose-900" : mine ? "rounded-tr-sm bg-brand-600 text-white" : "rounded-tl-sm border border-slate-200 bg-white text-slate-800"}`}>
+                      <div className={`relative px-4 py-2 md:px-5 md:py-3 text-[14px] md:text-[15px] shadow-sm transition-all ${
+                        isFailed 
+                          ? "opacity-70 bg-rose-50 border border-rose-200 text-rose-900 rounded-2xl" 
+                          : mine 
+                            ? "rounded-2xl rounded-tr-sm bg-brand-600 text-white" 
+                            : "rounded-2xl rounded-tl-sm border border-slate-200/60 bg-white text-slate-800"
+                      }`}>
                         <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
                         
                         {/* Attachment Rendering */}
                         {(m.attachment_url || m.upload_status === 'uploading') && (
                           <a href={m.attachment_url || "#"} target={m.attachment_url ? "_blank" : "_self"} rel="noreferrer"
-                            className={`mt-2 flex items-center gap-2 rounded-lg p-2 text-xs transition ${mine ? (isFailed ? "bg-rose-100" : "bg-brand-700 hover:bg-brand-800") : "bg-slate-50 border border-slate-100 hover:bg-slate-100"}`}>
-                            <div className={`p-1.5 rounded-md ${mine ? (isFailed ? "bg-rose-200" : "bg-brand-600") : "bg-white border border-slate-200 text-brand-600"}`}>
-                              {m.upload_status === 'uploading' ? <Clock className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+                            className={`mt-3 flex items-center gap-3 rounded-xl p-2.5 text-sm transition-colors ${mine ? (isFailed ? "bg-rose-100/50" : "bg-brand-700/50 hover:bg-brand-700") : "bg-slate-50 border border-slate-100 hover:bg-slate-100"}`}>
+                            <div className={`p-2 rounded-lg shadow-sm ${mine ? (isFailed ? "bg-rose-200" : "bg-white text-brand-600") : "bg-white border border-slate-200 text-slate-600"}`}>
+                              {m.upload_status === 'uploading' ? <Clock className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
                             </div>
-                            <span className="font-medium truncate max-w-[200px]">{m.attachment_name || "Attachment"}</span>
+                            <span className="font-semibold truncate max-w-[200px]">{m.attachment_name || "Attachment"}</span>
                           </a>
                         )}
 
                         {mine && !isSending && !isFailed && (
                           <button onClick={() => deleteMessage(m.id)}
-                            className="absolute -left-8 top-1.5 hidden rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-500 group-hover:flex transition">
-                            <Trash2 className="h-3.5 w-3.5" />
+                            className="absolute -left-10 top-1/2 -translate-y-1/2 opacity-0 rounded-full p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100 transition-all shadow-sm bg-white border border-slate-100">
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         )}
                       </div>
@@ -606,20 +623,22 @@ export default function Chat() {
         </div>
 
         {/* Input */}
-        <div className="border-t border-slate-200 px-4 py-3 bg-slate-50">
+        <div className="px-3 md:px-6 pt-3 md:pt-4 pb-2 md:pb-3 bg-white border-t border-slate-200/60 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)]">
           {!canSend ? (
-            <p className="text-center text-sm text-slate-500 py-2 font-medium">Only HR can post in #{selectedChannel?.name}.</p>
+            <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-center">
+              <p className="text-sm text-slate-500 font-medium">Only HR can post in #{selectedChannel?.name}.</p>
+            </div>
           ) : (
             <div className="flex flex-col gap-2">
               {currentDraftFile && (
-                <div className="flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs text-brand-700 w-fit">
-                  <FileText className="h-3.5 w-3.5" />
-                  <span className="font-medium max-w-[200px] truncate">{currentDraftFile.name}</span>
-                  <button onClick={() => setDraftFiles(prev => ({ ...prev, [selectedChannel!.id]: null }))} className="ml-1 text-brand-600 hover:text-rose-600"><X className="h-3.5 w-3.5" /></button>
+                <div className="flex items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2 text-sm text-brand-700 w-fit shadow-sm">
+                  <FileText className="h-4 w-4" />
+                  <span className="font-semibold max-w-[200px] truncate">{currentDraftFile.name}</span>
+                  <button onClick={() => setDraftFiles(prev => ({ ...prev, [selectedChannel!.id]: null }))} className="ml-2 rounded-full p-1 hover:bg-brand-200/50 text-brand-600 hover:text-rose-600 transition-colors"><X className="h-4 w-4" /></button>
                 </div>
               )}
-              <div className="flex items-end gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500 transition shadow-sm">
-                <button onClick={() => fileInputRef.current?.click()} className="shrink-0 text-slate-400 hover:text-brand-600 pb-0.5 transition">
+              <div className="flex items-end gap-2 md:gap-3 rounded-2xl border border-slate-300 bg-slate-50 p-2 md:p-2.5 focus-within:bg-white focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/20 transition-all shadow-sm">
+                <button onClick={() => fileInputRef.current?.click()} className="shrink-0 rounded-xl p-2 md:p-2.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 transition-colors">
                   <Paperclip className="h-5 w-5" />
                 </button>
                 <input type="file" className="hidden" ref={fileInputRef} onChange={e => selectedChannel && setDraftFiles(prev => ({ ...prev, [selectedChannel.id]: e.target.files?.[0] || null }))} />
@@ -629,17 +648,17 @@ export default function Chat() {
                   onKeyDown={handleKey}
                   placeholder={`Message #${selectedChannel?.name || "channel"}…`}
                   rows={1}
-                  className="flex-1 resize-none bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400 py-0.5"
+                  className="flex-1 resize-none bg-transparent text-sm md:text-[15px] text-slate-800 outline-none placeholder:text-slate-400 px-2 py-1.5 md:py-2.5"
                 />
                 <button
                   onClick={() => void sendMessage()}
                   disabled={(!currentDraftText.trim() && !currentDraftFile) || sending}
-                  className="shrink-0 rounded-lg bg-brand-600 p-1.5 text-white hover:bg-brand-700 disabled:opacity-40 transition shadow-sm"
+                  className="shrink-0 rounded-xl bg-brand-600 p-2 md:p-2.5 text-white hover:bg-brand-700 hover:shadow-md hover:-translate-y-0.5 disabled:translate-y-0 disabled:opacity-40 disabled:hover:shadow-none transition-all shadow-sm"
                 >
-                  <Send className="h-4.5 w-4.5" />
+                  <Send className="h-5 w-5" />
                 </button>
               </div>
-              <p className="text-[10px] text-slate-400 px-1 font-medium tracking-wide">Press Enter to send · Shift+Enter for new line</p>
+              <p className="text-[11px] text-slate-400 px-2 font-medium tracking-wide">Press <span className="font-bold text-slate-500">Enter</span> to send · <span className="font-bold text-slate-500">Shift+Enter</span> for new line</p>
             </div>
           )}
         </div>

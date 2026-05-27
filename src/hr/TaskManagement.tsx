@@ -257,70 +257,104 @@ export default function TaskManagement() {
 
       {/* ── ASSIGN TAB ── */}
       {tab === "assign" && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-          <h3 className="font-semibold text-slate-800">Assign New Task</h3>
-          <div className="grid gap-3 md:grid-cols-2">
-            <input value={form.title} onChange={e => setForm({...form,title:e.target.value})}
-              placeholder="Task title *" className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring md:col-span-2" />
-            <textarea value={form.description} onChange={e => setForm({...form,description:e.target.value})}
-              placeholder="Description (optional)" rows={3}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring md:col-span-2" />
-
-            {/* Assign mode toggle */}
-            <div className="flex gap-2 md:col-span-2">
-              {(["employee","department"] as const).map(m => (
-                <button key={m} onClick={() => setForm({...form,assign_mode:m,assigned_to:"",department:""})}
-                  className={`rounded-lg px-4 py-1.5 text-sm font-medium border transition capitalize ${form.assign_mode===m?"bg-brand-600 text-white border-brand-600":"border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                  {m==="employee" ? "Single Employee" : "Entire Department"}
-                </button>
-              ))}
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-8 shadow-sm max-w-5xl">
+          <div className="mb-6">
+            <h3 className="text-lg font-bold text-slate-900">Assign New Task</h3>
+            <p className="text-sm text-slate-500">Fill out the details below to assign a task to an employee or department.</p>
+          </div>
+          
+          <div className="space-y-8">
+            {/* Task Details */}
+            <div className="space-y-4">
+              <h4 className="text-sm font-semibold text-slate-700 border-b border-slate-100 pb-2">1. Task Details</h4>
+              <div className="space-y-3">
+                <input value={form.title} onChange={e => setForm({...form,title:e.target.value})}
+                  placeholder="Task title *" className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none ring-brand-600 focus:ring focus:border-brand-500 transition-shadow bg-slate-50 hover:bg-white focus:bg-white" />
+                <textarea value={form.description} onChange={e => setForm({...form,description:e.target.value})}
+                  placeholder="Description (optional)" rows={3}
+                  className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none ring-brand-600 focus:ring focus:border-brand-500 transition-shadow bg-slate-50 hover:bg-white focus:bg-white resize-none" />
+              </div>
             </div>
 
-            {form.assign_mode === "employee" ? (
-              <div className="md:col-span-2 space-y-2">
-                <input value={empSearch} onChange={e => setEmpSearch(e.target.value)}
-                  placeholder="Search employee…" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring" />
-                <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
-                  {filteredEmp.map(e => (
-                    <button key={e.id} onClick={() => { setForm({...form,assigned_to:e.id}); setEmpSearch(e.full_name); }}
-                      className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition hover:bg-slate-50 ${form.assigned_to===e.id?"bg-brand-50":""}`}>
-                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-slate-200 text-xs font-bold text-slate-600">
-                        {e.full_name.slice(0,2).toUpperCase()}
-                      </span>
-                      <span className="flex-1 font-medium text-slate-800">{e.full_name}</span>
-                      <span className="text-xs capitalize text-slate-400">{e.department ?? "—"}</span>
-                    </button>
-                  ))}
+            {/* Assignment */}
+            <div className="space-y-4">
+              <h4 className="text-sm font-semibold text-slate-700 border-b border-slate-100 pb-2">2. Assignment</h4>
+              
+              {/* Segmented Control */}
+              <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
+                {(["employee","department"] as const).map(m => (
+                  <button key={m} onClick={() => setForm({...form,assign_mode:m,assigned_to:"",department:""})}
+                    className={`rounded-lg px-5 py-2 text-sm font-medium transition-all capitalize ${form.assign_mode===m?"bg-white text-brand-700 shadow-sm":"text-slate-500 hover:text-slate-700"}`}>
+                    {m==="employee" ? "Single Employee" : "Entire Department"}
+                  </button>
+                ))}
+              </div>
+
+              {form.assign_mode === "employee" ? (
+                <div className="space-y-3">
+                  <input value={empSearch} onChange={e => setEmpSearch(e.target.value)}
+                    placeholder="Search employee…" className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none ring-brand-600 focus:ring focus:border-brand-500 transition-shadow bg-slate-50 hover:bg-white focus:bg-white" />
+                  <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100 bg-white">
+                    {filteredEmp.map(e => (
+                      <button key={e.id} onClick={() => { setForm({...form,assigned_to:e.id}); setEmpSearch(e.full_name); }}
+                        className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-slate-50 ${form.assigned_to===e.id?"bg-brand-50":""}`}>
+                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-200 text-xs font-bold text-slate-600">
+                          {e.full_name.slice(0,2).toUpperCase()}
+                        </span>
+                        <span className="flex-1 font-medium text-slate-800">{e.full_name}</span>
+                        <span className="text-xs capitalize text-slate-400">{e.department ?? "—"}</span>
+                        {form.assigned_to === e.id && <Check className="h-4 w-4 text-brand-600" />}
+                      </button>
+                    ))}
+                    {filteredEmp.length === 0 && <div className="p-4 text-center text-sm text-slate-500">No employees found.</div>}
+                  </div>
+                </div>
+              ) : (
+                <select value={form.department} onChange={e => setForm({...form,department:e.target.value})}
+                  className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none ring-brand-600 focus:ring focus:border-brand-500 transition-shadow bg-slate-50 hover:bg-white focus:bg-white">
+                  <option value="">Select department *</option>
+                  {DEPT_OPTIONS.filter(d=>d!=="all").map(d=><option key={d} value={d} className="capitalize">{d}</option>)}
+                </select>
+              )}
+            </div>
+
+            {/* Schedule & Priority */}
+            <div className="space-y-4">
+              <h4 className="text-sm font-semibold text-slate-700 border-b border-slate-100 pb-2">3. Schedule & Priority</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Due Date</label>
+                  <input type="date" value={form.due_date} onChange={e => setForm({...form,due_date:e.target.value})}
+                    className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none ring-brand-600 focus:ring focus:border-brand-500 transition-shadow bg-slate-50 hover:bg-white focus:bg-white" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Time</label>
+                  <input type="time" value={form.due_time} onChange={e => setForm({...form,due_time:e.target.value})}
+                    className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none ring-brand-600 focus:ring focus:border-brand-500 transition-shadow bg-slate-50 hover:bg-white focus:bg-white" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Priority</label>
+                  <select value={form.priority} onChange={e => setForm({...form,priority:e.target.value as Task["priority"]})}
+                    className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none ring-brand-600 focus:ring focus:border-brand-500 transition-shadow bg-slate-50 hover:bg-white focus:bg-white">
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="urgent">🚨 Urgent</option>
+                  </select>
                 </div>
               </div>
-            ) : (
-              <select value={form.department} onChange={e => setForm({...form,department:e.target.value})}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring md:col-span-2">
-                <option value="">Select department *</option>
-                {DEPT_OPTIONS.filter(d=>d!=="all").map(d=><option key={d} value={d} className="capitalize">{d}</option>)}
-              </select>
-            )}
+            </div>
 
-            <select value={form.priority} onChange={e => setForm({...form,priority:e.target.value as Task["priority"]})}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring">
-              <option value="low">Low Priority</option>
-              <option value="medium">Medium Priority</option>
-              <option value="high">High Priority</option>
-              <option value="urgent">🚨 Urgent</option>
-            </select>
-            <div />
-            <input type="date" value={form.due_date} onChange={e => setForm({...form,due_date:e.target.value})}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring" />
-            <input type="time" value={form.due_time} onChange={e => setForm({...form,due_time:e.target.value})}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring" />
-          </div>
-          <div className="flex gap-2 pt-2">
-            <button onClick={assignTask} disabled={submitting}
-              className="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
-              {submitting ? "Assigning…" : "Assign Task"}
-            </button>
-            <button onClick={() => { setForm(EMPTY_FORM); setEmpSearch(""); }}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">Reset</button>
+            <div className="flex gap-3 pt-4 border-t border-slate-100">
+              <button onClick={assignTask} disabled={submitting}
+                className="rounded-xl bg-brand-600 px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-brand-700 hover:shadow disabled:opacity-50 active:scale-[0.98]">
+                {submitting ? "Assigning…" : "Assign Task"}
+              </button>
+              <button onClick={() => { setForm(EMPTY_FORM); setEmpSearch(""); }}
+                className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 active:scale-[0.98]">
+                Reset
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -417,7 +451,8 @@ export default function TaskManagement() {
                 { value: "all", label: "All Employees" },
                 ...employees.map(e => ({ value: e.id, label: e.full_name }))
               ]}
-              containerClassName="min-w-0 flex-1 sm:flex-none sm:min-w-[150px]"
+              searchable
+              containerClassName="min-w-0 flex-1 sm:flex-none sm:min-w-[170px]"
               triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
             />
             <SelectDropdown
@@ -472,7 +507,7 @@ export default function TaskManagement() {
                 ) : tasks.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="p-10">
-                      <EmptyState icon={ClipboardList} title="No tasks found" description="No tasks match the current filters." />
+                      <EmptyState icon={ClipboardList} title="No tasks found" description="No tasks match the current filters." minimal />
                     </td>
                   </tr>
                 ) : tasks.map(task => {

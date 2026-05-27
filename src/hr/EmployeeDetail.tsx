@@ -345,7 +345,15 @@ export default function EmployeeDetail() {
 
           {/* Action Menu Dropdown */}
           {showActionsMenu && (
-            <div className="fixed inset-0 z-40" onClick={() => setShowActionsMenu(false)} />
+            <div 
+              className="fixed inset-0 z-40 cursor-default" 
+              onClick={() => setShowActionsMenu(false)} 
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                setShowActionsMenu(false);
+              }}
+              aria-hidden="true"
+            />
           )}
           <div className={`absolute right-0 top-full mt-2 w-48 flex-col gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-xl z-50 ${showActionsMenu ? "flex" : "hidden"}`}>
             <button
