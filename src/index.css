@@ -51,10 +51,10 @@ h6 {
 
 /* Safe area insets for mobile notches */
 @supports (padding-top: env(safe-area-inset-top)) {
-  .pt-safe { padding-top: max(env(safe-area-inset-top), 1rem) !important; }
-  .pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 1.25rem) !important; }
+  .pt-safe { padding-top: max(env(safe-area-inset-top), 0.75rem) !important; }
+  .pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 0.5rem) !important; }
   .px-safe {
-    padding-left: max(env(safe-area-inset-left), 1.5rem) !important;
-    padding-right: max(env(safe-area-inset-right), 1.5rem) !important;
+    padding-left: max(env(safe-area-inset-left), 1rem) !important;
+    padding-right: max(env(safe-area-inset-right), 1rem) !important;
   }
 }

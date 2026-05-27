@@ -140,7 +140,7 @@ export default function HRLayout() {
         <NavLink
           to="/hr/dashboard"
           className={({ isActive }) =>
-            `flex flex-col items-center p-2 text-xs font-medium transition-colors ${isActive ? "text-brand-700" : "text-slate-500 hover:text-slate-900"}`
+            `flex flex-col items-center py-1.5 px-2 text-[11px] font-medium transition-colors ${isActive ? "text-brand-700" : "text-slate-500 hover:text-slate-900"}`
           }
         >
           <Home className="mb-1 h-5 w-5" />
@@ -149,7 +149,7 @@ export default function HRLayout() {
         <NavLink
           to="/hr/employees"
           className={({ isActive }) =>
-            `flex flex-col items-center p-2 text-xs font-medium transition-colors ${isActive ? "text-brand-700" : "text-slate-500 hover:text-slate-900"}`
+            `flex flex-col items-center py-1.5 px-2 text-[11px] font-medium transition-colors ${isActive ? "text-brand-700" : "text-slate-500 hover:text-slate-900"}`
           }
         >
           <Users className="mb-1 h-5 w-5" />
@@ -158,7 +158,7 @@ export default function HRLayout() {
         <NavLink
           to="/hr/attendance"
           className={({ isActive }) =>
-            `flex flex-col items-center p-2 text-xs font-medium transition-colors ${isActive ? "text-brand-700" : "text-slate-500 hover:text-slate-900"}`
+            `flex flex-col items-center py-1.5 px-2 text-[11px] font-medium transition-colors ${isActive ? "text-brand-700" : "text-slate-500 hover:text-slate-900"}`
           }
         >
           <CalendarCheck className="mb-1 h-5 w-5" />
@@ -167,7 +167,7 @@ export default function HRLayout() {
         <button
           type="button"
           onClick={() => setMobileOpen(true)}
-          className={`flex flex-col items-center p-2 text-xs font-medium transition-colors ${mobileOpen ? "text-brand-700" : "text-slate-500 hover:text-slate-900"}`}
+          className={`flex flex-col items-center py-1.5 px-2 text-[11px] font-medium transition-colors ${mobileOpen ? "text-brand-700" : "text-slate-500 hover:text-slate-900"}`}
         >
           <MoreHorizontal className="mb-1 h-5 w-5" />
           More
