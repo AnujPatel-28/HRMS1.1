@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, Menu, LayoutDashboard, Clock, Plane, CheckSquare, ShieldCheck, Palmtree, Calendar, MessageSquare, BookOpen } from "lucide-react";
+import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, LayoutDashboard, Clock, Plane, CheckSquare, ShieldCheck, Palmtree, Calendar, MessageSquare, BookOpen } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
@@ -63,7 +63,7 @@ export default function HRLayout() {
             <img 
               src="/TalentMesh_page-0002-removebg-preview.png" 
               alt="TalentMesh" 
-              className="h-10 w-auto shrink-0 object-contain sm:hidden -ml-1" 
+              className="w-[38.2vw] max-w-[180px] h-auto shrink-0 object-contain sm:hidden -ml-1" 
             />
           </div>
           <div className="flex items-center gap-3">
