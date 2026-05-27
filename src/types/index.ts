@@ -130,7 +130,7 @@ export interface Task {
   due_date: string | null;
   due_time: string | null;
   attendance_lock_date?: string | null;
-  status: "assigned" | "in_progress" | "submitted" | "approved" | "rejected";
+  status: "assigned" | "in_progress" | "submitted" | "approved" | "rejected" | "overdue";
   created_at: string;
   updated_at: string;
 }

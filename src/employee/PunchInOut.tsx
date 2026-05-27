@@ -12,6 +12,7 @@ import { checkGeofence, getCurrentPosition, type LocationStatus } from "../utils
 import { useEmployeeShift } from "../hooks/useEmployeeShift";
 import { formatLocalDate } from "../utils/date";
 import { functions } from "../insforge/client";
+import { BLOCKING_TASK_STATUSES, PUNCH_OUT_ERROR_MESSAGES } from "../utils/taskConstants";
 
 // Business calendar date — uses local timezone to avoid UTC date-shift bugs.
 // See src/utils/date.ts for full explanation.
@@ -159,7 +160,7 @@ export default function PunchInOut() {
       const [attRes, todayClosedRes, taskRes, settingsRes, recentAttRes, overtimeRes, correctionsRes] = await Promise.all([
         db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("session_status", "open").not("punch_in", "is", null).order("punch_in", { ascending: false }).limit(1).maybeSingle(),
         db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("date", TODAY).eq("session_status", "closed").order("punch_out", { ascending: false }).limit(1).maybeSingle(),
-        db.from("tasks").select("*").eq("tenant_id", tenantId).eq("assigned_to", employee.id).eq("due_date", TODAY),
+        db.from("tasks").select("*").eq("tenant_id", tenantId).eq("assigned_to", employee.id).lte("due_date", TODAY).in("status", [...BLOCKING_TASK_STATUSES]),
         db.from("tenant_settings").select("key,value").eq("tenant_id", tenantId),
         db
           .from("attendance")
@@ -298,7 +299,7 @@ export default function PunchInOut() {
         halfDayCutoffDate.setDate(halfDayCutoffDate.getDate() + 1);
       }
       const isHalfDay = now.getTime() > halfDayCutoffDate.getTime();
-      const unapprovedTasks = todayTasks.filter((task) => task.status !== "approved");
+      const unapprovedTasks = todayTasks.filter((task) => BLOCKING_TASK_STATUSES.includes(task.status as any));
       const allowed = tenant.punch_out_gate_enabled ? unapprovedTasks.length === 0 : true;
       const geofenceEnabled = tenantSettings["geofence_enabled"] === "true";
       const officeLat = parseFloat(tenantSettings["office_lat"] || "0");
@@ -471,7 +472,7 @@ export default function PunchInOut() {
 
       if (dbErr) throw dbErr;
       if (data && data.success === false) {
-        throw new Error(data.reason || "Server rejected punch out");
+        throw data;
       }
 
       const workHoursReturned = data?.work_hours ?? 0;
@@ -486,8 +487,21 @@ export default function PunchInOut() {
       if (err instanceof Error && err.message === "LOW_ACCURACY") {
         error("GPS accuracy is too low (>100m). Please step outside or connect to Wi-Fi.");
       } else {
-        error("Failed to punch out.");
-        console.error(err);
+        const errcode = (err as any)?.code || (err as any)?.errcode;
+        if (errcode === "P0003") {
+          void logAction("attendance.punch_out_blocked", "attendance", attendance.id, {
+            errcode,
+            source: "client",
+            unresolved_task_count: todayTasks.filter((task) => BLOCKING_TASK_STATUSES.includes(task.status as any)).length,
+          });
+        }
+        const userMessage = PUNCH_OUT_ERROR_MESSAGES[errcode];
+        if (userMessage) {
+          error(userMessage);
+        } else {
+          error("Failed to punch out.");
+          console.error(err);
+        }
       }
     } finally {
       setActing(false);
@@ -765,7 +779,7 @@ export default function PunchInOut() {
     );
   }
 
-  const unapprovedTasks = todayTasks.filter((task) => task.status !== "approved");
+  const unapprovedTasks = todayTasks.filter((task) => BLOCKING_TASK_STATUSES.includes(task.status as any));
   const locked = tenant.punch_out_gate_enabled ? unapprovedTasks.length > 0 : false;
   const locationIndicator = getLocationIndicator(attendance.punch_in_location_status);
 
@@ -830,7 +844,9 @@ export default function PunchInOut() {
             <p className="flex items-center justify-center gap-1 text-sm font-semibold text-amber-700">
               <Lock className="h-4 w-4" /> Punch-out locked
             </p>
-            <p className="text-xs text-amber-600">Awaiting HR approval of your task submission.</p>
+            <p className="text-xs text-amber-600">
+              {unapprovedTasks.length} task{unapprovedTasks.length > 1 ? "s" : ""} need HR approval before you can punch out.
+            </p>
             <Link
               to="/employee/tasks"
               className="inline-block text-xs font-semibold text-brand-600 underline hover:text-brand-800"
@@ -853,6 +869,8 @@ export default function PunchInOut() {
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${
                   task.status === "approved" ? "bg-emerald-100 text-emerald-700" :
                   task.status === "submitted" ? "bg-purple-100 text-purple-700" :
+                  task.status === "overdue" ? "bg-red-100 text-red-700" :
+                  task.status === "rejected" ? "bg-rose-100 text-rose-700" :
                   "bg-amber-100 text-amber-700"
                 }`}>{task.status.replace("_", " ")}</span>
               </div>

@@ -10,6 +10,7 @@ import { ConfirmModal } from "../shared/ConfirmModal";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { SelectDropdown } from "../shared/components/SelectDropdown";
+import { ALL_TASK_STATUSES, BLOCKING_TASK_STATUSES, SUBMITTED_TASK_STATUSES } from "../utils/taskConstants";
 
 type Tab = "active" | "inbox" | "all" | "assign";
 type StatusFilter = "all" | Task["status"];
@@ -28,6 +29,7 @@ const STATUS_BADGE: Record<Task["status"], string> = {
   submitted: "bg-purple-100 text-purple-700",
   approved: "bg-emerald-100 text-emerald-700",
   rejected: "bg-rose-100 text-rose-700",
+  overdue: "bg-red-100 text-red-700",
 };
 
 interface TaskWithEmployee extends Task { assignee?: Employee; submission?: TaskSubmission; }
@@ -69,7 +71,7 @@ export default function TaskManagement() {
     setLoading(true);
     try {
       let q = db.from("tasks").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false });
-      if (tab === "active") q = q.in("status", ["assigned","in_progress","submitted"]);
+      if (tab === "active") q = q.in("status", ["in_progress", ...BLOCKING_TASK_STATUSES]);
       if (tab === "inbox") q = q.eq("status","submitted");
       if (statusFilter !== "all" && tab === "all") q = q.eq("status", statusFilter);
       if (priorityFilter !== "all") q = q.eq("priority", priorityFilter);
@@ -79,7 +81,7 @@ export default function TaskManagement() {
       if (fetchErr) throw fetchErr;
       
       const taskList = (data ?? []) as Task[];
-      const subIds = taskList.filter(t => ["submitted","approved","rejected"].includes(t.status)).map(t => t.id);
+      const subIds = taskList.filter(t => SUBMITTED_TASK_STATUSES.includes(t.status as any)).map(t => t.id);
       let subMap: Record<string,TaskSubmission> = {};
       if (subIds.length > 0) {
         const { data: subs } = await db.from("task_submissions")
@@ -468,7 +470,7 @@ export default function TaskManagement() {
                 onChange={(val) => setStatusFilter(val as StatusFilter)}
                 options={[
                   { value: "all", label: "All Statuses" },
-                  ...(["assigned","in_progress","submitted","approved","rejected"] as const).map(s => ({ value: s, label: s.replace("_"," ").replace(/\b\w/g, l => l.toUpperCase()) }))
+                  ...ALL_TASK_STATUSES.map(s => ({ value: s, label: s.replace("_"," ").replace(/\b\w/g, l => l.toUpperCase()) }))
                 ]}
                 containerClassName="min-w-0 flex-1 sm:flex-none sm:min-w-[150px]"
                 triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
@@ -523,7 +525,7 @@ export default function TaskManagement() {
                       <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${STATUS_BADGE[task.status]}`}>{task.status.replace("_"," ")}</span></td>
                       <td className="px-4 py-3">
                         <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                          {task.status === "submitted" && (
+                          {(task.status === "submitted" || (task.status === "overdue" && task.submission)) && (
                             <button onClick={() => { setTab("inbox"); setExpandedId(task.id); }}
                               className="rounded-lg bg-purple-50 border border-purple-200 px-2 py-1 text-xs font-medium text-purple-700 hover:bg-purple-100">
                               <Eye className="inline h-3 w-3 mr-1"/>Review
