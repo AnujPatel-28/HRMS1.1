@@ -24,6 +24,7 @@ const STATUS_CONFIG: Record<Task["status"], { label: string; color: string; icon
   submitted: { label: "Submitted", color: "bg-purple-100 text-purple-700", icon: <Clock className="h-4 w-4" /> },
   approved: { label: "Approved", color: "bg-emerald-100 text-emerald-700", icon: <CheckCircle className="h-4 w-4" /> },
   rejected: { label: "Rejected", color: "bg-rose-100 text-rose-700", icon: <XCircle className="h-4 w-4" /> },
+  overdue: { label: "Overdue", color: "bg-red-100 text-red-700", icon: <AlertCircle className="h-4 w-4" /> },
 };
 
 export default function MyTasks() {
