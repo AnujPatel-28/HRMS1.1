@@ -446,9 +446,9 @@ export default function Chat() {
         setShowCreateModal(false);
         resetCreateModal();
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to create channel", err);
-      alert("Failed to create channel. Name might already exist.");
+      alert(`Failed to create channel: ${err?.message || err?.details || JSON.stringify(err)}`);
     } finally {
       setCreating(false);
     }
