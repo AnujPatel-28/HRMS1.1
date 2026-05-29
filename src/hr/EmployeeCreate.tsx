@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useTenant } from "../contexts/TenantContext";
 import { insforge, db } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
+import { getTenantYear } from "../utils/date";
+
 
 interface FormState {
   full_name: string;
@@ -358,6 +360,47 @@ export default function EmployeeCreate() {
 
         currentEmployeeId = insertRes.data.id as string;
         setInsertedEmployeeId(currentEmployeeId);
+
+        // ── Auto-initialize leave balances for the new employee ──
+        // Silently seed leave_balance rows for every active leave type
+        // so the employee portal shows correct balances immediately.
+        try {
+          const currentYear = new Date().getFullYear();
+          const targetYear = getTenantYear("UTC"); // use UTC as timezone isn't available here
+          const { data: leaveTypesData } = await db
+            .from("leave_types")
+            .select("id, days_per_year, accrual_type")
+            .eq("tenant_id", tenantId)
+            .eq("is_active", true);
+
+          if (leaveTypesData && leaveTypesData.length > 0) {
+            const balanceRows = leaveTypesData.map((lt: { id: string; days_per_year: number; accrual_type: string }) => {
+              let initialBalance = lt.days_per_year;
+              if (lt.accrual_type === "monthly") {
+                if (targetYear === currentYear) {
+                  const elapsedMonths = new Date().getMonth() + 1;
+                  initialBalance = Number(((lt.days_per_year / 12) * elapsedMonths).toFixed(2));
+                } else if (targetYear > currentYear) {
+                  initialBalance = 0;
+                }
+              }
+              return {
+                tenant_id: tenantId,
+                employee_id: currentEmployeeId as string,
+                leave_type_id: lt.id,
+                year: targetYear,
+                total_allocated: lt.days_per_year,
+                used_days: 0,
+                carried_forward: 0,
+                balance: initialBalance,
+              };
+            });
+            await db.from("leave_balances").upsert(balanceRows, { onConflict: "tenant_id,employee_id,leave_type_id,year", ignoreDuplicates: true });
+          }
+        } catch (leaveErr) {
+          // Non-fatal: employee is created; HR can always use "Initialize Balances" as a fallback
+          console.warn("Could not auto-initialize leave balances for new employee:", leaveErr);
+        }
       }
 
       // ── Upload documents (optional) ──

@@ -911,6 +911,24 @@ export default function PolicyCenter() {
     setLeaveTypeModalOpen(true);
   }
 
+  /**
+   * Compute the prorated initial leave balance for a given leave type.
+   * - monthly: prorate by elapsed months in the current year
+   * - lump_sum: grant the full year entitlement upfront
+   */
+  function computeInitialBalance(daysPerYear: number, accrualType: string, targetYear: number): number {
+    const currentYear = new Date().getFullYear();
+    if (accrualType === "monthly") {
+      if (targetYear === currentYear) {
+        const elapsedMonths = new Date().getMonth() + 1; // 1-based (Jan=1, May=5, ...)
+        return Number(((daysPerYear / 12) * elapsedMonths).toFixed(2));
+      } else if (targetYear > currentYear) {
+        return 0; // future year starts at zero; cron will accrue
+      }
+    }
+    return daysPerYear; // lump_sum — full entitlement on day 1
+  }
+
   async function saveLeaveType() {
     if (!tenantId) return;
     
@@ -940,14 +958,42 @@ export default function PolicyCenter() {
         is_paid: leaveTypeForm.is_paid,
       };
 
+      const isNew = !leaveTypeForm.id;
+      let newLeaveTypeId: string | null = null;
+
       if (leaveTypeForm.id) {
         const now = new Date().toISOString();
         const { data: updateData, error: updateError } = await db.from("leave_types").update({ ...payload, updated_at: now }).eq("tenant_id", tenantId).eq("id", leaveTypeForm.id).eq("updated_at", leaveTypeForm.updated_at as string).select("id").maybeSingle();
         if (updateError) throw updateError;
         if (leaveTypeForm.updated_at && !updateData) throw new Error("STALE_WRITE");
       } else {
-        const { error: insertError } = await db.from("leave_types").insert([{ ...payload, updated_at: new Date().toISOString() }]);
+        const { data: insertData, error: insertError } = await db.from("leave_types").insert([{ ...payload, updated_at: new Date().toISOString() }]).select("id").single();
         if (insertError) throw insertError;
+        newLeaveTypeId = insertData?.id ?? null;
+      }
+
+      // ── Auto-initialize balances for all active employees when a NEW leave type is added ──
+      if (isNew && newLeaveTypeId && payload.is_active) {
+        const targetYear = getTenantYear(tenantForm.timezone || "UTC");
+        const initialBalance = computeInitialBalance(payload.days_per_year, payload.accrual_type, targetYear);
+
+        const { data: empData } = await db.from("employees").select("id").eq("tenant_id", tenantId).eq("status", "active");
+        const empIds = (empData ?? []).map((e: { id: string }) => e.id);
+
+        if (empIds.length > 0) {
+          const balanceRows = empIds.map((employeeId: string) => ({
+            tenant_id: tenantId,
+            employee_id: employeeId,
+            leave_type_id: newLeaveTypeId as string,
+            year: targetYear,
+            total_allocated: payload.days_per_year,
+            used_days: 0,
+            carried_forward: 0,
+            balance: initialBalance,
+          }));
+          // ignoreDuplicates = true ensures this is fully idempotent
+          await db.from("leave_balances").upsert(balanceRows, { onConflict: "tenant_id,employee_id,leave_type_id,year", ignoreDuplicates: true });
+        }
       }
 
       success("Leave type saved.");
@@ -1023,7 +1069,7 @@ export default function PolicyCenter() {
       if (empError) throw empError;
       const liveEmployeeIds = (freshEmployees || []).map(e => e.id);
 
-      const currentYear = new Date().getFullYear();
+
       const targetYear = dryRunStats.targetYear;
       const existingKeys = new Set(
         leaveBalanceRows
@@ -1033,27 +1079,16 @@ export default function PolicyCenter() {
       const rowsToInsert = liveEmployeeIds.flatMap((employeeId) =>
         activeLeaveTypes
           .filter((leaveType) => !existingKeys.has(`${employeeId}:${leaveType.id}`))
-          .map((leaveType) => {
-            let initialBalance = leaveType.days_per_year;
-            if (leaveType.accrual_type === "monthly") {
-              if (targetYear === currentYear) {
-                const elapsedMonths = new Date().getMonth() + 1; // 1-based index (e.g., May = 5)
-                initialBalance = Number(((leaveType.days_per_year / 12) * elapsedMonths).toFixed(2));
-              } else if (targetYear > currentYear) {
-                initialBalance = 0;
-              }
-            }
-            return {
-              tenant_id: tenantId,
-              employee_id: employeeId,
-              leave_type_id: leaveType.id,
-              year: targetYear,
-              total_allocated: leaveType.days_per_year,
-              used_days: 0,
-              carried_forward: 0,
-              balance: initialBalance,
-            };
-          }),
+          .map((leaveType) => ({
+            tenant_id: tenantId,
+            employee_id: employeeId,
+            leave_type_id: leaveType.id,
+            year: targetYear,
+            total_allocated: leaveType.days_per_year,
+            used_days: 0,
+            carried_forward: 0,
+            balance: computeInitialBalance(leaveType.days_per_year, leaveType.accrual_type, targetYear),
+          })),
       );
 
       if (rowsToInsert.length > 0) {
