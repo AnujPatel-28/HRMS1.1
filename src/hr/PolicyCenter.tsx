@@ -996,6 +996,41 @@ export default function PolicyCenter() {
         }
       }
 
+      // ── Recalculate existing balances when days_per_year changes on an EDIT ──
+      if (!isNew && leaveTypeForm.id) {
+        const targetYear = getTenantYear(tenantForm.timezone || "UTC");
+        const newProrated = computeInitialBalance(payload.days_per_year, payload.accrual_type, targetYear);
+
+        // Fetch existing balance rows for this leave type in the current year
+        const { data: existingBalances } = await db
+          .from("leave_balances")
+          .select("id, used_days, pending_days, carried_forward")
+          .eq("tenant_id", tenantId)
+          .eq("leave_type_id", leaveTypeForm.id)
+          .eq("year", targetYear);
+
+        if (existingBalances && existingBalances.length > 0) {
+          // Update each row: new balance = prorated_entitlement - used - pending + carried
+          // GREATEST(0, ...) prevents negative balances
+          for (const row of existingBalances) {
+            const newBalance = Math.max(
+              0,
+              Number((
+                newProrated
+                - Number(row.used_days || 0)
+                - Number(row.pending_days || 0)
+                + Number(row.carried_forward || 0)
+              ).toFixed(2)),
+            );
+            await db
+              .from("leave_balances")
+              .update({ total_allocated: payload.days_per_year, balance: newBalance, updated_at: new Date().toISOString() })
+              .eq("id", row.id);
+          }
+        }
+      }
+
+
       success("Leave type saved.");
       setLeaveTypeModalOpen(false);
       setLeaveTypeForm(defaultLeaveTypeForm);
