@@ -565,34 +565,86 @@ export default function EmployeeDetail() {
 
       {activeTab === "identity" ? (
         <div className="mt-4">
-          <button
-            type="button"
-            onClick={() => setShowSensitive((value) => !value)}
-            className="mb-5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
-          >
-            {showSensitive ? "Hide" : "Show"} sensitive fields
-          </button>
+          {!isEditing && (
+            <button
+              type="button"
+              onClick={() => setShowSensitive((value) => !value)}
+              className="mb-5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
+            >
+              {showSensitive ? "Hide" : "Show"} sensitive fields
+            </button>
+          )}
 
           <div className="grid gap-5 md:grid-cols-2">
             <div>
-              <p className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Aadhaar Number</p>
-              <p className="font-semibold text-slate-900">{maskValue(employee.aadhaar_number, showSensitive)}</p>
+              <label className="block text-sm">
+                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Aadhaar Number</span>
+                {isEditing ? (
+                  <input
+                    value={editForm.aadhaar_number ?? ""}
+                    onChange={(event) => updateField("aadhaar_number", event.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                  />
+                ) : (
+                  <p className="font-semibold text-slate-900">{maskValue(employee.aadhaar_number, showSensitive)}</p>
+                )}
+              </label>
             </div>
             <div>
-              <p className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">PAN Number</p>
-              <p className="font-semibold text-slate-900">{maskValue(employee.pan_number, showSensitive)}</p>
+              <label className="block text-sm">
+                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">PAN Number</span>
+                {isEditing ? (
+                  <input
+                    value={editForm.pan_number ?? ""}
+                    onChange={(event) => updateField("pan_number", event.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                  />
+                ) : (
+                  <p className="font-semibold text-slate-900">{maskValue(employee.pan_number, showSensitive)}</p>
+                )}
+              </label>
             </div>
             <div>
-              <p className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Bank Name</p>
-              <p className="font-semibold text-slate-900">{employee.bank_name ?? "—"}</p>
+              <label className="block text-sm">
+                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Bank Name</span>
+                {isEditing ? (
+                  <input
+                    value={editForm.bank_name ?? ""}
+                    onChange={(event) => updateField("bank_name", event.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                  />
+                ) : (
+                  <p className="font-semibold text-slate-900">{employee.bank_name ?? "—"}</p>
+                )}
+              </label>
             </div>
             <div>
-              <p className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Account Number</p>
-              <p className="font-semibold text-slate-900">{maskValue(employee.account_number, showSensitive)}</p>
+              <label className="block text-sm">
+                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Account Number</span>
+                {isEditing ? (
+                  <input
+                    value={editForm.account_number ?? ""}
+                    onChange={(event) => updateField("account_number", event.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                  />
+                ) : (
+                  <p className="font-semibold text-slate-900">{maskValue(employee.account_number, showSensitive)}</p>
+                )}
+              </label>
             </div>
             <div className="md:col-span-2">
-              <p className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">IFSC Code</p>
-              <p className="font-semibold text-slate-900">{maskValue(employee.ifsc_code, showSensitive, 2)}</p>
+              <label className="block text-sm">
+                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">IFSC Code</span>
+                {isEditing ? (
+                  <input
+                    value={editForm.ifsc_code ?? ""}
+                    onChange={(event) => updateField("ifsc_code", event.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                  />
+                ) : (
+                  <p className="font-semibold text-slate-900">{maskValue(employee.ifsc_code, showSensitive, 2)}</p>
+                )}
+              </label>
             </div>
           </div>
         </div>
