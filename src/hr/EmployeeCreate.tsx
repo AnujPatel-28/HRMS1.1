@@ -407,7 +407,10 @@ export default function EmployeeCreate() {
       sessionStorage.removeItem(`hrms_employee_draft_${tenantId}`);
 
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Something went wrong. Please try again.";
+      let message = err instanceof Error ? err.message : "Something went wrong. Please try again.";
+      if (message.includes("employees_email_key")) {
+        message = "This email is already registered to an employee in the system. Please provide a different email, or ask the employee to use an email alias (e.g., name+company@gmail.com).";
+      }
       setError(message);
     } finally {
       setSubmitting(false);
