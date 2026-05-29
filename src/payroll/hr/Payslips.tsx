@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Download, ExternalLink, Eye, Loader2, Mail, 
 import { db, storage } from "../../insforge/client";
 import { useTenant } from "../../contexts/TenantContext";
 import { useToast } from "../../shared/ToastContext";
+import { useAuditLog } from "../../hooks/useAuditLog";
 import { Skeleton } from "../../shared/Skeleton";
 import { EmptyState } from "../../shared/EmptyState";
 import type { Employee } from "../../types";
@@ -22,6 +23,18 @@ const PAYSLIP_TEMPLATE_KEY = "payroll.payslip_template";
 const PAYSLIP_TEMPLATE_VALUE = "standard_v1";
 const LEGACY_TEMPLATE_VALUE = "zoho_standard_v1";
 
+// ─── Enterprise Safety Constants ──────────────────────────────────────────────────
+// Batch size caps: 30 recipients per mailto: link stays safely below browser URL limits.
+// 10 batches max = 300 employees. Beyond this, use the future email queue workflow.
+const RECIPIENT_BATCH_SIZE = 30;
+const MAX_EMAIL_BATCHES = 10;
+
+// Snapshot versioning: bump when the payroll engine's policy_snapshot shape changes.
+// Old snapshots below this version fall back to DB column values (safe defaults).
+// CRITICAL: Never auto-regenerate historical payslips. Always render from stored DB values.
+// Changing PF/ESI ceilings must NOT retroactively alter what employees see on old payslips.
+const SUPPORTED_SNAPSHOT_VERSION = 2;
+
 interface PayrollRun {
   id: string;
   tenant_id: string;
@@ -30,6 +43,17 @@ interface PayrollRun {
   status: RunStatus;
   total_net: number | null;
   employee_count: number | null;
+}
+
+interface PolicySnapshot {
+  snapshot_version?: number;
+  paid_leave_days?: number;
+  unpaid_leave_days?: number;
+  overtime_amount?: number;
+  pf_base?: number | null;
+  esi_base?: number | null;
+  override_net?: number | null;
+  [key: string]: unknown;
 }
 
 interface Payslip {
@@ -59,6 +83,7 @@ interface Payslip {
   net_payable: number;
   pdf_url: string | null;
   emailed_at: string | null;
+  policy_snapshot?: PolicySnapshot | null;
   employee_name?: string;
   employee_email?: string;
   employee_code?: string | null;
@@ -81,6 +106,12 @@ function StatusBadge({ status }: { status: RunStatus }) {
   );
 }
 
+// NOTE ON emailed_at SEMANTICS:
+// In the current mailto: workflow, emailed_at means "payslip email was prepared"
+// (i.e. the mail composer was opened with the employee's address pre-filled).
+// It does NOT mean the email was actually delivered.
+// When the future email_jobs queue is built (send-payslip-email Edge Function),
+// emailed_at should be updated only on confirmed delivery, not on preparation.
 async function openPdfBlob(blob: Blob) {
   const url = URL.createObjectURL(blob);
   window.open(url, "_blank", "noopener,noreferrer");
@@ -169,15 +200,42 @@ function employeeFromPayslip(slip: Payslip, tenantId: string): Employee {
 }
 
 function pdfDataFromPayslip(slip: Payslip): PayslipPdfData {
+  const snapshot = slip.policy_snapshot ?? null;
+  const snapshotVersion = snapshot?.snapshot_version ?? 0;
+
+  // Version-aware parsing: v0/v1 = legacy, fall back to DB columns.
+  // v2+ = full semantic fields available in snapshot.
+  // If a future engine version exceeds SUPPORTED_SNAPSHOT_VERSION, warn and render best-effort.
+  if (snapshotVersion > SUPPORTED_SNAPSHOT_VERSION) {
+    console.warn(
+      `[Payslips] Snapshot version ${snapshotVersion} exceeds supported version ${SUPPORTED_SNAPSHOT_VERSION}. Rendering with available fields.`
+    );
+  }
+
+  // Snapshot field fallback table:
+  // | Field             | Snapshot Source (v2+)         | Legacy Fallback (v0/v1)  |
+  // |-------------------|-------------------------------|---------------------------|
+  // | paid_leave_days   | snapshot.paid_leave_days      | days_on_leave (combined) |
+  // | unpaid_leave_days | snapshot.unpaid_leave_days    | 0                        |
+  // | overtime_amount   | snapshot.overtime_amount      | 0                        |
+  // | pf_base           | snapshot.pf_base              | null                     |
+  // | esi_base          | snapshot.esi_base             | null                     |
+  const hasSplitLeaves = snapshotVersion >= 2 && snapshot !== null;
+  const paidLeaveDays = hasSplitLeaves
+    ? (snapshot!.paid_leave_days ?? slip.days_on_leave)
+    : slip.days_on_leave;
+  const unpaidLeaveDays = hasSplitLeaves
+    ? (snapshot!.unpaid_leave_days ?? 0)
+    : 0;
+
   return {
     employeeId: slip.employee_id,
     daysInMonth: slip.days_in_month,
     workingDays: slip.working_days,
     daysPresent: slip.days_present,
     daysAbsent: slip.days_absent,
-    // DB stores combined days_on_leave; split as all-paid for display (no LOP breakdown in legacy DB column)
-    paidLeaveDays: slip.days_on_leave,
-    unpaidLeaveDays: 0,
+    paidLeaveDays,
+    unpaidLeaveDays,
     halfDays: slip.half_days,
     basicMonthly: slip.basic_monthly,
     hraMonthly: slip.hra_monthly,
@@ -259,13 +317,16 @@ function PayslipRow({
   tenantId,
   tenant,
   onEmailed,
+  payrollRunId,
 }: {
   slip: Payslip;
   tenantId: string;
   tenant: NonNullable<ReturnType<typeof useTenant>["tenant"]>;
   onEmailed: (id: string) => void;
+  payrollRunId: string;
 }) {
   const { success, error: toastError, info } = useToast();
+  const { logAction } = useAuditLog();
   const [loadingView, setLoadingView] = useState(false);
   const [loadingDownload, setLoadingDownload] = useState(false);
   const [emailing, setEmailing] = useState(false);
@@ -292,6 +353,7 @@ function PayslipRow({
     setLoadingView(true);
     try {
       await openPdfBlob(await getPdfBlob());
+      void logAction("payslip.previewed", "payslip", slip.id, { payroll_run_id: payrollRunId, employee_id: slip.employee_id });
     } catch (err) {
       toastError(err instanceof Error ? err.message : "Failed to open payslip PDF.");
     } finally {
@@ -303,6 +365,7 @@ function PayslipRow({
     setLoadingDownload(true);
     try {
       downloadPdfBlob(await getPdfBlob(), payslipFilename(slip.employee_name, slip.month, slip.year));
+      void logAction("payslip.downloaded", "payslip", slip.id, { payroll_run_id: payrollRunId, employee_id: slip.employee_id });
     } catch (err) {
       toastError(err instanceof Error ? err.message : "Failed to download payslip PDF.");
     } finally {
@@ -351,10 +414,10 @@ function PayslipRow({
         {slip.emailed_at ? (
           <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600">
             <MailCheck className="h-3.5 w-3.5" />
-            Sent
+            Prepared
           </span>
         ) : (
-          <span className="text-xs text-slate-400">Not sent</span>
+          <span className="text-xs text-slate-400">Not prepared</span>
         )}
       </td>
       <td className="px-4 py-3">
@@ -394,30 +457,35 @@ function PayslipRow({
 
 function RunRow({ run, tenantId, tenant }: { run: PayrollRun; tenantId: string; tenant: NonNullable<ReturnType<typeof useTenant>["tenant"]> }) {
   const { error: toastError, success } = useToast();
+  const { logAction } = useAuditLog();
   const [expanded, setExpanded] = useState(false);
   const [slips, setSlips] = useState<Payslip[]>([]);
   const [loadingSlips, setLoadingSlips] = useState(false);
   const [emailingAll, setEmailingAll] = useState(false);
+  // Optimistic concurrency: cache the run's updated_at when slips load.
+  // Before any bulk mutation we verify this hasn't changed in another session.
+  const [cachedRunUpdatedAt, setCachedRunUpdatedAt] = useState<string | null>(null);
 
   const fetchSlips = useCallback(async () => {
     setLoadingSlips(true);
     try {
-      const { data: slipsData, error } = await db
-        .from("payslips")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .eq("payroll_run_id", run.id)
-        .order("net_payable", { ascending: false });
-      if (error) throw error;
+      const [slipsRes, runRes] = await Promise.all([
+        db.from("payslips").select("*").eq("tenant_id", tenantId).eq("payroll_run_id", run.id).order("net_payable", { ascending: false }),
+        db.from("payroll_runs").select("updated_at").eq("id", run.id).single(),
+      ]);
+      if (slipsRes.error) throw slipsRes.error;
 
-      const slipRows = (slipsData ?? []) as Payslip[];
+      // Cache freshness timestamp for optimistic concurrency guard
+      if (runRes.data) setCachedRunUpdatedAt((runRes.data as { updated_at: string }).updated_at);
+
+      const slipRows = (slipsRes.data ?? []) as Payslip[];
       const empIds = slipRows.map((s) => s.employee_id);
       if (empIds.length === 0) {
         setSlips([]);
         return;
       }
 
-        const { data: empData, error: empError } = await db
+      const { data: empData, error: empError } = await db
         .from("employees")
         .select("id,full_name,email,employee_code,department,designation")
         .eq("tenant_id", tenantId)
@@ -457,38 +525,101 @@ function RunRow({ run, tenantId, tenant }: { run: PayrollRun; tenantId: string; 
   };
 
   const handleEmailAll = async () => {
-    const unEmailed = slips.filter((s) => !s.emailed_at && s.pdf_url && s.employee_email);
-    if (unEmailed.length === 0) {
-      success("All available payslips are already prepared.");
+    // Separate candidates into skipped (no email or no PDF) and actionable
+    const skipped = slips.filter((s) => !s.emailed_at && (!s.pdf_url || !s.employee_email));
+    const eligible = slips.filter((s) => !s.emailed_at && s.pdf_url && s.employee_email);
+
+    if (eligible.length === 0 && skipped.length === 0) {
+      success("All available payslips have already been prepared.");
+      return;
+    }
+    if (eligible.length === 0) {
+      toastError("No employees with both a PDF and email address found.");
       return;
     }
 
+    // Optimistic concurrency guard — normalize timestamps before comparison
+    // to handle serializer differences (e.g. "...Z" vs "...000Z")
+    if (cachedRunUpdatedAt) {
+      const { data: latestRun } = await db.from("payroll_runs").select("updated_at").eq("id", run.id).single();
+      const latestTs = latestRun ? new Date((latestRun as { updated_at: string }).updated_at).getTime() : null;
+      const cachedTs = new Date(cachedRunUpdatedAt).getTime();
+      if (latestTs !== null && latestTs !== cachedTs) {
+        toastError("This payroll run was modified by another administrator. Please refresh and try again.");
+        return;
+      }
+    }
+
+    // Large-tenant safety: cap at MAX_EMAIL_BATCHES × RECIPIENT_BATCH_SIZE
+    const maxRecipients = RECIPIENT_BATCH_SIZE * MAX_EMAIL_BATCHES;
+    const capped = eligible.length > maxRecipients;
+    const toEmail = capped ? eligible.slice(0, maxRecipients) : eligible;
+    if (capped) {
+      toastError(
+        `Only the first ${maxRecipients} payslips can be prepared via email link. For larger runs, please use the export/queue workflow.`
+      );
+    }
+
     setEmailingAll(true);
+    const sentAt = new Date().toISOString();
+    const successfullyQueued: string[] = [];
+
     try {
-      const recipients = unEmailed.map((s) => s.employee_email).filter(Boolean).join(",");
+      void logAction("payslip.email_batch_started", "payroll_run", run.id, {
+        month: run.month, year: run.year, employee_count: toEmail.length,
+        batch_count: Math.ceil(toEmail.length / RECIPIENT_BATCH_SIZE),
+      });
+
+      // Emit audit events for skipped recipients
+      for (const s of skipped) {
+        void logAction("payslip.email_recipient_skipped", "payslip", s.id, {
+          employee_id: s.employee_id,
+          reason: !s.employee_email ? "missing_email" : "no_pdf",
+        });
+      }
+
       const subject = `Payslips for ${MONTH_NAMES[run.month - 1]} ${run.year}`;
       const body = [
-        "Hello,",
-        "",
+        "Hello,", "",
         `Payslips for ${MONTH_NAMES[run.month - 1]} ${run.year} are ready.`,
         "Please log in to the TalentMesh payroll portal to view or download the PDF.",
-        "",
-        "Regards,",
-        "HR Team",
+        "", "Regards,", "HR Team",
       ].join("\n");
-      window.location.href = `mailto:${recipients}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
-      const sentAt = new Date().toISOString();
-      const { error } = await db
-        .from("payslips")
-        .update({ emailed_at: sentAt })
-        .eq("tenant_id", tenantId)
-        .in("id", unEmailed.map((s) => s.id));
-      if (error) throw error;
+      const batches = [];
+      for (let i = 0; i < toEmail.length; i += RECIPIENT_BATCH_SIZE) {
+        batches.push(toEmail.slice(i, i + RECIPIENT_BATCH_SIZE));
+      }
 
-      setSlips((prev) => prev.map((s) => (unEmailed.some((item) => item.id === s.id) ? { ...s, emailed_at: sentAt } : s)));
-      success(`${unEmailed.length} payslip email(s) prepared.`);
+      for (const batch of batches) {
+        const recipients = batch.map((s) => s.employee_email).filter(Boolean).join(",");
+        window.open(`mailto:${recipients}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, "_blank");
+        batch.forEach((s) => successfullyQueued.push(s.id));
+      }
+
+      // emailed_at = "mail composer opened for this employee" (not guaranteed delivered).
+      // This will be upgraded to a true delivery timestamp when the email_jobs queue is built.
+      if (successfullyQueued.length > 0) {
+        const { error } = await db
+          .from("payslips")
+          .update({ emailed_at: sentAt })
+          .eq("tenant_id", tenantId)
+          .in("id", successfullyQueued);
+        if (error) throw error;
+        setSlips((prev) => prev.map((s) => successfullyQueued.includes(s.id) ? { ...s, emailed_at: sentAt } : s));
+      }
+
+      void logAction("payslip.email_batch_completed", "payroll_run", run.id, {
+        month: run.month, year: run.year,
+        queued_count: successfullyQueued.length,
+        skipped_count: skipped.length,
+      });
+
+      success(`${successfullyQueued.length} payslip(s) prepared for email.${
+        skipped.length > 0 ? ` ${skipped.length} skipped (missing email or PDF).` : ""
+      }`);
     } catch {
+      void logAction("payslip.email_batch_failed", "payroll_run", run.id, { month: run.month, year: run.year });
       toastError("Failed to prepare payslip emails.");
     } finally {
       setEmailingAll(false);
@@ -549,7 +680,7 @@ function RunRow({ run, tenantId, tenant }: { run: PayrollRun; tenantId: string; 
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {slips.map((slip) => (
-                    <PayslipRow key={slip.id} slip={slip} tenantId={tenantId} tenant={tenant} onEmailed={handleSlipEmailed} />
+                    <PayslipRow key={slip.id} slip={slip} tenantId={tenantId} tenant={tenant} onEmailed={handleSlipEmailed} payrollRunId={run.id} />
                   ))}
                 </tbody>
               </table>
@@ -687,11 +818,14 @@ export default function Payslips() {
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
-              <iframe
-                title="Payslip template preview"
-                srcDoc={previewHtml}
-                className="mx-auto h-[1123px] w-[794px] max-w-full origin-top rounded-lg border border-slate-200 bg-white shadow-sm"
-              />
+              <div className="mx-auto w-full max-w-[794px] overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+                <iframe
+                  title="Payslip template preview"
+                  srcDoc={previewHtml}
+                  className="h-[1123px] w-[794px] origin-top"
+                  style={{ transform: "scale(0.75)", transformOrigin: "top left", width: "794px", height: "1123px", display: "block" }}
+                />
+              </div>
             </div>
           </div>
         </div>

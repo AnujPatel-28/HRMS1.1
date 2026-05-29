@@ -319,8 +319,8 @@ export default function Chat() {
     setDraftFiles(prev => ({ ...prev, [selectedChannel.id]: null }));
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
 
-    let attachment_url = null;
-    let attachment_name = null;
+    let attachment_url: string | null = null;
+    let attachment_name: string | null = null;
     let filePath = "";
 
     try {
@@ -329,10 +329,11 @@ export default function Chat() {
         const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
         filePath = `chat/${fileName}`;
         
-        const { error: uploadError } = await storage.from("chat-attachments").upload(filePath, f);
+        // InsForge upload() returns { data: { url, key, ... } } — URL is in data.url
+        const { data: uploadData, error: uploadError } = await storage.from("chat-attachments").upload(filePath, f);
         if (uploadError) throw uploadError;
         
-        attachment_url = storage.from("chat-attachments").getPublicUrl(filePath);
+        attachment_url = uploadData?.url ?? null;
         attachment_name = f.name;
         
         dispatchMessages({ type: "UPSERT", channelId: selectedChannel.id, messages: [{
@@ -365,7 +366,8 @@ export default function Chat() {
       }] });
       
       if (attachment_url && filePath) {
-         await storage.from("chat-attachments").remove(filePath);
+        // remove() expects a single string path per InsForge SDK
+        await storage.from("chat-attachments").remove(filePath);
       }
     } finally {
       setSending(false);

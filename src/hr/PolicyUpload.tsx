@@ -55,11 +55,10 @@ export default function PolicyUpload() {
       const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
       const filePath = `policies/${fileName}`;
 
-      // Upload to Storage
-      const { error: uploadError } = await storage.from("hr-policies").upload(filePath, file);
+      // InsForge upload() returns { data: { url, key, ... } } — URL is in data.url
+      const { data: uploadData, error: uploadError } = await storage.from("hr-policies").upload(filePath, file);
       if (uploadError) throw uploadError;
-
-      const publicUrl = storage.from("hr-policies").getPublicUrl(filePath);
+      const publicUrl = uploadData?.url ?? "";
 
       // Insert into DB
       const { data: inserted, error: insertError } = await db.from("hr_policies").insert([{

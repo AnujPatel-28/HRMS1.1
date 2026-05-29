@@ -217,6 +217,7 @@ const tenantColumns = [
   "work_hours_per_day",
   "lunch_break_minutes",
   "punch_out_gate_enabled",
+  "updated_at"
 ].join(",");
 
 const inputClass = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-brand-600 focus:ring";
@@ -257,6 +258,39 @@ function suggestLeaveCode(name: string) {
   if (words.length === 0) return "";
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
   return words.slice(0, 2).map((word) => word[0]?.toUpperCase() ?? "").join("").slice(0, 5);
+}
+
+/**
+ * Maps a raw error from the DB/network layer to a stable category string.
+ * PostgREST permission-denied = code PGRST301 or HTTP 403.
+ * Postgres permission-denied  = code 42501.
+ * Stale-write sentinel        = Error("STALE_WRITE") thrown by saveSettingRows / save fns.
+ */
+function classifyDbError(err: unknown): "stale" | "permission" | "network" | "unknown" {
+  if (!err) return "unknown";
+  const e = err as { message?: string; code?: string; status?: number };
+  if (e.message === "STALE_WRITE") return "stale";
+  if (
+    e.code === "PGRST301" ||
+    e.code === "42501" ||
+    e.status === 403 ||
+    e.message?.toLowerCase().includes("permission denied")
+  ) return "permission";
+  if (
+    err instanceof TypeError ||
+    e.message?.toLowerCase().includes("failed to fetch") ||
+    e.message?.toLowerCase().includes("load failed") ||
+    e.message?.toLowerCase().includes("network")
+  ) return "network";
+  return "unknown";
+}
+
+function toastSaveError(toastFn: (msg: string) => void, err: unknown, section: string) {
+  const kind = classifyDbError(err);
+  if (kind === "stale")      return toastFn("Another admin has modified these settings. Please refresh.");
+  if (kind === "permission") return toastFn(`Permission denied — you may not have rights to edit ${section}.`);
+  if (kind === "network")    return toastFn("Network error — check your connection and try again.");
+  /* unknown */               toastFn(`Failed to save ${section}. Please try again or contact support.`);
 }
 
 function Toggle({
@@ -586,9 +620,10 @@ export default function PolicyCenter() {
     if (!logoFile || !tenantId) return tenantForm.logo_url || null;
     const ext = logoFile.name.split(".").pop() || "png";
     const path = `${tenantId}/logo-${Date.now()}.${ext}`;
-    const { error: uploadError } = await storage.from("company-assets").upload(path, logoFile);
+    // InsForge upload() returns { data: { url, key, ... }, error } — URL is in data.url
+    const { data, error: uploadError } = await storage.from("company-assets").upload(path, logoFile);
     if (uploadError) throw uploadError;
-    return storage.from("company-assets").getPublicUrl(path);
+    return data?.url ?? null;
   }
 
   async function saveSettingRows(rows: { key: string; value: string }[], section: string, successMessage: string, tab: TabKey) {
@@ -665,8 +700,7 @@ export default function PolicyCenter() {
       const { data: updateData, error: tenantUpdateError } = await query.select("updated_at").maybeSingle();
       if (tenantUpdateError) throw tenantUpdateError;
       if (tenantUpdatedAt && !updateData) throw new Error("STALE_WRITE");
-      
-      setTenantUpdatedAt(updateData.updated_at);
+      if (updateData) setTenantUpdatedAt(updateData.updated_at);
       await saveSettingRows([
         { key: "late_mark_enabled", value: String(attendancePolicy.late_mark_enabled) },
         { key: "late_mark_grace_minutes", value: attendancePolicy.late_mark_grace_minutes || "0" },
@@ -691,13 +725,9 @@ export default function PolicyCenter() {
         work_hours_per_day: tenantForm.work_hours_per_day,
         lunch_break_minutes: tenantForm.lunch_break_minutes,
       }));
-    } catch (err: any) {
-      console.error(err);
-      if (err.message === "STALE_WRITE") {
-        toastError("Another admin has modified these settings. Please refresh.");
-      } else {
-        toastError("Failed to save attendance policy.");
-      }
+    } catch (err) {
+      console.error("saveAttendancePolicy:", err);
+      toastSaveError(toastError, err, "attendance policy");
     } finally {
       setSavingTab(null);
     }
@@ -716,8 +746,8 @@ export default function PolicyCenter() {
         { key: "leave_carry_forward", value: String(leavePolicy.leave_carry_forward) },
       ], "leave-policy", "Leave policy saved", "leave");
     } catch (err) {
-      console.error(err);
-      toastError("Failed to save leave policy.");
+      console.error("saveLeavePolicy:", err);
+      toastSaveError(toastError, err, "leave policy");
     } finally {
       setSavingTab(null);
     }
@@ -738,13 +768,9 @@ export default function PolicyCenter() {
         { key: "professional_tax_state", value: salaryPolicy.professional_tax_state },
         { key: "professional_tax_manual_amount", value: salaryPolicy.professional_tax_manual_amount.trim() },
       ], "salary-policy", "Salary policy saved", "salary");
-    } catch (err: any) {
-      console.error(err);
-      if (err.message === "STALE_WRITE") {
-        toastError("Another admin has modified these settings. Please refresh.");
-      } else {
-        toastError("Failed to save salary policy.");
-      }
+    } catch (err) {
+      console.error("saveSalaryPolicy:", err);
+      toastSaveError(toastError, err, "salary policy");
     } finally {
       setSavingTab(null);
     }
@@ -771,21 +797,16 @@ export default function PolicyCenter() {
       const { data: updateData, error: tenantUpdateError } = await query.select("updated_at").maybeSingle();
       if (tenantUpdateError) throw tenantUpdateError;
       if (tenantUpdatedAt && !updateData) throw new Error("STALE_WRITE");
-      
-      setTenantUpdatedAt(updateData.updated_at);
+      if (updateData) setTenantUpdatedAt(updateData.updated_at);
       await saveSettingRows([
         { key: "task_eod_redmark_time", value: taskPolicy.task_eod_redmark_time || "23:30" },
         { key: "task_grace_period_minutes", value: taskPolicy.task_grace_period_minutes || "0" },
       ], "task-policy", "Task policy saved", "task");
       await refreshTenant();
       setBaselineTenantForm((current) => ({ ...current, punch_out_gate_enabled: taskPolicy.punch_out_gate_enabled }));
-    } catch (err: any) {
-      console.error(err);
-      if (err.message === "STALE_WRITE") {
-        toastError("Another admin has modified these settings. Please refresh.");
-      } else {
-        toastError("Failed to save task policy.");
-      }
+    } catch (err) {
+      console.error("saveTaskPolicy:", err);
+      toastSaveError(toastError, err, "task policy");
     } finally {
       setSavingTab(null);
     }
@@ -811,8 +832,7 @@ export default function PolicyCenter() {
       const { data: updateData, error: tenantUpdateError } = await query.select("updated_at").maybeSingle();
       if (tenantUpdateError) throw tenantUpdateError;
       if (tenantUpdatedAt && !updateData) throw new Error("STALE_WRITE");
-      
-      setTenantUpdatedAt(updateData.updated_at);
+      if (updateData) setTenantUpdatedAt(updateData.updated_at);
       
       // Cleanup orphaned logo strictly bounded to this tenant
       if (logoUrl && oldLogoUrl && oldLogoUrl !== logoUrl) {
@@ -859,11 +879,7 @@ export default function PolicyCenter() {
         }
       }
 
-      if (err.message === "STALE_WRITE") {
-        toastError("Another admin has modified these settings. Please refresh.");
-      } else {
-        toastError("Failed to save company profile.");
-      }
+      toastSaveError(toastError, err, "company profile");
     } finally {
       setSavingTab(null);
     }

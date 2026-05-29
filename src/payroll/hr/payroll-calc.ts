@@ -83,6 +83,7 @@ export interface PayslipCalc {
   esiBase: number;
   pfBase: number;
   policySnapshot: SalaryPolicySnapshot;
+  hasAttendanceAnomaly?: boolean;
 }
 
 export function calcPayslip(
@@ -109,19 +110,54 @@ export function calcPayslip(
     lopDivisor = 26;
   }
 
+  // --- Attendance Normalization Layer ---
   const paidDays = att.daysPresent + att.halfDays * 0.5 + att.paidLeaveDays;
-  const effectiveUnpaidDays = Math.max(0, workingDays - paidDays);
-  
-  let daysRatio = 1;
-  if (policy.lopCalculationMethod === "working_days") {
-    daysRatio = (workingDays - effectiveUnpaidDays) / workingDays;
-  } else if (policy.lopCalculationMethod === "calendar") {
-    daysRatio = (daysInMonth - effectiveUnpaidDays) / daysInMonth;
-  } else {
-    daysRatio = (26 - effectiveUnpaidDays) / 26;
+  const explicitUnpaidDays = att.daysAbsent + att.unpaidLeaveDays;
+
+  // Sanity check: Ensure total tracked days do not exceed working days
+  const totalTrackedDays = paidDays + explicitUnpaidDays;
+  const hasAttendanceAnomaly = totalTrackedDays > workingDays;
+
+  let normalizedPaidDays = paidDays;
+  let normalizedUnpaidDays = explicitUnpaidDays;
+
+  if (hasAttendanceAnomaly) {
+    // Normalize by prioritizing paid days and making unpaid days the remainder
+    normalizedPaidDays = Math.min(paidDays, workingDays);
+    normalizedUnpaidDays = Math.max(0, workingDays - normalizedPaidDays);
+    console.warn(
+      `[Payroll Engine] Attendance anomaly detected for employee ${struct.employee_id}. ` +
+      `Total tracked days (${totalTrackedDays}) exceeds working days (${workingDays}). ` +
+      `Normalized to Paid: ${normalizedPaidDays}, Unpaid: ${normalizedUnpaidDays}.`
+    );
   }
-  
+
+  // Implicit absences (e.g. if HR only enters daysPresent and leaves daysAbsent empty)
+  const unaccountedDays = Math.max(0, workingDays - (normalizedPaidDays + normalizedUnpaidDays));
+  const totalDeductibleDays = normalizedUnpaidDays + unaccountedDays;
+
+  // Explicit attendance classification layer
+  const attendanceState: "full_unpaid" | "partial_payable" = 
+    (normalizedPaidDays === 0 && totalDeductibleDays >= workingDays) 
+      ? "full_unpaid" 
+      : "partial_payable";
+      
+  let daysRatio = 1;
+  if (attendanceState === "full_unpaid") {
+    daysRatio = 0;
+  } else {
+    if (policy.lopCalculationMethod === "working_days") {
+      daysRatio = normalizedPaidDays / workingDays;
+    } else if (policy.lopCalculationMethod === "calendar") {
+      daysRatio = (daysInMonth - totalDeductibleDays) / daysInMonth;
+    } else {
+      daysRatio = (26 - totalDeductibleDays) / 26;
+    }
+  }
+
   const boundedDaysRatio = Math.max(0, Math.min(daysRatio, 1));
+  const effectiveUnpaidDays = totalDeductibleDays;
+  // --------------------------------------
 
   const proratedBasic = roundCurrency(basicMonthly * boundedDaysRatio);
   const proratedHra = roundCurrency(hraMonthly * boundedDaysRatio);
@@ -198,5 +234,6 @@ export function calcPayslip(
     lopRatio: boundedDaysRatio,
     lopDivisor,
     policySnapshot: policy,
+    hasAttendanceAnomaly,
   };
 }

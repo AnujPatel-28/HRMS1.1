@@ -12,6 +12,8 @@ import { MONTH_NAMES, formatCurrency, roundCurrency, calcPayslip, getWorkingDays
 import { PayrollError } from "../../utils/errors";
 import { uploadPayslipPdf } from "./payslip-pdf";
 
+const LATE_MARK_BATCH_SIZE = 20;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 type RunStatus = "draft" | "under_review" | "approved" | "paid";
 
@@ -125,6 +127,11 @@ export default function RunPayroll() {
 
   useEffect(() => { void checkExistingRun(); }, [checkExistingRun]);
 
+  // Reset overrides when changing period to prevent leak across months
+  useEffect(() => {
+    setOverrides({});
+  }, [month, year]);
+
   // ── Step 2: calculate ──────────────────────────────────────────────────────
   const calculate = useCallback(async () => {
     setLoading(true);
@@ -133,7 +140,7 @@ export default function RunPayroll() {
       const startDate = `${monthStr}-01`;
       const endDate = `${monthStr}-${new Date(year, month, 0).getDate().toString().padStart(2, "0")}`;
 
-      const [empRes, structRes, attRes, holRes, overtimeRes, settingsRes, leavesRes] = await Promise.all([
+      const [empRes, structRes, attRes, holRes, overtimeRes, settingsRes, leavesRes, existingPayslipsRes] = await Promise.all([
         db.from("employees").select("*").eq("tenant_id", tenantId).eq("status", "active").order("full_name"),
         db.from("salary_structures").select("*").eq("tenant_id", tenantId).order("effective_from", { ascending: false }),
         db.from("attendance").select("employee_id,status,date").eq("tenant_id", tenantId).gte("date", startDate).lte("date", endDate),
@@ -147,6 +154,9 @@ export default function RunPayroll() {
           .lte("date", endDate),
         db.from("tenant_settings").select("key,value").eq("tenant_id", tenantId),
         db.from("leaves").select("employee_id,start_date,end_date,leave_types!inner(is_paid)").eq("tenant_id", tenantId).eq("status", "approved").lte("start_date", endDate).gte("end_date", startDate),
+        existingRun
+          ? db.from("payslips").select("employee_id,net_payable,policy_snapshot").eq("tenant_id", tenantId).eq("payroll_run_id", existingRun.id)
+          : Promise.resolve({ data: [], error: null }),
       ]);
 
       if (empRes.error) throw empRes.error;
@@ -156,6 +166,7 @@ export default function RunPayroll() {
       if (overtimeRes.error) throw overtimeRes.error;
       if (settingsRes.error) throw settingsRes.error;
       if (leavesRes.error) throw leavesRes.error;
+      if (existingPayslipsRes.error) throw existingPayslipsRes.error;
       const employees = (empRes.data ?? []) as Employee[];
       const allStructures = (structRes.data ?? []) as SalaryStructure[];
       const attendances = (attRes.data ?? []) as { employee_id: string; status: string; date: string }[];
@@ -203,21 +214,28 @@ export default function RunPayroll() {
         }
       });
 
-      // Unpaid leaves mapping
+      // Generate all calendar date strings for this month in YYYY-MM-DD format
+      const daysInMonth = new Date(year, month, 0).getDate();
+      const monthDates: string[] = [];
+      for (let d = 1; d <= daysInMonth; d++) {
+        monthDates.push(`${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+      }
+
+      // Unpaid leaves mapping using timezone-safe string comparison
       const approvedLeaves = (leavesRes.data ?? []) as any[];
       const unpaidLeaveMap = new Map<string, Set<string>>(); // employee_id -> set of unpaid date strings
       
       approvedLeaves.forEach(leave => {
         if (leave.leave_types && leave.leave_types.is_paid === false) {
-          const clampStart = new Date(Math.max(new Date(leave.start_date).getTime(), new Date(startDate).getTime()));
-          const clampEnd = new Date(Math.min(new Date(leave.end_date).getTime(), new Date(endDate).getTime()));
-          if (clampStart > clampEnd) return; // leave doesn't overlap this payroll period
+          const leaveStart = leave.start_date.substring(0, 10);
+          const leaveEnd = leave.end_date.substring(0, 10);
+          
           const current = unpaidLeaveMap.get(leave.employee_id) || new Set<string>();
-          const iter = new Date(clampStart);
-          while (iter <= clampEnd) {
-            current.add(iter.toISOString().split('T')[0]);
-            iter.setDate(iter.getDate() + 1);
-          }
+          monthDates.forEach(dt => {
+            if (dt >= leaveStart && dt <= leaveEnd) {
+              current.add(dt);
+            }
+          });
           unpaidLeaveMap.set(leave.employee_id, current);
         }
       });
@@ -253,6 +271,40 @@ export default function RunPayroll() {
         overtimeByEmployee.set(record.employee_id, current);
       });
 
+      // Asynchronously fetch late marks in parallel chunks with failure isolation
+      const lateSummaryMap = new Map<string, { late_count?: number; threshold?: number; deduction_hours?: number }>();
+      const eligibleEmployees = employees.filter(emp => structMap.has(emp.id));
+      
+      for (let i = 0; i < eligibleEmployees.length; i += LATE_MARK_BATCH_SIZE) {
+        const chunk = eligibleEmployees.slice(i, i + LATE_MARK_BATCH_SIZE);
+        const results = await Promise.all(
+          chunk.map(async (emp) => {
+            try {
+              const { data, error } = await functions.invoke("calculate-late-marks", {
+                body: {
+                  tenant_id: tenantId,
+                  employee_id: emp.id,
+                  month,
+                  year,
+                },
+              });
+              if (error) throw error;
+              return { employeeId: emp.id, data };
+            } catch (err) {
+              console.error(`Failed to calculate late marks for employee ${emp.id}:`, err);
+              return { employeeId: emp.id, data: null };
+            }
+          })
+        );
+        results.forEach(res => {
+          if (res.data) {
+            lateSummaryMap.set(res.employeeId, res.data);
+          } else {
+            lateSummaryMap.set(res.employeeId, {});
+          }
+        });
+      }
+
       const newRows: RowCalc[] = [];
       const newSkipped: Employee[] = [];
 
@@ -267,20 +319,7 @@ export default function RunPayroll() {
         const att = attMap.get(emp.id) ?? { daysPresent: 0, daysAbsent: workingDays, paidLeaveDays: 0, unpaidLeaveDays: 0, halfDays: 0 };
         const calc = calcPayslip(struct, att, overtimeAmount, year, month, holidayDates, policy);
         
-        const { data: lateData, error: lateError } = await functions.invoke("calculate-late-marks", {
-          body: {
-            tenant_id: tenantId,
-            employee_id: emp.id,
-            month,
-            year,
-          },
-        });
-        if (lateError) throw lateError;
-        const lateSummary = (lateData ?? {}) as {
-          late_count?: number;
-          threshold?: number;
-          deduction_hours?: number;
-        };
+        const lateSummary = lateSummaryMap.get(emp.id) ?? {};
         const hourlyRate = calc.grossSalary / (Number(tenant?.work_hours_per_day ?? 8) * workingDays);
         const lateDeductionAmount = roundCurrency((lateSummary.deduction_hours ?? 0) * hourlyRate);
         const otherDeductions = roundCurrency(calc.otherDeductions + lateDeductionAmount);
@@ -305,7 +344,22 @@ export default function RunPayroll() {
 
       setRows(newRows);
       setSkipped(newSkipped);
-      setOverrides({});
+
+      // Hydrate overrides if resuming a draft run without erasing current in-session changes
+      setOverrides((currentOverrides) => {
+        const merged: Record<string, string> = { ...currentOverrides };
+        if (existingRun && existingPayslipsRes.data) {
+          existingPayslipsRes.data.forEach((slip: any) => {
+            const snapshot = slip.policy_snapshot as any;
+            if (snapshot && snapshot.override_net !== undefined && snapshot.override_net !== null) {
+              if (merged[slip.employee_id] === undefined) {
+                merged[slip.employee_id] = String(slip.net_payable);
+              }
+            }
+          });
+        }
+        return merged;
+      });
     } catch (err: any) {
       if (err instanceof PayrollError && err.code === "PAYROLL_LOCKED") {
         toastError(err.message);

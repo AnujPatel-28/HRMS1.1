@@ -188,6 +188,7 @@ const tenantColumns = [
   "work_hours_per_day",
   "lunch_break_minutes",
   "punch_out_gate_enabled",
+  "updated_at"
 ].join(",");
 
 function normalizeTime(value: unknown, fallback: string) {
@@ -329,9 +330,10 @@ export default function HRSettings() {
     if (!logoFile || !tenantId) return tenantForm.logo_url || null;
     const ext = logoFile.name.split(".").pop() || "png";
     const path = `${tenantId}/logo-${Date.now()}.${ext}`;
-    const { error: uploadError } = await storage.from("company-assets").upload(path, logoFile);
+    // InsForge upload() returns { data: { url, key, ... }, error } — URL is in data.url
+    const { data, error: uploadError } = await storage.from("company-assets").upload(path, logoFile);
     if (uploadError) throw uploadError;
-    return storage.from("company-assets").getPublicUrl(path);
+    return data?.url ?? null;
   }
 
   async function saveCompanyProfile() {
