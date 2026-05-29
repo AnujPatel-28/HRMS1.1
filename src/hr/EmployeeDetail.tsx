@@ -6,7 +6,8 @@ import { db, storage, insforge } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
-import { File, Calendar, ClipboardList, MoreVertical } from "lucide-react";
+import { useToast } from "../shared/ToastContext";
+import { File, Calendar, ClipboardList, MoreVertical, Upload, Loader2 } from "lucide-react";
 
 type TabKey = "personal" | "identity" | "documents" | "attendance" | "leaves" | "tasks";
 
@@ -40,6 +41,7 @@ export default function EmployeeDetail() {
   const navigate = useNavigate();
   const { tenantId } = useTenant();
   const { logAction } = useAuditLog();
+  const { success, error: toastError } = useToast();
 
   const [activeTab, setActiveTab] = useState<TabKey>("personal");
   const [employee, setEmployee] = useState<Employee | null>(null);
@@ -48,6 +50,40 @@ export default function EmployeeDetail() {
   const [leaves, setLeaves] = useState<Leave[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [documents, setDocuments] = useState<StorageDoc[]>([]);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+
+  const handleUploadDocument = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !employee || !tenantId) return;
+
+    setUploadingDoc(true);
+    try {
+      const path = `employees/${employee.id}/${Date.now()}-${file.name}`;
+      const { data: uploadData, error: uploadError } = await storage.from("employee-documents").upload(path, file);
+      if (uploadError || !uploadData) throw uploadError || new Error("Upload failed");
+
+      const { error: insertError } = await db.from("employee_documents").insert([{
+        tenant_id: tenantId,
+        employee_id: employee.id,
+        file_name: file.name,
+        file_url: uploadData.url,
+        file_key: uploadData.key,
+        size: uploadData.size,
+      }]);
+      if (insertError) {
+        await storage.from("employee-documents").remove(uploadData.key);
+        throw insertError;
+      }
+
+      await loadData();
+      success("Document uploaded successfully.");
+    } catch (err) {
+      console.error(err);
+      toastError("Failed to upload document.");
+    } finally {
+      setUploadingDoc(false);
+    }
+  };
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -97,19 +133,22 @@ export default function EmployeeDetail() {
         .order("date", { ascending: true }),
       db.from("leaves").select("*").eq("tenant_id", tenantId).eq("employee_id", currentEmployee.id).order("applied_at", { ascending: false }),
       db.from("tasks").select("*").eq("tenant_id", tenantId).eq("assigned_to", currentEmployee.id).order("created_at", { ascending: false }),
-      storage.from("employee-documents").list({ prefix: `employees/${currentEmployee.id}/`, limit: 200, offset: 0 }),
+      db.from("employee_documents").select("*").eq("tenant_id", tenantId).eq("employee_id", currentEmployee.id).order("uploaded_at", { ascending: false }),
     ]);
 
     setAttendance((attendanceRes.data as Attendance[]) ?? []);
     setLeaves((leavesRes.data as Leave[]) ?? []);
     setTasks((tasksRes.data as Task[]) ?? []);
 
-    if (docsRes.data?.objects) {
+    if (docsRes.error) {
+      console.error("Database query error for employee documents:", docsRes.error);
+      toastError(`Failed to load employee documents: ${docsRes.error.message}`);
+    } else if (docsRes.data) {
       setDocuments(
-        docsRes.data.objects.map((item) => ({
-          key: item.key,
-          url: item.url,
-          uploadedAt: item.uploadedAt,
+        (docsRes.data as any[]).map((item) => ({
+          key: item.file_key,
+          url: item.file_url,
+          uploadedAt: item.uploaded_at,
           size: item.size,
         })),
       );
@@ -653,7 +692,36 @@ export default function EmployeeDetail() {
       {activeTab === "documents" ? (
         <div className="mt-4 space-y-3">
           {documents.length === 0 ? (
-            <div className="py-4"><EmptyState icon={File} title="No documents" description="No uploaded documents found in storage." /></div>
+            isEditing ? (
+              <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-8 text-center transition-colors hover:bg-slate-100/50">
+                <div className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-50 text-brand-600 ring-1 ring-brand-500/20 mb-3">
+                  <Upload className="h-6 w-6" />
+                </div>
+                <p className="text-sm font-semibold text-slate-800">Upload employee document</p>
+                <p className="text-xs text-slate-500 mt-1 mb-4">Supported files: PDF, DOCX, images (Max 10MB)</p>
+                <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-brand-700 transition disabled:opacity-60">
+                  {uploadingDoc ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4" />
+                      Select File
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    className="hidden"
+                    disabled={uploadingDoc}
+                    onChange={handleUploadDocument}
+                  />
+                </label>
+              </div>
+            ) : (
+              <div className="py-4"><EmptyState icon={File} title="No documents" description="No uploaded documents found in storage." /></div>
+            )
           ) : (
             documents.map((doc) => (
               <div key={doc.key} className="flex flex-wrap items-center justify-between rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-slate-300 transition-colors">

@@ -197,6 +197,21 @@ export default function EmployeeCreate() {
     const fileName = `employees/${employeeId}/${Date.now()}_${file.name}`;
     const { data, error: uploadErr } = await insforge.storage.from("employee-documents").upload(fileName, file);
     if (uploadErr || !data) throw new Error(`Upload failed for ${label}: ${uploadErr?.message ?? "Unknown error"}`);
+
+    // Insert into employee_documents table!
+    const { error: insertError } = await db.from("employee_documents").insert([{
+      tenant_id: tenantId,
+      employee_id: employeeId,
+      file_name: file.name,
+      file_url: data.url,
+      file_key: data.key,
+      size: data.size,
+    }]);
+    if (insertError) {
+      await insforge.storage.from("employee-documents").remove(data.key);
+      throw insertError;
+    }
+
     return { label, url: data.url };
   };
 
