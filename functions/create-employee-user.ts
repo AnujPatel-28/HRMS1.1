@@ -66,7 +66,7 @@ const deleteAuthUser = async (userId) => {
       "Content-Type": "application/json",
       Authorization: `Bearer ${ADMIN_KEY}`,
     },
-    body: JSON.stringify({ userId }),
+    body: JSON.stringify({ userIds: [userId] }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -107,13 +107,13 @@ const createAuthUser = async (email, password, name, tenantId) => {
 
 export default async function (req) {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  if (req.method !== "POST") return json({ message: "Method not allowed", error: "Method not allowed" }, 405);
 
   let body;
   try {
     body = await req.json();
   } catch {
-    return json({ error: "Invalid JSON body" }, 400);
+    return json({ message: "Invalid JSON body", error: "Invalid JSON body" }, 400);
   }
 
   const email = (body.email ?? "").trim().toLowerCase();
@@ -122,11 +122,11 @@ export default async function (req) {
   const tenantId = (body.tenant_id ?? body.metadata?.tenant_id ?? DEFAULT_TENANT_ID).trim();
 
   if (!email || !password || !name) {
-    return json({ error: "email, password, and name are required" }, 400);
+    return json({ message: "email, password, and name are required", error: "email, password, and name are required" }, 400);
   }
 
   if (!tenantId) {
-    return json({ error: "tenant_id is required" }, 400);
+    return json({ message: "tenant_id is required", error: "tenant_id is required" }, 400);
   }
 
   // 1. Check if employee record exists globally in public.employees (Cross-Tenant check)
@@ -135,7 +135,8 @@ export default async function (req) {
     console.warn(`[create-employee-user] Email ${email} already mapped to an existing employee record.`);
     return json(
       {
-        error: "This email is already registered to an employee in the system. Please provide a different email, or ask the employee to use an email alias (e.g., name+company@gmail.com).",
+        message: "This email is already registered to an employee in the system. Please provide a different email, or ask the employee to use an email alias (e.g., name+company@gmail.com).",
+        error: "CROSS_TENANT_EMAIL_CONFLICT",
         code: "CROSS_TENANT_EMAIL_CONFLICT",
       },
       409
@@ -153,7 +154,8 @@ export default async function (req) {
       console.warn(`[create-employee-user] Orphaned auth user ${email} is too new (${ageInHours.toFixed(2)} hours).`);
       return json(
         {
-          error: "This email recently started the onboarding process but hasn't finished. Please wait 1 hour before trying again, or use a different email.",
+          message: "This email recently started the onboarding process but hasn't finished. Please wait 1 hour before trying again, or use a different email.",
+          error: "ORPHANED_AUTH_USER_TOO_NEW",
           code: "ORPHANED_AUTH_USER_TOO_NEW",
         },
         409
@@ -165,7 +167,8 @@ export default async function (req) {
     const deleted = await deleteAuthUser(authDetails.id);
     if (!deleted) {
       return json({
-        error: `The email \"${email}\" already has an auth account that could not be removed automatically. Please go to InsForge Dashboard > Authentication > Users, delete \"${email}\", and try again.`,
+        message: `The email \"${email}\" already has an auth account that could not be removed automatically. Please go to InsForge Dashboard > Authentication > Users, delete \"${email}\", and try again.`,
+        error: "ORPHANED_AUTH_USER",
         code: "ORPHANED_AUTH_USER",
       }, 409);
     }
@@ -175,7 +178,7 @@ export default async function (req) {
   const createResult = await createAuthUser(email, password, name, tenantId);
 
   if (!createResult.ok) {
-    return json({ error: createResult.err }, createResult.status ?? 500);
+    return json({ message: createResult.err, error: createResult.err }, createResult.status ?? 500);
   }
 
   let userId = null;
@@ -191,7 +194,8 @@ export default async function (req) {
   if (!userId) {
     return json(
       {
-        error: "Auth user was created but user ID could not be retrieved. Please try again.",
+        message: "Auth user was created but user ID could not be retrieved. Please try again.",
+        error: "USER_ID_NOT_FOUND",
         code: "USER_ID_NOT_FOUND",
       },
       500,
