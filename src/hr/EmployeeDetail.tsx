@@ -29,7 +29,7 @@ const tabs: { key: TabKey; label: string }[] = [
 import { formatLocalDate } from "../utils/date";
 
 const maskValue = (value: string | null, visible: boolean, minVisible = 4) => {
-  if (!value) return "�";
+  if (!value) return "—";
   if (visible) return value;
   if (value.length <= minVisible) return "*".repeat(value.length);
   return `${"*".repeat(Math.max(value.length - minVisible, 0))}${value.slice(-minVisible)}`;
