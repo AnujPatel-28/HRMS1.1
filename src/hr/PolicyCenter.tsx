@@ -1023,6 +1023,7 @@ export default function PolicyCenter() {
       if (empError) throw empError;
       const liveEmployeeIds = (freshEmployees || []).map(e => e.id);
 
+      const currentYear = new Date().getFullYear();
       const targetYear = dryRunStats.targetYear;
       const existingKeys = new Set(
         leaveBalanceRows
@@ -1032,16 +1033,27 @@ export default function PolicyCenter() {
       const rowsToInsert = liveEmployeeIds.flatMap((employeeId) =>
         activeLeaveTypes
           .filter((leaveType) => !existingKeys.has(`${employeeId}:${leaveType.id}`))
-          .map((leaveType) => ({
-            tenant_id: tenantId,
-            employee_id: employeeId,
-            leave_type_id: leaveType.id,
-            year: targetYear,
-            total_allocated: leaveType.days_per_year,
-            used_days: 0,
-            carried_forward: 0,
-            balance: leaveType.accrual_type === "monthly" ? 0 : leaveType.days_per_year,
-          })),
+          .map((leaveType) => {
+            let initialBalance = leaveType.days_per_year;
+            if (leaveType.accrual_type === "monthly") {
+              if (targetYear === currentYear) {
+                const elapsedMonths = new Date().getMonth() + 1; // 1-based index (e.g., May = 5)
+                initialBalance = Number(((leaveType.days_per_year / 12) * elapsedMonths).toFixed(2));
+              } else if (targetYear > currentYear) {
+                initialBalance = 0;
+              }
+            }
+            return {
+              tenant_id: tenantId,
+              employee_id: employeeId,
+              leave_type_id: leaveType.id,
+              year: targetYear,
+              total_allocated: leaveType.days_per_year,
+              used_days: 0,
+              carried_forward: 0,
+              balance: initialBalance,
+            };
+          }),
       );
 
       if (rowsToInsert.length > 0) {
