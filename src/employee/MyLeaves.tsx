@@ -29,6 +29,21 @@ interface LeaveType {
   is_active: boolean;
 }
 
+// Maps leave type codes to the legacy leave_type enum values in the `leaves` table.
+// Custom leave types that don't match a known code fall back to 'other'.
+const CODE_TO_LEAVE_TYPE_ENUM: Record<string, string> = {
+  CL: "casual",
+  SL: "sick",
+  EL: "earned",
+  UL: "unpaid",
+  ML: "maternity",
+  PL: "paternity",
+};
+
+function resolveLeaveTypeEnum(code: string): string {
+  return CODE_TO_LEAVE_TYPE_ENUM[code.toUpperCase()] ?? "other";
+}
+
 interface LeaveBalance {
   id: string;
   leave_type_id: string;
@@ -122,7 +137,7 @@ export default function MyLeaves() {
         employee_id: employee.id,
         tenant_id: tenantId,
         leave_type_id: form.leave_type_id,
-        leave_type: selectedType?.name || "other", // Fallback for legacy column
+        leave_type: selectedType ? resolveLeaveTypeEnum(selectedType.code) : "other",
         start_date: form.start_date,
         end_date: form.end_date,
         total_days: totalDays,
