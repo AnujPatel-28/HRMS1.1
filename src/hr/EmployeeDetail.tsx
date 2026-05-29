@@ -7,7 +7,8 @@ import { useAuditLog } from "../hooks/useAuditLog";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { useToast } from "../shared/ToastContext";
-import { File, Calendar, ClipboardList, MoreVertical, Upload, Loader2 } from "lucide-react";
+import { File, Calendar, ClipboardList, MoreVertical, Upload, Loader2, Trash2 } from "lucide-react";
+import { ConfirmModal } from "../shared/ConfirmModal";
 
 type TabKey = "personal" | "identity" | "documents" | "attendance" | "leaves" | "tasks";
 
@@ -82,6 +83,35 @@ export default function EmployeeDetail() {
       toastError("Failed to upload document.");
     } finally {
       setUploadingDoc(false);
+    }
+  };
+  const [deleteConfirmDocKey, setDeleteConfirmDocKey] = useState<string | null>(null);
+  const [deletingDoc, setDeletingDoc] = useState(false);
+
+  const handleDeleteDocument = async () => {
+    if (!deleteConfirmDocKey || !employee || !tenantId) return;
+
+    setDeletingDoc(true);
+    try {
+      const { error: dbError } = await db
+        .from("employee_documents")
+        .delete()
+        .eq("tenant_id", tenantId)
+        .eq("employee_id", employee.id)
+        .eq("file_key", deleteConfirmDocKey);
+      if (dbError) throw dbError;
+
+      const { error: storageError } = await storage.from("employee-documents").remove(deleteConfirmDocKey);
+      if (storageError) throw storageError;
+
+      await loadData();
+      success("Document deleted successfully.");
+      setDeleteConfirmDocKey(null);
+    } catch (err) {
+      console.error(err);
+      toastError("Failed to delete document.");
+    } finally {
+      setDeletingDoc(false);
     }
   };
   const [loading, setLoading] = useState(false);
@@ -690,60 +720,78 @@ export default function EmployeeDetail() {
       ) : null}
 
       {activeTab === "documents" ? (
-        <div className="mt-4 space-y-3">
-          {documents.length === 0 ? (
-            isEditing ? (
-              <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-8 text-center transition-colors hover:bg-slate-100/50">
-                <div className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-50 text-brand-600 ring-1 ring-brand-500/20 mb-3">
-                  <Upload className="h-6 w-6" />
-                </div>
-                <p className="text-sm font-semibold text-slate-800">Upload employee document</p>
-                <p className="text-xs text-slate-500 mt-1 mb-4">Supported files: PDF, DOCX, images (Max 10MB)</p>
-                <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-brand-700 transition disabled:opacity-60">
-                  {uploadingDoc ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Uploading...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="h-4 w-4" />
-                      Select File
-                    </>
-                  )}
-                  <input
-                    type="file"
-                    className="hidden"
-                    disabled={uploadingDoc}
-                    onChange={handleUploadDocument}
-                  />
-                </label>
-              </div>
-            ) : (
-              <div className="py-4"><EmptyState icon={File} title="No documents" description="No uploaded documents found in storage." /></div>
-            )
-          ) : (
-            documents.map((doc) => (
-              <div key={doc.key} className="flex flex-wrap items-center justify-between rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-slate-300 transition-colors">
-                <div className="flex items-center gap-4">
-                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600 ring-1 ring-brand-500/20">
-                     <File className="h-5 w-5" />
+        <div className="mt-4 space-y-4">
+          {documents.length > 0 && (
+            <div className="space-y-3">
+              {documents.map((doc) => (
+                <div key={doc.key} className="flex flex-wrap items-center justify-between rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-slate-300 transition-colors">
+                  <div className="flex items-center gap-4">
+                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600 ring-1 ring-brand-500/20">
+                       <File className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{doc.key.split("/").pop()}</p>
+                      <p className="text-xs font-medium text-slate-500 mt-0.5">{new Date(doc.uploadedAt).toLocaleString()} — {(doc.size / 1024).toFixed(1)} KB</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{doc.key.split("/").pop()}</p>
-                    <p className="text-xs font-medium text-slate-500 mt-0.5">{new Date(doc.uploadedAt).toLocaleString()} — {(doc.size / 1024).toFixed(1)} KB</p>
+                  <div className="flex items-center gap-2 mt-3 md:mt-0">
+                    <a
+                      href={doc.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-brand-600 transition-colors shadow-sm"
+                    >
+                      Download
+                    </a>
+                    {isEditing && (
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmDocKey(doc.key)}
+                        className="rounded-lg border border-rose-200 bg-white p-2 text-rose-600 hover:bg-rose-50 hover:text-rose-700 transition-colors shadow-sm"
+                        title="Delete Document"
+                      >
+                        <Trash2 className="h-5 w-5" />
+                      </button>
+                    )}
                   </div>
                 </div>
-                <a
-                  href={doc.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-3 md:mt-0 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-brand-600 transition-colors shadow-sm"
-                >
-                  Download
-                </a>
+              ))}
+            </div>
+          )}
+
+          {isEditing && (
+            <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-8 text-center transition-colors hover:bg-slate-100/50">
+              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-50 text-brand-600 ring-1 ring-brand-500/20 mb-3">
+                <Upload className="h-6 w-6" />
               </div>
-            ))
+              <p className="text-sm font-semibold text-slate-800">Upload employee document</p>
+              <p className="text-xs text-slate-500 mt-1 mb-4">Supported files: PDF, DOCX, images (Max 10MB)</p>
+              <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-brand-700 transition disabled:opacity-60">
+                {uploadingDoc ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Uploading...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-4 w-4" />
+                    Select File
+                  </>
+                )}
+                <input
+                  type="file"
+                  className="hidden"
+                  disabled={uploadingDoc}
+                  onChange={handleUploadDocument}
+                />
+              </label>
+            </div>
+          )}
+
+          {!isEditing && documents.length === 0 && (
+            <div className="py-4">
+              <EmptyState icon={File} title="No documents" description="No uploaded documents found in storage." />
+            </div>
           )}
         </div>
       ) : null}
@@ -821,6 +869,17 @@ export default function EmployeeDetail() {
           )}
         </div>
       ) : null}
+
+      <ConfirmModal
+        isOpen={deleteConfirmDocKey !== null}
+        onClose={() => setDeleteConfirmDocKey(null)}
+        onConfirm={() => { void handleDeleteDocument(); }}
+        title="Delete Document"
+        message="Are you sure you want to delete this document? This action cannot be undone."
+        confirmText="Delete"
+        confirmColor="red"
+        isSubmitting={deletingDoc}
+      />
     </section>
   );
 }
