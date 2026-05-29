@@ -107,20 +107,49 @@ export function validateLeaveType(policy: LeaveTypeForm): ValidationResult {
   if (!policy.code.trim()) {
     errors.code = "Leave type code is required.";
   }
-  if (Number(policy.days_per_year) < 0) {
-    errors.days_per_year = "Days per year cannot be negative.";
+
+  // Days per year validation
+  if (policy.days_per_year.trim()) {
+    const val = Number(policy.days_per_year);
+    if (isNaN(val) || val < 0) {
+      errors.days_per_year = "Days per year must be a valid non-negative number.";
+    }
   }
-  if (policy.carry_forward && Number(policy.max_carry_forward_days) < 0) {
-    errors.max_carry_forward_days = "Max carry forward days cannot be negative.";
+
+  // Carry forward validation
+  if (policy.carry_forward) {
+    if (!policy.max_carry_forward_days.trim()) {
+      errors.max_carry_forward_days = "Max carry forward days is required when carry forward is enabled.";
+    } else {
+      const val = Number(policy.max_carry_forward_days);
+      if (isNaN(val) || val < 0) {
+        errors.max_carry_forward_days = "Max carry forward days must be a valid non-negative number.";
+      }
+    }
   }
-  if (Number(policy.applicable_after_days) < 0) {
-    errors.applicable_after_days = "Applicable after days cannot be negative.";
+
+  // Applicable after days validation
+  if (policy.applicable_after_days.trim()) {
+    const val = Number(policy.applicable_after_days);
+    if (isNaN(val) || !Number.isInteger(val) || val < 0) {
+      errors.applicable_after_days = "Applicable after days must be a valid non-negative integer.";
+    }
   }
-  if (Number(policy.minimum_notice_days) < 0) {
-    errors.minimum_notice_days = "Minimum notice days cannot be negative.";
+
+  // Minimum notice days validation
+  if (policy.minimum_notice_days.trim()) {
+    const val = Number(policy.minimum_notice_days);
+    if (isNaN(val) || !Number.isInteger(val) || val < 0) {
+      errors.minimum_notice_days = "Minimum notice days must be a valid non-negative integer.";
+    }
   }
-  if (policy.maximum_consecutive_days.trim() && Number(policy.maximum_consecutive_days) < 1) {
-    errors.maximum_consecutive_days = "Max consecutive days must be at least 1.";
+
+  // Maximum consecutive days validation
+  if (policy.maximum_consecutive_days.trim()) {
+    const val = Number(policy.maximum_consecutive_days);
+    if (isNaN(val) || !Number.isInteger(val) || val < 1) {
+      errors.maximum_consecutive_days = "Max consecutive days must be a valid integer of at least 1.";
+    }
   }
 
   return {
