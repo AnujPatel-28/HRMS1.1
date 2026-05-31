@@ -331,10 +331,17 @@ export default function PunchInOut() {
           const fenceResult = checkGeofence(position.lat, position.lng, officeLat, officeLng, radiusMeters);
           if (!fenceResult.inside) {
             locationData.punch_in_location_status = "outside_fence";
-            toast(
-              `You are ${fenceResult.distanceMeters}m from the office. Punch-in recorded with your location.`,
-              "info",
-            );
+            const geofenceMode = tenantSettings["geofence_mode"] ?? "warn";
+            if (geofenceMode === "strict") {
+              // Hard block — punch-in is NOT recorded.
+              error(`Punch-in blocked: You are ${fenceResult.distanceMeters}m outside the designated office area. Please move closer and try again.`);
+              return; // exits punchIn(); finally block cleans up acting state
+            } else {
+              toast(
+                `You are ${fenceResult.distanceMeters}m from the office. Punch-in recorded with your location.`,
+                "info",
+              );
+            }
           }
         }
       } catch (geoError) {
@@ -430,6 +437,12 @@ export default function PunchInOut() {
           const fenceResult = checkGeofence(position.lat, position.lng, officeLat, officeLng, radiusMeters);
           if (!fenceResult.inside) {
             locationData.punch_out_location_status = "outside_fence";
+            const geofenceMode = tenantSettings["geofence_mode"] ?? "warn";
+            if (geofenceMode === "strict") {
+              // Hard block — punch-out is NOT recorded.
+              error(`Punch-out blocked: You are ${fenceResult.distanceMeters}m outside the designated office area. Please move closer and try again.`);
+              return; // exits punchOut(); finally block cleans up acting state
+            }
           }
         }
       } catch (geoError) {

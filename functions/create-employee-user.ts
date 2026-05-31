@@ -6,11 +6,24 @@
  *
  * Creates an employee auth user, preserving tenant_id in auth metadata so RLS
  * policies can isolate the user immediately after login.
+ *
+ * Required function secrets (set in InsForge dashboard → Functions → Secrets):
+ *   INSFORGE_BASE_URL   — e.g. https://rq3qmu8y.ap-southeast.insforge.app
+ *   INSFORGE_ADMIN_KEY  — the platform admin key (rotate the old one first!)
+ *   DEFAULT_TENANT_ID   — fallback tenant UUID when none is supplied by caller
  */
 
-const BASE_URL = "https://rq3qmu8y.ap-southeast.insforge.app";
-const ADMIN_KEY = "ik_aaf7c33902b801271b5ec27017882e87";
-const DEFAULT_TENANT_ID = "c3816de9-2222-49d0-842b-8e99613c635a";
+const BASE_URL = Deno.env.get("INSFORGE_BASE_URL");
+const ADMIN_KEY = Deno.env.get("INSFORGE_ADMIN_KEY");
+const DEFAULT_TENANT_ID = Deno.env.get("DEFAULT_TENANT_ID") ?? "";
+
+// Fail fast at cold-start if secrets are missing — avoids silent auth failures.
+if (!BASE_URL || !ADMIN_KEY) {
+  throw new Error(
+    "[create-employee-user] Missing required env vars: INSFORGE_BASE_URL and/or INSFORGE_ADMIN_KEY. " +
+    "Set them in InsForge Dashboard → Functions → Secrets."
+  );
+}
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",

@@ -2,8 +2,17 @@
 -- for the auto-generated attendance rows. This avoids unique constraint
 -- violations (idx_single_open_session) when the employee already has an
 -- open attendance session (e.g. today's clock-in).
+--
+-- SECURITY HARDENING (2026-05-31): p_hr_employee_id removed from signature.
+-- The reviewing HR user is now derived server-side from auth.uid() to prevent
+-- privilege escalation — a malicious authenticated caller can no longer forge
+-- the reviewer identity by passing an arbitrary UUID.
 
-CREATE OR REPLACE FUNCTION public.approve_leave_request(p_leave_id uuid, p_hr_employee_id uuid, p_working_dates date[], p_approved_business_days integer)
+CREATE OR REPLACE FUNCTION public.approve_leave_request(
+  p_leave_id uuid,
+  p_working_dates date[],
+  p_approved_business_days integer
+)
  RETURNS void
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -13,7 +22,15 @@ DECLARE
     v_leave RECORD;
     v_balance_row RECORD;
     v_date DATE;
+    v_caller_uid UUID;
+    v_hr_employee_id UUID;
 BEGIN
+    -- 0. Derive reviewer identity from the calling user's auth context.
+    v_caller_uid := auth.uid();
+    IF v_caller_uid IS NULL THEN
+        RAISE EXCEPTION 'Unauthenticated';
+    END IF;
+
     -- 1. Lock the leave record
     SELECT * INTO v_leave
     FROM leaves
@@ -28,7 +45,26 @@ BEGIN
         RAISE EXCEPTION 'Leave request is no longer pending (current status: %)', v_leave.status;
     END IF;
 
-    -- 2. Deduct balance if leave_type_id is present
+    -- 2. Verify caller is an HR employee of the leave's tenant.
+    SELECT id INTO v_hr_employee_id
+    FROM employees
+    WHERE auth_user_id = v_caller_uid
+      AND tenant_id = v_leave.tenant_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Caller is not an HR employee of this tenant';
+    END IF;
+
+    -- Additional role check via auth metadata.
+    IF NOT EXISTS (
+        SELECT 1 FROM auth.users
+        WHERE id = v_caller_uid
+          AND raw_app_meta_data->>'role' = 'hr'
+    ) THEN
+        RAISE EXCEPTION 'Insufficient role: HR privileges required';
+    END IF;
+
+    -- 3. Deduct balance if leave_type_id is present
     IF v_leave.leave_type_id IS NOT NULL THEN
         SELECT * INTO v_balance_row
         FROM leave_balances
@@ -53,15 +89,15 @@ BEGIN
         WHERE id = v_balance_row.id;
     END IF;
 
-    -- 3. Update the leave status
+    -- 4. Update the leave status — reviewer derived from server-side identity
     UPDATE leaves
     SET status = 'approved',
-        reviewed_by = p_hr_employee_id,
+        reviewed_by = v_hr_employee_id,
         reviewed_at = NOW(),
         approved_business_days = p_approved_business_days
     WHERE id = p_leave_id;
 
-    -- 4. Generate Attendance Rows
+    -- 5. Generate Attendance Rows
     IF p_working_dates IS NOT NULL THEN
         FOREACH v_date IN ARRAY p_working_dates
         LOOP

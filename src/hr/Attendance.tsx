@@ -548,7 +548,18 @@ export default function HRAttendance() {
       const finalIsLate = (editStatus === "half_day" || editStatus === "absent") ? false : row.is_late;
 
       if (row.id) {
-        await db.from("attendance").update({ punch_in: punchIn, punch_out: punchOut, status: editStatus, work_hours: workHours, is_late: finalIsLate }).eq("tenant_id", tenantId).eq("id", row.id);
+        // Fix orphaned open sessions: if HR is setting a punch_out time, mark the session closed.
+        // Without this, session_status stays 'open' even after manual edits, which breaks the
+        // "single open session" constraint and leaves attendance calendar in a stale state.
+        const sessionStatusUpdate = punchOut ? { session_status: "closed" } : {};
+        await db.from("attendance").update({
+          punch_in: punchIn,
+          punch_out: punchOut,
+          status: editStatus,
+          work_hours: workHours,
+          is_late: finalIsLate,
+          ...sessionStatusUpdate,
+        }).eq("tenant_id", tenantId).eq("id", row.id);
       } else {
         await db.from("attendance").insert([{
           employee_id: row.employee_id,

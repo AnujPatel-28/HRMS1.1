@@ -1,9 +1,16 @@
+// DEV UTILITY — not used in production. Run with: node --env-file=.env test-api.js
+// Keys are loaded from .env (gitignored). Never hard-code secrets here.
 import { createClient } from "@insforge/sdk";
 
-const insforge = createClient({
-  baseUrl: "https://rq3qmu8y.ap-southeast.insforge.app",
-  anonKey: "ik_aaf7c33902b801271b5ec27017882e87"
-});
+const baseUrl = process.env.VITE_INSFORGE_URL;
+const anonKey = process.env.VITE_INSFORGE_ANON_KEY;
+
+if (!baseUrl || !anonKey) {
+  console.error("Missing VITE_INSFORGE_URL or VITE_INSFORGE_ANON_KEY in .env");
+  process.exit(1);
+}
+
+const insforge = createClient({ baseUrl, anonKey });
 
 async function test() {
   // Try to query tenants directly without login to see if it fails with Invalid token or RLS

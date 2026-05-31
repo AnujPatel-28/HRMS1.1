@@ -157,12 +157,12 @@ export default function TaskManagement() {
   }
 
   async function approveTask(task: TaskWithEmployee) {
-    if (!hrEmployee?.id || !task.submission) return;
+    if (!task.submission) return;
     setSavingReview(true);
     try {
+      // p_hr_employee_id removed — reviewer is derived server-side from auth.uid()
       const { error: rpcErr } = await db.rpc('approve_task_request', {
-        p_task_id: task.id,
-        p_hr_employee_id: hrEmployee.id
+        p_task_id: task.id
       });
       if (rpcErr) throw rpcErr;
       
@@ -190,12 +190,12 @@ export default function TaskManagement() {
   }
 
   async function rejectTask(task: TaskWithEmployee) {
-    if (!hrEmployee?.id || !task.submission) return;
+    if (!task.submission) return;
     setSavingReview(true);
     try {
+      // p_hr_employee_id removed — reviewer is derived server-side from auth.uid()
       const { error: rpcErr } = await db.rpc('reject_task_request', {
         p_task_id: task.id,
-        p_hr_employee_id: hrEmployee.id,
         p_notes: rejectNotes || null
       });
       if (rpcErr) throw rpcErr;

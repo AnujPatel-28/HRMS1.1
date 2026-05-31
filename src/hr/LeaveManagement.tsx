@@ -140,10 +140,9 @@ export default function LeaveManagement() {
       const holidayDates = holidays.map(h => h.date);
       const { total_days, working_dates } = calculateBusinessDays(leave.start_date, leave.end_date, workingDays, holidayDates);
 
-      // 3. Call Transactional RPC
+      // p_hr_employee_id removed — reviewer is derived server-side from auth.uid()
       const { error: rpcErr } = await db.rpc('approve_leave_request', {
         p_leave_id: leave.id,
-        p_hr_employee_id: hrEmployee.id,
         p_working_dates: working_dates,
         p_approved_business_days: total_days
       });
@@ -175,9 +174,9 @@ export default function LeaveManagement() {
     if (!hrEmployee?.id) return;
     setActionLoading(true);
     try {
+      // p_hr_employee_id removed — reviewer is derived server-side from auth.uid()
       const { error: rpcErr } = await db.rpc('cancel_leave_request', {
         p_leave_id: leave.id,
-        p_hr_employee_id: hrEmployee.id,
         p_rejection_reason: rejectReason || null,
         p_new_status: 'rejected'
       });
@@ -567,9 +566,9 @@ export default function LeaveManagement() {
                             <button onClick={async () => {
                               if (!confirm("Are you sure you want to cancel this approved leave? Balances will be restored.")) return;
                               try {
+                                // p_hr_employee_id removed — reviewer derived server-side from auth.uid()
                                 const { error: rpcErr } = await db.rpc('cancel_leave_request', {
                                   p_leave_id: l.id,
-                                  p_hr_employee_id: hrEmployee?.id,
                                   p_rejection_reason: "Cancelled by HR",
                                   p_new_status: 'cancelled'
                                 });
