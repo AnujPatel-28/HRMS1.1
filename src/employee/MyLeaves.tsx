@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { Calendar } from "lucide-react";
+import { Calendar, FileText } from "lucide-react";
 import type { Leave } from "../types";
 import { db } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
@@ -27,6 +27,11 @@ interface LeaveType {
   name: string;
   code: string;
   is_active: boolean;
+  // Policy enforcement fields (Gap #6)
+  min_notice_days: number;
+  max_consecutive_days: number | null;
+  applicable_from_day: number;
+  requires_document: boolean;
 }
 
 // Maps leave type codes to the legacy leave_type enum values in the `leaves` table.
@@ -60,6 +65,8 @@ export default function MyLeaves() {
   const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
   const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
   const [holidays, setHolidays] = useState<string[]>([]);
+  // Gap #6b: global leave minimum notice days from tenant settings.
+  const [globalMinNoticeDays, setGlobalMinNoticeDays] = useState(0);
   
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -73,23 +80,34 @@ export default function MyLeaves() {
     try {
       const currentYear = new Date().getFullYear();
       
-      const [leavesRes, typesRes, balancesRes, holidaysRes] = await Promise.all([
+      const [leavesRes, typesRes, balancesRes, holidaysRes, settingsRes] = await Promise.all([
         db.from("leaves").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).order("applied_at", { ascending: false }),
-        db.from("leave_types").select("id, name, code, is_active").eq("tenant_id", tenantId).eq("is_active", true).order("name"),
+        // Gap #6a: fetch all policy-relevant leave_type columns.
+        db.from("leave_types").select("id, name, code, is_active, min_notice_days, max_consecutive_days, applicable_from_day, requires_document").eq("tenant_id", tenantId).eq("is_active", true).order("name"),
         db.from("leave_balances").select("id, leave_type_id, balance").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("year", currentYear),
-        db.from("holidays").select("date").eq("tenant_id", tenantId).gte("date", `${currentYear}-01-01`)
+        db.from("holidays").select("date").eq("tenant_id", tenantId).gte("date", `${currentYear}-01-01`),
+        // Gap #6b: read global leave minimum notice days.
+        db.from("tenant_settings").select("key, value").eq("tenant_id", tenantId).in("key", ["leave_min_notice_days"]),
       ]);
 
       if (leavesRes.error) throw leavesRes.error;
       if (typesRes.error) throw typesRes.error;
       if (balancesRes.error) throw balancesRes.error;
       if (holidaysRes.error) throw holidaysRes.error;
+      if (settingsRes.error) throw settingsRes.error;
 
       setLeaves((leavesRes.data ?? []) as Leave[]);
       const types = (typesRes.data ?? []) as LeaveType[];
       setLeaveTypes(types);
       setLeaveBalances((balancesRes.data ?? []) as LeaveBalance[]);
       setHolidays((holidaysRes.data ?? []).map((h: any) => h.date));
+
+      // Parse global notice days setting.
+      const settingsMap = ((settingsRes.data ?? []) as { key: string; value: string }[]).reduce<Record<string, string>>((acc, row) => {
+        acc[row.key] = row.value;
+        return acc;
+      }, {});
+      setGlobalMinNoticeDays(parseInt(settingsMap["leave_min_notice_days"] || "0", 10));
       
       if (types.length > 0 && !form.leave_type_id) {
         setForm(prev => ({ ...prev, leave_type_id: types[0].id }));
@@ -118,7 +136,56 @@ export default function MyLeaves() {
   async function applyLeave(e: React.FormEvent) {
     e.preventDefault();
     if (!employee?.id || !tenantId || !form.start_date || !form.end_date || !form.reason || !form.leave_type_id) return;
-    
+
+    const selectedType = leaveTypes.find(t => t.id === form.leave_type_id);
+
+    // ── Gap #6: Policy enforcement checks ─────────────────────────────────────
+
+    // 1. Global & per-type minimum notice period
+    const perTypeNoticeDays = selectedType?.min_notice_days ?? 0;
+    const effectiveNoticeDays = Math.max(globalMinNoticeDays, perTypeNoticeDays);
+    if (effectiveNoticeDays > 0) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const startDate = new Date(form.start_date);
+      startDate.setHours(0, 0, 0, 0);
+      const noticeDaysGiven = Math.floor((startDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      if (noticeDaysGiven < effectiveNoticeDays) {
+        error(
+          `This leave requires at least ${effectiveNoticeDays} day${effectiveNoticeDays !== 1 ? "s" : ""} notice. ` +
+          `Your selected start date is ${noticeDaysGiven < 0 ? "in the past" : `only ${noticeDaysGiven} day${noticeDaysGiven !== 1 ? "s" : ""} away`}.`
+        );
+        return;
+      }
+    }
+
+    // 2. Maximum consecutive days
+    if (selectedType?.max_consecutive_days != null && totalDays > selectedType.max_consecutive_days) {
+      error(
+        `${selectedType.name} allows a maximum of ${selectedType.max_consecutive_days} consecutive working day${selectedType.max_consecutive_days !== 1 ? "s" : ""} per request. ` +
+        `Your selection covers ${totalDays} working day${totalDays !== 1 ? "s" : ""}.`
+      );
+      return;
+    }
+
+    // 3. Applicable-after-days (probation / tenure check)
+    if (selectedType?.applicable_from_day != null && selectedType.applicable_from_day > 0 && employee.date_of_joining) {
+      const joining = new Date(employee.date_of_joining);
+      joining.setHours(0, 0, 0, 0);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const daysSinceJoining = Math.floor((today.getTime() - joining.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysSinceJoining < selectedType.applicable_from_day) {
+        const daysRemaining = selectedType.applicable_from_day - daysSinceJoining;
+        error(
+          `${selectedType.name} is only available after ${selectedType.applicable_from_day} days of employment. ` +
+          `You become eligible in ${daysRemaining} more day${daysRemaining !== 1 ? "s" : ""}.`
+        );
+        return;
+      }
+    }
+
+    // 4. Leave balance
     if (totalDays > selectedBalance) {
       error(`Insufficient balance. You only have ${selectedBalance} days available.`);
       return;
@@ -129,9 +196,31 @@ export default function MyLeaves() {
       return;
     }
 
+    // ── Gap #7: Overlap check ─────────────────────────────────────────────────
+    // Check for existing pending or approved leaves that overlap the requested range.
+    const { data: overlapping, error: overlapErr } = await db
+      .from("leaves")
+      .select("id, start_date, end_date, status")
+      .eq("tenant_id", tenantId)
+      .eq("employee_id", employee.id)
+      .in("status", ["pending", "approved"])
+      .lte("start_date", form.end_date)
+      .gte("end_date", form.start_date);
+    if (overlapErr) {
+      error("Could not verify leave overlap. Please try again.");
+      return;
+    }
+    if (overlapping && overlapping.length > 0) {
+      const existing = overlapping[0] as { start_date: string; end_date: string; status: string };
+      error(
+        `You already have a ${existing.status} leave from ${existing.start_date} to ${existing.end_date} that overlaps these dates. ` +
+        `Please cancel or adjust that request first.`
+      );
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const selectedType = leaveTypes.find(t => t.id === form.leave_type_id);
       
       const { error: insErr } = await db.from("leaves").insert([{
         employee_id: employee.id,
@@ -243,6 +332,17 @@ export default function MyLeaves() {
                 </select>
                 <p className="mt-1 text-[10px] font-semibold text-brand-600">Available Balance: {selectedBalance} days</p>
               </div>
+
+              {/* Gap #6g: requires_document warning banner */}
+              {leaveTypes.find(t => t.id === form.leave_type_id)?.requires_document && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                  <span>
+                    <span className="font-semibold">Supporting document required.</span>{" "}
+                    HR may ask you to submit a supporting document (e.g. medical certificate) for this leave type. Please keep it ready.
+                  </span>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">Start Date</label>

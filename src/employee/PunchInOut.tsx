@@ -147,15 +147,24 @@ export default function PunchInOut() {
   if (isNightShift && currentMinutes < 12 * 60) {
     effectiveCurrentMinutes += 1440;
   }
-  const canPunchIn = effectiveCurrentMinutes >= shiftStartTime;
+  // Gap #3: respect the shift-level punch_in_opens_minutes_before window.
+  // Employees can punch in this many minutes BEFORE shift start (default 60).
+  const openBeforeMinutes = shift?.punch_in_opens_minutes_before ?? 60;
+  const canPunchIn = effectiveCurrentMinutes >= shiftStartTime - openBeforeMinutes;
   const regularizationEnabled = tenantSettings["regularization_enabled"] === "true";
+  // Gap #5: read dynamic regularization window from tenant settings (default 7 days).
+  const regularizationWindowDays = Math.max(1, parseInt(tenantSettings["regularization_window_days"] || "7", 10));
 
   const fetchData = async () => {
     if (!employee?.id || !tenantId || !tenant) return;
     try {
       const today = new Date();
       const recentStart = new Date(today);
-      recentStart.setDate(today.getDate() - 6);
+      // Gap #5: use the dynamically-read window. At render time tenantSettings may
+      // not be loaded yet (first render), so we read the raw state here.
+      // We default to 7 to match the tenant-settings default.
+      const windowDays = Math.max(1, parseInt(tenantSettings["regularization_window_days"] || "7", 10));
+      recentStart.setDate(today.getDate() - (windowDays - 1));
       const recentStartDate = formatLocalDate(recentStart);
       const [attRes, todayClosedRes, taskRes, settingsRes, recentAttRes, overtimeRes, correctionsRes] = await Promise.all([
         db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("session_status", "open").not("punch_in", "is", null).order("punch_in", { ascending: false }).limit(1).maybeSingle(),
@@ -302,6 +311,7 @@ export default function PunchInOut() {
       const unapprovedTasks = todayTasks.filter((task) => BLOCKING_TASK_STATUSES.includes(task.status as any));
       const allowed = tenant.punch_out_gate_enabled ? unapprovedTasks.length === 0 : true;
       const geofenceEnabled = tenantSettings["geofence_enabled"] === "true";
+      const geofenceMode = tenantSettings["geofence_mode"] ?? "warn";
       const officeLat = parseFloat(tenantSettings["office_lat"] || "0");
       const officeLng = parseFloat(tenantSettings["office_lng"] || "0");
       const radiusMeters = parseInt(tenantSettings["geofence_radius_meters"] || "500", 10);
@@ -331,9 +341,15 @@ export default function PunchInOut() {
           const fenceResult = checkGeofence(position.lat, position.lng, officeLat, officeLng, radiusMeters);
           if (!fenceResult.inside) {
             locationData.punch_in_location_status = "outside_fence";
-            const geofenceMode = tenantSettings["geofence_mode"] ?? "warn";
             if (geofenceMode === "strict") {
-              // Hard block — punch-in is NOT recorded.
+              // Gap #4: Hard block — audit the event so HR has a record.
+              void logAction("geofence_blocked", "attendance", null, {
+                reason: "outside_radius",
+                direction: "punch_in",
+                distance_meters: fenceResult.distanceMeters,
+                radius_meters: radiusMeters,
+                severity: "WARNING",
+              });
               error(`Punch-in blocked: You are ${fenceResult.distanceMeters}m outside the designated office area. Please move closer and try again.`);
               return; // exits punchIn(); finally block cleans up acting state
             } else {
@@ -347,17 +363,45 @@ export default function PunchInOut() {
       } catch (geoError) {
         if (geoError instanceof Error && geoError.message === "DENIED") {
           locationData.punch_in_location_status = "denied";
+          // Gap #4: strict geofence blocks on permission denied too.
+          if (geofenceEnabled && geofenceMode === "strict") {
+            void logAction("geofence_blocked", "attendance", null, {
+              reason: "location_denied",
+              direction: "punch_in",
+              severity: "WARNING",
+            });
+            error("Punch-in blocked: Location permission is required in strict geofence mode. Please enable location access and try again.");
+            return;
+          }
           info("Location permission denied. Punch-in recorded without location.");
-        } else {
+        } else if (!(geoError instanceof Error && geoError.message === "LOW_ACCURACY")) {
           locationData.punch_in_location_status = "unavailable";
+          // Gap #4: strict geofence blocks when GPS is simply unavailable.
+          if (geofenceEnabled && geofenceMode === "strict") {
+            void logAction("geofence_blocked", "attendance", null, {
+              reason: "location_unavailable",
+              direction: "punch_in",
+              severity: "WARNING",
+            });
+            error("Punch-in blocked: Unable to determine your location. Please check GPS or Wi-Fi and try again.");
+            return;
+          }
+        } else {
+          throw geoError; // re-throw LOW_ACCURACY to be caught by outer handler
         }
       }
 
       const ip = await ipPromise;
       setActionText("Punching In...");
-      const gracePeriodMinutes = parseInt(tenantSettings["late_mark_grace_minutes"] || "0", 10);
+      // Gap #2: prefer shift-level grace override; fall back to tenant-level setting.
+      const gracePeriodMinutes =
+        shift?.late_mark_grace_override != null
+          ? shift.late_mark_grace_override
+          : parseInt(tenantSettings["late_mark_grace_minutes"] || "0", 10);
       const elapsedSinceShiftStartMinutes = (now.getTime() - shiftStartDate.getTime()) / 60000;
-      const isLate = elapsedSinceShiftStartMinutes > gracePeriodMinutes;
+      // Gap #1: only compute lateness when the late_mark feature is enabled.
+      const lateMarkFeatureEnabled = tenantSettings["late_mark_enabled"] === "true";
+      const isLate = lateMarkFeatureEnabled && elapsedSinceShiftStartMinutes > gracePeriodMinutes;
 
       const { data: inserted, error: dbErr } = await db.from("attendance").insert([{
         employee_id: employee.id,
@@ -408,6 +452,7 @@ export default function PunchInOut() {
     setActionText("Getting your location...");
     try {
       const geofenceEnabled = tenantSettings["geofence_enabled"] === "true";
+      const geofenceMode = tenantSettings["geofence_mode"] ?? "warn";
       const officeLat = parseFloat(tenantSettings["office_lat"] || "0");
       const officeLng = parseFloat(tenantSettings["office_lng"] || "0");
       const radiusMeters = parseInt(tenantSettings["geofence_radius_meters"] || "500", 10);
@@ -437,9 +482,15 @@ export default function PunchInOut() {
           const fenceResult = checkGeofence(position.lat, position.lng, officeLat, officeLng, radiusMeters);
           if (!fenceResult.inside) {
             locationData.punch_out_location_status = "outside_fence";
-            const geofenceMode = tenantSettings["geofence_mode"] ?? "warn";
             if (geofenceMode === "strict") {
-              // Hard block — punch-out is NOT recorded.
+              // Gap #4: Hard block — audit the event so HR has a record.
+              void logAction("geofence_blocked", "attendance", attendance.id, {
+                reason: "outside_radius",
+                direction: "punch_out",
+                distance_meters: fenceResult.distanceMeters,
+                radius_meters: radiusMeters,
+                severity: "WARNING",
+              });
               error(`Punch-out blocked: You are ${fenceResult.distanceMeters}m outside the designated office area. Please move closer and try again.`);
               return; // exits punchOut(); finally block cleans up acting state
             }
@@ -448,9 +499,31 @@ export default function PunchInOut() {
       } catch (geoError) {
         if (geoError instanceof Error && geoError.message === "DENIED") {
           locationData.punch_out_location_status = "denied";
+          // Gap #4: strict geofence blocks on permission denied too.
+          if (geofenceEnabled && geofenceMode === "strict") {
+            void logAction("geofence_blocked", "attendance", attendance.id, {
+              reason: "location_denied",
+              direction: "punch_out",
+              severity: "WARNING",
+            });
+            error("Punch-out blocked: Location permission is required in strict geofence mode. Please enable location access and try again.");
+            return;
+          }
           info("Location permission denied. Punch-out recorded without location.");
-        } else {
+        } else if (!(geoError instanceof Error && geoError.message === "LOW_ACCURACY")) {
           locationData.punch_out_location_status = "unavailable";
+          // Gap #4: strict geofence blocks when GPS is simply unavailable.
+          if (geofenceEnabled && geofenceMode === "strict") {
+            void logAction("geofence_blocked", "attendance", attendance.id, {
+              reason: "location_unavailable",
+              direction: "punch_out",
+              severity: "WARNING",
+            });
+            error("Punch-out blocked: Unable to determine your location. Please check GPS or Wi-Fi and try again.");
+            return;
+          }
+        } else {
+          throw geoError; // re-throw LOW_ACCURACY to be caught by outer handler
         }
       }
 
@@ -522,7 +595,8 @@ export default function PunchInOut() {
     }
   }
 
-  const recentDays = Array.from({ length: 7 }, (_, index) => {
+  // Gap #5: use the tenant-configured window, not a hard-coded 7.
+  const recentDays = Array.from({ length: regularizationWindowDays }, (_, index) => {
     const date = new Date();
     date.setDate(date.getDate() - index);
     const dateStr = formatLocalDate(date);
@@ -625,7 +699,8 @@ export default function PunchInOut() {
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center gap-2">
         <Clock className="h-4 w-4 text-slate-400" />
-        <h3 className="font-semibold text-slate-800">Past 7 Days</h3>
+        {/* Gap #5: heading reflects the actual policy window */}
+        <h3 className="font-semibold text-slate-800">Past {regularizationWindowDays} Day{regularizationWindowDays !== 1 ? "s" : ""}</h3>
       </div>
       <div className="space-y-2">
         {recentDays.length === 0 ? (
@@ -779,7 +854,9 @@ export default function PunchInOut() {
           </button>
           {!isWorkingDay ? <p className="text-sm font-medium text-amber-600">Today is not a working day for your shift.</p> : null}
           {!isWorkingDay ? null : !canPunchIn ? (
-            <p className="text-sm font-medium text-amber-600">Your shift starts at {shift?.name ?? "Standard shift"}: {shiftStartLabel}</p>
+            <p className="text-sm font-medium text-amber-600">
+              Punch-in opens {openBeforeMinutes > 0 ? `${openBeforeMinutes} min before` : "at"} your shift start ({shiftStartLabel}).
+            </p>
           ) : null}
           <p className="text-xs text-slate-400">Office hours: {shiftStartLabel} - {shiftEndLabel} | Half day after {halfDayLabel} | Expected {expectedHours.toFixed(1)}h</p>
           <p className="text-xs text-slate-400">
