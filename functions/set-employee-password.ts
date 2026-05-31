@@ -3,6 +3,9 @@
 // Allows an authenticated HR user to reset an employee password in the same tenant.
 
 import bcrypt from "npm:bcryptjs";
+import { createClient } from "npm:@insforge/sdk";
+
+const ADMIN_KEY = Deno.env.get("INSFORGE_ADMIN_KEY");
 
 const BASE_URL =
   Deno.env.get("INSFORGE_BASE_URL") ||
@@ -33,6 +36,19 @@ const parseRpcError = async (res) => {
   return `Password update failed with HTTP ${res.status}`;
 };
 
+const logAudit = async (tenantId, actorId, actorRole, action, targetType, targetId, details) => {
+  const client = createClient(BASE_URL, ADMIN_KEY);
+  await client.from("audit_logs").insert([{
+    tenant_id: tenantId,
+    actor_id: actorId,
+    actor_role: actorRole,
+    action,
+    target_type: targetType,
+    target_id: targetId,
+    details
+  }]).catch(e => console.error("[set-employee-password] Audit log failed", e));
+};
+
 export default async function (request) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -40,6 +56,18 @@ export default async function (request) {
   const authHeader = request.headers.get("Authorization") || "";
   const userToken = authHeader.replace(/^Bearer\s+/i, "");
   if (!userToken) return json({ error: "Unauthorized" }, 401);
+
+  let actorId = null;
+  let actorRole = "unknown";
+  
+  if (userToken) {
+    const client = createClient(BASE_URL, userToken);
+    const { data: { user } } = await client.auth.getUser();
+    if (user) {
+      actorId = user.id;
+      actorRole = user.user_metadata?.role || user.app_metadata?.role || "unknown";
+    }
+  }
 
   let body;
   try {
@@ -58,6 +86,21 @@ export default async function (request) {
 
   if (password.length < 8) {
     return json({ error: "Password must be at least 8 characters." }, 400);
+  }
+
+  if (tenantId && actorId) {
+    const client = createClient(BASE_URL, userToken);
+    const { data: rateLimitOk, error: rateLimitErr } = await client.rpc("check_rate_limit", {
+      p_tenant_id: tenantId,
+      p_user_id: actorId,
+      p_endpoint: 'set-employee-password',
+      p_max_requests: 20,
+      p_window_interval: '1 hour'
+    });
+
+    if (rateLimitErr || rateLimitOk === false) {
+      return json({ error: "Rate limit exceeded. Please try again later." }, 429);
+    }
   }
 
   try {
@@ -81,6 +124,28 @@ export default async function (request) {
     }
 
     const userId = await rpcRes.json().catch(() => null);
+    
+    // Update onboarding state
+    if (userId) {
+      const client = createClient(BASE_URL, ADMIN_KEY);
+      await client.from("employee_onboarding")
+        .update({ status: 'password_set' })
+        .eq('auth_user_id', userId)
+        .eq('tenant_id', tenantId)
+        .catch(e => console.error("[set-employee-password] Onboarding status update failed", e));
+    }
+
+    // Log audit event
+    await logAudit(
+      tenantId,
+      actorId,
+      actorRole,
+      "employee.password_set",
+      "auth_user",
+      userId,
+      { email }
+    );
+    
     return json({ success: true, user_id: userId });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : "Failed to update password." }, 500);

@@ -59,7 +59,18 @@ export default function EmployeeDetail() {
 
     setUploadingDoc(true);
     try {
-      const path = `employees/${employee.id}/${Date.now()}-${file.name}`;
+      const getUuid = () => {
+        if (typeof window !== "undefined" && window.crypto && window.crypto.randomUUID) {
+          return window.crypto.randomUUID();
+        }
+        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+          const r = (Math.random() * 16) | 0;
+          const v = c === "x" ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
+        });
+      };
+      const fileExt = file.name.split('.').pop() || "bin";
+      const path = `${tenantId}/${employee.id}/${getUuid()}.${fileExt}`;
       const { data: uploadData, error: uploadError } = await storage.from("employee-documents").upload(path, file);
       if (uploadError || !uploadData) throw uploadError || new Error("Upload failed");
 
@@ -112,6 +123,34 @@ export default function EmployeeDetail() {
       toastError("Failed to delete document.");
     } finally {
       setDeletingDoc(false);
+    }
+  };
+
+  const handleViewDocument = async (fileKey: string) => {
+    if (!employee) return;
+    try {
+      const { data, error } = await storage.from("employee-documents").download(fileKey);
+      if (error || !data) throw error;
+      
+      // Log audit action
+      void logAction("employee.document_viewed", "employee", employee.id, { document: fileKey });
+      
+      const blobUrl = URL.createObjectURL(data);
+      const win = window.open(blobUrl, "_blank");
+      if (!win) {
+        URL.revokeObjectURL(blobUrl);
+        toastError("Please allow popups to view this document.");
+        return;
+      }
+      const interval = setInterval(() => {
+        if (win.closed) {
+          URL.revokeObjectURL(blobUrl);
+          clearInterval(interval);
+        }
+      }, 1000);
+    } catch (e) {
+      toastError("Failed to fetch secure document.");
+      console.error(e);
     }
   };
   const [loading, setLoading] = useState(false);
@@ -735,14 +774,13 @@ export default function EmployeeDetail() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 mt-3 md:mt-0">
-                    <a
-                      href={doc.url}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => handleViewDocument(doc.key)}
                       className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-brand-600 transition-colors shadow-sm"
                     >
-                      Download
-                    </a>
+                      View / Download
+                    </button>
                     {isEditing && (
                       <button
                         type="button"

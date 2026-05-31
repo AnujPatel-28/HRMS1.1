@@ -31,6 +31,8 @@ const CORS = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
+import { createClient } from "npm:@insforge/sdk";
+
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -107,7 +109,7 @@ const createAuthUser = async (email, password, name, tenantId) => {
 
   if (res.ok) {
     console.log("[create-employee-user] Auth user created (OTP sent) for:", email);
-    return { ok: true };
+    return { ok: true, id: data.id };
   }
 
   console.error(`[create-employee-user] Auth error ${res.status}:`, JSON.stringify(data));
@@ -116,6 +118,19 @@ const createAuthUser = async (email, password, name, tenantId) => {
     err: data.message ?? data.error ?? `Auth service returned HTTP ${res.status}`,
     status: res.status,
   };
+};
+
+const logAudit = async (tenantId, actorId, actorRole, action, targetType, targetId, details) => {
+  const client = createClient(BASE_URL, ADMIN_KEY);
+  await client.from("audit_logs").insert([{
+    tenant_id: tenantId,
+    actor_id: actorId,
+    actor_role: actorRole,
+    action,
+    target_type: targetType,
+    target_id: targetId,
+    details
+  }]).catch(e => console.error("[create-employee-user] Audit log failed", e));
 };
 
 export default async function (req) {
@@ -142,6 +157,42 @@ export default async function (req) {
     return json({ message: "tenant_id is required", error: "tenant_id is required" }, 400);
   }
 
+  // 0. Verify Caller Identity
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) {
+    return json({ message: "Unauthorized. Missing Authorization header.", error: "Unauthorized" }, 401);
+  }
+  const callerToken = authHeader.replace(/^Bearer\s+/i, "");
+  
+  const client = createClient(BASE_URL, callerToken);
+  const { data: { user }, error: userErr } = await client.auth.getUser();
+  if (userErr || !user) {
+    return json({ message: "Unauthorized. Invalid token.", error: "Unauthorized" }, 401);
+  }
+
+  const callerRole = user.user_metadata?.role || user.app_metadata?.role;
+  const callerTenant = user.user_metadata?.tenant_id || user.app_metadata?.tenant_id;
+
+  if (callerRole !== "hr") {
+    return json({ message: "Forbidden. Only HR can create employee users.", error: "Forbidden" }, 403);
+  }
+  if (callerTenant !== tenantId) {
+    return json({ message: "Forbidden. Tenant ID mismatch.", error: "Forbidden" }, 403);
+  }
+
+  // 0.5. Check Rate Limit
+  const { data: rateLimitOk, error: rateLimitErr } = await client.rpc("check_rate_limit", {
+    p_tenant_id: tenantId,
+    p_user_id: user.id,
+    p_endpoint: 'create-employee-user',
+    p_max_requests: 20,
+    p_window_interval: '1 hour'
+  });
+
+  if (rateLimitErr || rateLimitOk === false) {
+    return json({ message: "Rate limit exceeded. Please try again later.", error: "Too Many Requests" }, 429);
+  }
+
   // 1. Check if employee record exists globally in public.employees (Cross-Tenant check)
   const employeeExists = await checkEmployeeRecordExists(email);
   if (employeeExists) {
@@ -163,11 +214,11 @@ export default async function (req) {
     const createdAtTime = new Date(authDetails.created_at).getTime();
     const ageInHours = (Date.now() - createdAtTime) / (1000 * 60 * 60);
 
-    if (ageInHours < 1) {
+    if (ageInHours < 0.5) {
       console.warn(`[create-employee-user] Orphaned auth user ${email} is too new (${ageInHours.toFixed(2)} hours).`);
       return json(
         {
-          message: "This email recently started the onboarding process but hasn't finished. Please wait 1 hour before trying again, or use a different email.",
+          message: "This email recently started the onboarding process but hasn't finished. Please wait 30 minutes before trying again, or use a different email.",
           error: "ORPHANED_AUTH_USER_TOO_NEW",
           code: "ORPHANED_AUTH_USER_TOO_NEW",
         },
@@ -214,6 +265,24 @@ export default async function (req) {
       500,
     );
   }
+
+  // Insert into employee_onboarding state table
+  await client.from("employee_onboarding").insert([{
+    tenant_id: tenantId,
+    auth_user_id: userId,
+    status: 'pending_auth'
+  }]).catch(e => console.error("[create-employee-user] Onboarding state init failed", e));
+
+  // Log audit event
+  await logAudit(
+    tenantId,
+    user.id,
+    callerRole,
+    "employee.auth_user_created",
+    "auth_user",
+    userId,
+    { email, actor_employee_id: null }
+  );
 
   console.log(`[create-employee-user] Done: userId=${userId}, OTP sent to ${email}`);
   return json({ userId });

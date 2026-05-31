@@ -165,8 +165,10 @@ export default function EmployeeCreate() {
       if (isCreated) {
         sessionStorage.removeItem(`hrms_employee_draft_${tenantId}`);
       } else {
+        // Do not store the actual password in the draft for security reasons
+        const safeCredentials = credentials ? { email: credentials.email, password: "" } : null;
         sessionStorage.setItem(`hrms_employee_draft_${tenantId}`, JSON.stringify({
-          form, createdUserId, authStep, insertedEmployeeId, uploadStatus, step, credentials, pendingEmail, isCreated
+          form, createdUserId, authStep, insertedEmployeeId, uploadStatus, step, credentials: safeCredentials, pendingEmail, isCreated
         }));
       }
     }
@@ -195,23 +197,37 @@ export default function EmployeeCreate() {
     return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
   };
 
-  const uploadFileToEmployeeFolder = async (employeeId: string, file: File, label: string): Promise<UploadedDoc> => {
-    const fileName = `employees/${employeeId}/${Date.now()}_${file.name}`;
-    const { data, error: uploadErr } = await insforge.storage.from("employee-documents").upload(fileName, file);
+  const uploadFileToEmployeeFolder = async (employeeId: string, file: File, label: string, bucket: string = "employee-documents"): Promise<UploadedDoc> => {
+    const getUuid = () => {
+      if (typeof window !== "undefined" && window.crypto && window.crypto.randomUUID) {
+        return window.crypto.randomUUID();
+      }
+      return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        const v = c === "x" ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
+    };
+    const fileExt = file.name.split('.').pop() || "bin";
+    const randomUuid = getUuid();
+    const fileName = `${tenantId}/${employeeId}/${randomUuid}.${fileExt}`;
+    const { data, error: uploadErr } = await insforge.storage.from(bucket).upload(fileName, file);
     if (uploadErr || !data) throw new Error(`Upload failed for ${label}: ${uploadErr?.message ?? "Unknown error"}`);
 
-    // Insert into employee_documents table!
-    const { error: insertError } = await db.from("employee_documents").insert([{
-      tenant_id: tenantId,
-      employee_id: employeeId,
-      file_name: file.name,
-      file_url: data.url,
-      file_key: data.key,
-      size: data.size,
-    }]);
-    if (insertError) {
-      await insforge.storage.from("employee-documents").remove(data.key);
-      throw insertError;
+    if (bucket === "employee-documents") {
+      // Insert into employee_documents table!
+      const { error: insertError } = await db.from("employee_documents").insert([{
+        tenant_id: tenantId,
+        employee_id: employeeId,
+        file_name: file.name,
+        file_url: data.url,
+        file_key: data.key,
+        size: data.size,
+      }]);
+      if (insertError) {
+        await insforge.storage.from(bucket).remove(data.key);
+        throw insertError;
+      }
     }
 
     return { label, url: data.url };
@@ -226,6 +242,80 @@ export default function EmployeeCreate() {
     setAuthLoading(true);
     setAuthError(null);
     try {
+      // 1. Check if there is an existing, resumable onboarding flow
+      const { data: resumable, error: resErr } = await db.rpc("check_onboarding_resumable", {
+        p_email: normalizedEmail,
+        p_tenant_id: tenantId
+      });
+
+      if (resErr) {
+        throw new Error(resErr.message);
+      }
+
+      if (resumable && resumable.length > 0) {
+        const flow = resumable[0];
+        const confirmResume = window.confirm(
+          `An onboarding flow already exists for this email with status "${flow.status.replace('_', ' ')}". Would you like to resume it?`
+        );
+        if (confirmResume) {
+          // Log audit action for resuming onboarding
+          void logAction("employee.onboarding_resumed", "employee_onboarding", flow.employee_id || flow.auth_user_id, {
+            employee_id: flow.employee_id || null,
+            previous_status: flow.status,
+            tenant_id: tenantId
+          });
+
+          setCreatedUserId(flow.auth_user_id);
+          setPendingEmail(normalizedEmail);
+          
+          if (flow.status === "pending_auth" || flow.status === "expired") {
+            setAuthStep("verifying");
+          } else if (flow.status === "otp_verified") {
+            setAuthStep("setting-password");
+          } else if (flow.status === "password_set") {
+            setAuthStep("done");
+            setCredentials({ email: normalizedEmail, password: "[Existing Password]" });
+          }
+          
+          if (flow.employee_id) {
+            setInsertedEmployeeId(flow.employee_id);
+            // Fetch the employee details to pre-populate the form
+            const { data: empData } = await db.from("employees").select("*").eq("id", flow.employee_id).single();
+            if (empData) {
+              setForm({
+                full_name: empData.full_name || "",
+                email: empData.email || "",
+                phone: empData.phone || "",
+                date_of_birth: empData.date_of_birth || "",
+                gender: empData.gender || "",
+                address: empData.address || "",
+                city: empData.city || "",
+                state: empData.state || "",
+                pincode: empData.pincode || "",
+                department: empData.department || "sales",
+                designation: empData.designation || "",
+                employee_code: empData.employee_code || "",
+                date_of_joining: empData.date_of_joining || "",
+                employment_type: empData.employment_type || "full_time",
+                aadhaar_number: empData.aadhaar_number || "",
+                pan_number: empData.pan_number || "",
+                bank_name: empData.bank_name || "",
+                account_number: empData.account_number || "",
+                ifsc_code: empData.ifsc_code || "",
+                emergency_contact_name: empData.emergency_contact_name || "",
+                emergency_contact_phone: empData.emergency_contact_phone || "",
+                emergency_contact_relation: empData.emergency_contact_relation || "",
+              });
+            }
+          }
+          setAuthLoading(false);
+          return;
+        } else {
+          throw new Error("Please use a different email address or resume the existing flow.");
+        }
+      }
+
+      // 2. Fall back to checking employees table (to raise an error if email is already active/exists outside resumable flow)
       const emailCheck = await db
         .from("employees")
         .select("id")
@@ -252,7 +342,6 @@ export default function EmployeeCreate() {
         let parsedData = fnRes.data;
         if (fnRes.error && !parsedData) {
             try {
-               // Sometimes the error object itself has the data or context
                const errObj = fnRes.error as any;
                if (errObj.context && typeof errObj.context.json === 'function') {
                    parsedData = await errObj.context.json();
@@ -300,8 +389,16 @@ export default function EmployeeCreate() {
       validateFile(panDoc, "PAN Document", ['image/jpeg', 'image/png', 'application/pdf'])
     ].filter(Boolean);
 
-    if (fileErrors.length > 0) {
-      setError(fileErrors.join(" "));
+    const validationErrors = [];
+    if (form.aadhaar_number.trim() && !/^\d{12}$/.test(form.aadhaar_number.trim())) {
+      validationErrors.push("Aadhaar Number must be exactly 12 digits.");
+    }
+    if (form.pan_number.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(form.pan_number.trim().toUpperCase())) {
+      validationErrors.push("PAN Number format is invalid (e.g. ABCDE1234F).");
+    }
+
+    if (fileErrors.length > 0 || validationErrors.length > 0) {
+      setError([...validationErrors, ...fileErrors].join(" "));
       setSubmitting(false);
       return;
     }
@@ -365,8 +462,12 @@ export default function EmployeeCreate() {
         // Silently seed leave_balance rows for every active leave type
         // so the employee portal shows correct balances immediately.
         try {
+          // Fetch tenant settings to get the correct timezone
+          const { data: tenantSettings } = await db.from("tenant_settings").select("timezone").eq("tenant_id", tenantId).maybeSingle();
+          const tz = tenantSettings?.timezone || "UTC";
+
           const currentYear = new Date().getFullYear();
-          const targetYear = getTenantYear("UTC"); // use UTC as timezone isn't available here
+          const targetYear = getTenantYear(tz);
           const { data: leaveTypesData } = await db
             .from("leave_types")
             .select("id, days_per_year, accrual_type")
@@ -401,6 +502,38 @@ export default function EmployeeCreate() {
           // Non-fatal: employee is created; HR can always use "Initialize Balances" as a fallback
           console.warn("Could not auto-initialize leave balances for new employee:", leaveErr);
         }
+      } else {
+        // Update the existing employee profile to capture any new edits made during the recovery flow
+        const updateRes = await db
+          .from("employees")
+          .update({
+            full_name: form.full_name.trim(),
+            phone: form.phone.trim(),
+            date_of_birth: form.date_of_birth || null,
+            gender: form.gender || null,
+            address: form.address.trim() || null,
+            city: form.city.trim() || null,
+            state: form.state.trim() || null,
+            pincode: form.pincode.trim() || null,
+            department: form.department,
+            designation: form.designation.trim(),
+            employee_code: form.employee_code.trim(),
+            date_of_joining: form.date_of_joining,
+            employment_type: form.employment_type,
+            aadhaar_number: form.aadhaar_number.trim(),
+            pan_number: form.pan_number.trim(),
+            bank_name: form.bank_name.trim() || null,
+            account_number: form.account_number.trim() || null,
+            ifsc_code: form.ifsc_code.trim() || null,
+            emergency_contact_name: form.emergency_contact_name.trim(),
+            emergency_contact_phone: form.emergency_contact_phone.trim(),
+            emergency_contact_relation: form.emergency_contact_relation.trim() || null,
+          })
+          .eq("tenant_id", tenantId)
+          .eq("id", currentEmployeeId);
+        if (updateRes.error) {
+          throw new Error("Failed to update existing employee profile: " + updateRes.error.message);
+        }
       }
 
       // ── Upload documents (optional) ──
@@ -410,7 +543,7 @@ export default function EmployeeCreate() {
 
       if (profilePhoto && !newUploadStatus.profile) {
         try {
-          const uploaded = await uploadFileToEmployeeFolder(currentEmployeeId, profilePhoto, "Profile Photo");
+          const uploaded = await uploadFileToEmployeeFolder(currentEmployeeId, profilePhoto, "Profile Photo", "employee-profile-photos");
           await db.from("employees").update({ profile_photo_url: uploaded.url }).eq("tenant_id", tenantId).eq("id", currentEmployeeId);
           newUploadStatus.profile = true;
         } catch (e) {
@@ -443,6 +576,15 @@ export default function EmployeeCreate() {
 
       if (hasUploadError) {
         throw new Error("Failed to upload some documents:\n" + uploadErrors.join("\n") + "\n\nClick 'Confirm & Create' to retry failed uploads.");
+      }
+
+      // ── Finalize Onboarding State ──
+      try {
+        await insforge.functions.invoke("finalize-onboarding", {
+          body: { email: form.email.trim().toLowerCase(), tenant_id: tenantId },
+        });
+      } catch (finalizeErr) {
+        console.warn("Failed to update finalize-onboarding state:", finalizeErr);
       }
 
       setIsCreated(true);
