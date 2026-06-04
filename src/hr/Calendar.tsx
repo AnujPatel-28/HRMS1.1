@@ -141,7 +141,7 @@ export default function HRCalendar() {
     // 2. Attendance
     const att = attByDateEmp[dateStr]?.[empId];
     if (att) {
-      if (att.status === "present") return "approved";
+      if (att.status === "present" || att.status === "half_day") return "approved";
       if (att.status === "on_leave") return "leave";
     }
 
@@ -181,7 +181,7 @@ export default function HRCalendar() {
 
   // --- Today stats ---
   const todayAtt = useMemo(() => attByDateEmp[todayStr] ?? {}, [attByDateEmp, todayStr]);
-  const presentToday = useMemo(() => Object.values(todayAtt).filter(a=>a.status==="present").length, [todayAtt]);
+  const presentToday = useMemo(() => Object.values(todayAtt).filter(a => ["present", "half_day"].includes(a.status)).length, [todayAtt]);
   const absentToday = useMemo(() => employees.length - presentToday - (leaveByDateEmp[todayStr]?.size??0), [employees,presentToday,leaveByDateEmp,todayStr]);
   const pendingTasksToday = useMemo(() => (tasksByDate[todayStr]??[]).filter(t=>BLOCKING_TASK_STATES.includes(t.status)).length, [tasksByDate, todayStr]);
   const approvedTasksToday = useMemo(() => (tasksByDate[todayStr]??[]).filter(t=>!BLOCKING_TASK_STATES.includes(t.status)).length, [tasksByDate, todayStr]);

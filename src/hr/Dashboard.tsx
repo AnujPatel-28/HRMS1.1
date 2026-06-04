@@ -113,7 +113,7 @@ export default function HRDashboard() {
     return todayAttendance.filter(a => validEmpIds.has(a.employee_id));
   }, [selectedShift, todayAttendance, filteredEmployees]);
 
-  const presentCount = filteredAttendance.filter((a) => a.status === "present").length;
+  const presentCount = filteredAttendance.filter((a) => ["present", "half_day"].includes(a.status)).length;
   const absentCount = filteredEmployees.length - filteredAttendance.length;
   const onLeaveCount = filteredAttendance.filter((a) => a.status === "on_leave").length;
 
@@ -380,12 +380,12 @@ export default function HRDashboard() {
           </div>
 
           {/* Employee avatars — present */}
-          {filteredAttendance.filter((a) => a.status === "present").length > 0 && (
+          {filteredAttendance.filter((a) => ["present", "half_day"].includes(a.status)).length > 0 && (
             <div className="mt-5">
               <p className="mb-2 text-xs font-medium text-slate-500">Punched in today</p>
               <div className="flex flex-wrap gap-2">
                 {filteredAttendance
-                  .filter((a) => a.status === "present")
+                  .filter((a) => ["present", "half_day"].includes(a.status))
                   .slice(0, 12)
                   .map((a) => {
                     const emp = filteredEmployees.find((e) => e.id === a.employee_id);

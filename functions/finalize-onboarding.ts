@@ -5,10 +5,10 @@
 import { createClient } from "npm:@insforge/sdk";
 
 const BASE_URL = Deno.env.get("INSFORGE_BASE_URL") || Deno.env.get("INSFORGE_URL") || "https://rq3qmu8y.ap-southeast.insforge.app";
-const ADMIN_KEY = Deno.env.get("INSFORGE_ADMIN_KEY");
+const ADMIN_KEY = Deno.env.get("INSFORGE_ADMIN_KEY") || Deno.env.get("API_KEY");
 
 if (!BASE_URL || !ADMIN_KEY) {
-  throw new Error("Missing INSFORGE_BASE_URL or INSFORGE_ADMIN_KEY in environment.");
+  console.warn("[finalize-onboarding] Missing env vars BASE_URL or ADMIN_KEY.");
 }
 
 const CORS = {
@@ -24,20 +24,27 @@ const json = (body, status = 200) =>
   });
 
 const logAudit = async (tenantId, actorId, actorRole, action, targetType, targetId, details) => {
-  const client = createClient(BASE_URL, ADMIN_KEY);
-  await client.from("audit_logs").insert([{
-    tenant_id: tenantId,
-    actor_id: actorId,
-    actor_role: actorRole,
-    action,
-    target_type: targetType,
-    target_id: targetId,
-    details
-  }]).catch(e => console.error("[finalize-onboarding] Audit log failed", e));
+  try {
+    const client = createClient({ baseUrl: BASE_URL, anonKey: ADMIN_KEY });
+    await client.database.from("audit_logs").insert([{
+      tenant_id: tenantId,
+      actor_id: actorId,
+      actor_role: actorRole,
+      action,
+      target_type: targetType,
+      target_id: targetId,
+      details
+    }]);
+  } catch (e) {
+    console.error("[finalize-onboarding] Audit log failed", e);
+  }
 };
 
 export default async function (request) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+  if (!BASE_URL || !ADMIN_KEY) {
+    return json({ error: "Server configuration error. Missing required environment variables." }, 500);
+  }
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   const authHeader = request.headers.get("Authorization") || "";
@@ -49,12 +56,13 @@ export default async function (request) {
   let actorTenant = null;
   
   if (userToken) {
-    const client = createClient(BASE_URL, userToken);
-    const { data: { user } } = await client.auth.getUser();
+    const client = createClient({ baseUrl: BASE_URL, edgeFunctionToken: userToken });
+    const { data: userData } = await client.auth.getCurrentUser();
+    const user = userData?.user;
     if (user) {
       actorId = user.id;
-      actorRole = user.user_metadata?.role || user.app_metadata?.role || "unknown";
-      actorTenant = user.user_metadata?.tenant_id || user.app_metadata?.tenant_id || null;
+      actorRole = user.metadata?.role || user.user_metadata?.role || user.app_metadata?.role || "unknown";
+      actorTenant = user.metadata?.tenant_id || user.user_metadata?.tenant_id || user.app_metadata?.tenant_id || null;
     }
   }
 
@@ -78,8 +86,8 @@ export default async function (request) {
 
   // Rate limiting
   if (tenantId && actorId) {
-    const client = createClient(BASE_URL, userToken);
-    const { data: rateLimitOk, error: rateLimitErr } = await client.rpc("check_rate_limit", {
+    const client = createClient({ baseUrl: BASE_URL, edgeFunctionToken: userToken });
+    const { data: rateLimitOk, error: rateLimitErr } = await client.database.rpc("check_rate_limit", {
       p_tenant_id: tenantId,
       p_user_id: actorId,
       p_endpoint: 'finalize-onboarding',
@@ -92,7 +100,7 @@ export default async function (request) {
     }
   }
 
-  const adminClient = createClient(BASE_URL, ADMIN_KEY);
+  const adminClient = createClient({ baseUrl: BASE_URL, anonKey: ADMIN_KEY });
 
   // Get auth user ID from email
   let targetAuthUserId = null;
@@ -113,7 +121,7 @@ export default async function (request) {
   }
 
   // Update onboarding state
-  const { error: updateErr } = await adminClient.from("employee_onboarding")
+  const { error: updateErr } = await adminClient.database.from("employee_onboarding")
     .update({ status: 'active' })
     .eq('auth_user_id', targetAuthUserId)
     .eq('tenant_id', tenantId);

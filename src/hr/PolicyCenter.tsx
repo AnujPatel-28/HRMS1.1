@@ -37,6 +37,16 @@ export type AttendancePolicyForm = {
   regularization_enabled: boolean;
   regularization_window_days: string;
   payroll_lock_date: string;
+  break_tracking_enabled: boolean;
+  break_deduction_mode: "fixed" | "actual";
+  short_break_limit_minutes: string;
+  remote_work_handling: "disabled" | "hr_approved_exceptions" | "always_allowed";
+  gps_verification_mode: "disabled" | "warn" | "strict";
+  attendance_selfie_mode: "disabled" | "punch_in" | "punch_out" | "both";
+  selfie_retention_days: "30" | "90" | "180" | "365" | "forever";
+  high_confidence_max: string;
+  medium_confidence_max: string;
+  low_confidence_max: string;
 };
 
 export type LeavePolicyForm = {
@@ -159,6 +169,16 @@ const defaultAttendancePolicy: AttendancePolicyForm = {
   regularization_enabled: false,
   regularization_window_days: "7",
   payroll_lock_date: "",
+  break_tracking_enabled: false,
+  break_deduction_mode: "fixed",
+  short_break_limit_minutes: "15",
+  remote_work_handling: "hr_approved_exceptions",
+  gps_verification_mode: "warn",
+  attendance_selfie_mode: "disabled",
+  selfie_retention_days: "forever",
+  high_confidence_max: "50",
+  medium_confidence_max: "150",
+  low_confidence_max: "300",
 };
 
 const defaultLeavePolicy: LeavePolicyForm = {
@@ -480,6 +500,16 @@ export default function PolicyCenter() {
         regularization_enabled: boolValue(settings.regularization_enabled, defaultAttendancePolicy.regularization_enabled),
         regularization_window_days: settings.regularization_window_days ?? defaultAttendancePolicy.regularization_window_days,
         payroll_lock_date: settings.payroll_lock_date ?? defaultAttendancePolicy.payroll_lock_date,
+        break_tracking_enabled: boolValue(settings.break_tracking_enabled, defaultAttendancePolicy.break_tracking_enabled),
+        break_deduction_mode: (settings.break_deduction_mode as "fixed" | "actual" | undefined) ?? defaultAttendancePolicy.break_deduction_mode,
+        short_break_limit_minutes: settings.short_break_limit_minutes ?? defaultAttendancePolicy.short_break_limit_minutes,
+        remote_work_handling: (settings.remote_work_handling as "disabled" | "hr_approved_exceptions" | "always_allowed" | undefined) ?? defaultAttendancePolicy.remote_work_handling,
+        gps_verification_mode: (settings.gps_verification_mode as "disabled" | "warn" | "strict" | undefined) ?? defaultAttendancePolicy.gps_verification_mode,
+        attendance_selfie_mode: (settings.attendance_selfie_mode as "disabled" | "punch_in" | "punch_out" | "both" | undefined) ?? defaultAttendancePolicy.attendance_selfie_mode,
+        selfie_retention_days: (settings.selfie_retention_days as "30" | "90" | "180" | "365" | "forever" | undefined) ?? defaultAttendancePolicy.selfie_retention_days,
+        high_confidence_max: settings.high_confidence_max ?? defaultAttendancePolicy.high_confidence_max,
+        medium_confidence_max: settings.medium_confidence_max ?? defaultAttendancePolicy.medium_confidence_max,
+        low_confidence_max: settings.low_confidence_max ?? defaultAttendancePolicy.low_confidence_max,
       };
       const nextLeavePolicy: LeavePolicyForm = {
         leave_min_notice_days: settings.leave_min_notice_days ?? defaultLeavePolicy.leave_min_notice_days,
@@ -716,6 +746,16 @@ export default function PolicyCenter() {
         { key: "regularization_enabled", value: String(attendancePolicy.regularization_enabled) },
         { key: "regularization_window_days", value: attendancePolicy.regularization_window_days || "7" },
         { key: "payroll_lock_date", value: attendancePolicy.payroll_lock_date || "" },
+        { key: "break_tracking_enabled", value: String(attendancePolicy.break_tracking_enabled) },
+        { key: "break_deduction_mode", value: attendancePolicy.break_deduction_mode },
+        { key: "short_break_limit_minutes", value: attendancePolicy.short_break_limit_minutes || "15" },
+        { key: "remote_work_handling", value: attendancePolicy.remote_work_handling },
+        { key: "gps_verification_mode", value: attendancePolicy.gps_verification_mode },
+        { key: "attendance_selfie_mode", value: attendancePolicy.attendance_selfie_mode },
+        { key: "selfie_retention_days", value: attendancePolicy.selfie_retention_days },
+        { key: "high_confidence_max", value: attendancePolicy.high_confidence_max || "50" },
+        { key: "medium_confidence_max", value: attendancePolicy.medium_confidence_max || "150" },
+        { key: "low_confidence_max", value: attendancePolicy.low_confidence_max || "300" },
       ], "attendance-policy", "Attendance policy saved", "attendance");
       await refreshTenant();
       setBaselineTenantForm((current) => ({
@@ -1286,6 +1326,41 @@ export default function PolicyCenter() {
             </div>
           </SectionCard>
 
+          <SectionCard title="Break Tracking Rules">
+            <div className="space-y-4">
+              <Toggle
+                checked={attendancePolicy.break_tracking_enabled}
+                onChange={(checked) => setAttendancePolicy((current) => ({ ...current, break_tracking_enabled: checked }))}
+                label="Enable break tracking"
+                description="Allows employees to log breaks (lunch, short break, tea break) with active timers."
+              />
+              {attendancePolicy.break_tracking_enabled ? (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <FieldLabel label="Break Deduction Mode">
+                    <select
+                      value={attendancePolicy.break_deduction_mode}
+                      onChange={(event) => setAttendancePolicy((current) => ({ ...current, break_deduction_mode: event.target.value as "fixed" | "actual" }))}
+                      className={inputClass}
+                    >
+                      <option value="fixed">Fixed Policy Duration (Deduct set lunch break duration if shift &gt;= 5 hours)</option>
+                      <option value="actual">Actual Tracked Duration (Deduct exact duration of recorded breaks)</option>
+                    </select>
+                  </FieldLabel>
+                  <FieldLabel label="Short break limit (minutes)">
+                    <input
+                      type="number"
+                      min={1}
+                      value={attendancePolicy.short_break_limit_minutes}
+                      onChange={(event) => setAttendancePolicy((current) => ({ ...current, short_break_limit_minutes: event.target.value }))}
+                      className={inputClass}
+                    />
+                    <p className="mt-1 text-xs text-slate-500">Time limit for tea and short breaks before marked as overage</p>
+                  </FieldLabel>
+                </div>
+              ) : null}
+            </div>
+          </SectionCard>
+
           <SectionCard title="Late Mark Rules">
             <div className="space-y-4">
               <Toggle checked={attendancePolicy.late_mark_enabled} onChange={(checked) => setAttendancePolicy((current) => ({ ...current, late_mark_enabled: checked }))} label="Enable late mark tracking" />
@@ -1342,11 +1417,11 @@ export default function PolicyCenter() {
                   <div>
                     <p className="mb-2 text-xs font-semibold text-slate-600">Geo-fence mode</p>
                     <div className="grid gap-3 md:grid-cols-2">
-                      <label className={`rounded-xl border px-4 py-3 text-sm ${attendancePolicy.geofence_mode === "warn" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
+                      <label className={`rounded-xl border px-4 py-3 text-sm cursor-pointer ${attendancePolicy.geofence_mode === "warn" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
                         <input type="radio" name="geofence_mode" checked={attendancePolicy.geofence_mode === "warn"} onChange={() => setAttendancePolicy((current) => ({ ...current, geofence_mode: "warn" }))} className="mr-2" />
                         Warn only (employees can punch in but HR sees the flag)
                       </label>
-                      <label className={`rounded-xl border px-4 py-3 text-sm ${attendancePolicy.geofence_mode === "strict" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
+                      <label className={`rounded-xl border px-4 py-3 text-sm cursor-pointer ${attendancePolicy.geofence_mode === "strict" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
                         <input type="radio" name="geofence_mode" checked={attendancePolicy.geofence_mode === "strict"} onChange={() => setAttendancePolicy((current) => ({ ...current, geofence_mode: "strict" }))} className="mr-2" />
                         Strict (employees outside fence cannot punch in)
                       </label>
@@ -1355,6 +1430,101 @@ export default function PolicyCenter() {
                   <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">Currently set to warn-only. Employees outside the fence can still punch in but their record is flagged for HR review.</p>
                 </>
               ) : null}
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Attendance Verification Settings">
+            <div className="space-y-6">
+              <div>
+                <p className="mb-2 text-xs font-semibold text-slate-600">Remote Work Policy</p>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <label className={`rounded-xl border px-4 py-3 text-sm cursor-pointer ${attendancePolicy.remote_work_handling === "disabled" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
+                    <input type="radio" name="remote_work_handling" checked={attendancePolicy.remote_work_handling === "disabled"} onChange={() => setAttendancePolicy((current) => ({ ...current, remote_work_handling: "disabled" }))} className="mr-2" />
+                    <span className="font-semibold block">Disabled</span>
+                    <span className="text-xs text-slate-500 mt-1 block">WFH punches are completely disallowed.</span>
+                  </label>
+                  <label className={`rounded-xl border px-4 py-3 text-sm cursor-pointer ${attendancePolicy.remote_work_handling === "hr_approved_exceptions" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
+                    <input type="radio" name="remote_work_handling" checked={attendancePolicy.remote_work_handling === "hr_approved_exceptions"} onChange={() => setAttendancePolicy((current) => ({ ...current, remote_work_handling: "hr_approved_exceptions" }))} className="mr-2" />
+                    <span className="font-semibold block">HR Approved Exceptions</span>
+                    <span className="text-xs text-slate-500 mt-1 block">Allowed with active WFH exception or remote/hybrid profiles.</span>
+                  </label>
+                  <label className={`rounded-xl border px-4 py-3 text-sm cursor-pointer ${attendancePolicy.remote_work_handling === "always_allowed" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
+                    <input type="radio" name="remote_work_handling" checked={attendancePolicy.remote_work_handling === "always_allowed"} onChange={() => setAttendancePolicy((current) => ({ ...current, remote_work_handling: "always_allowed" }))} className="mr-2" />
+                    <span className="font-semibold block">Always Allowed</span>
+                    <span className="text-xs text-slate-500 mt-1 block">Any employee can bypass office geofencing freely.</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-semibold text-slate-600">GPS Verification Mode</p>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <label className={`rounded-xl border px-4 py-3 text-sm cursor-pointer ${attendancePolicy.gps_verification_mode === "disabled" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
+                    <input type="radio" name="gps_verification_mode" checked={attendancePolicy.gps_verification_mode === "disabled"} onChange={() => setAttendancePolicy((current) => ({ ...current, gps_verification_mode: "disabled" }))} className="mr-2" />
+                    <span className="font-semibold block">Disabled</span>
+                    <span className="text-xs text-slate-500 mt-1 block">Bypass location checking entirely.</span>
+                  </label>
+                  <label className={`rounded-xl border px-4 py-3 text-sm cursor-pointer ${attendancePolicy.gps_verification_mode === "warn" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
+                    <input type="radio" name="gps_verification_mode" checked={attendancePolicy.gps_verification_mode === "warn"} onChange={() => setAttendancePolicy((current) => ({ ...current, gps_verification_mode: "warn" }))} className="mr-2" />
+                    <span className="font-semibold block">Warn Only</span>
+                    <span className="text-xs text-slate-500 mt-1 block">Capture location but only warn on mismatch.</span>
+                  </label>
+                  <label className={`rounded-xl border px-4 py-3 text-sm cursor-pointer ${attendancePolicy.gps_verification_mode === "strict" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
+                    <input type="radio" name="gps_verification_mode" checked={attendancePolicy.gps_verification_mode === "strict"} onChange={() => setAttendancePolicy((current) => ({ ...current, gps_verification_mode: "strict" }))} className="mr-2" />
+                    <span className="font-semibold block">Strict Enforcement</span>
+                    <span className="text-xs text-slate-500 mt-1 block">Hard-block outside geofence.</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-semibold text-slate-600">Selfie Verification Mode</p>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <label className={`rounded-xl border px-4 py-3 text-sm cursor-pointer ${attendancePolicy.attendance_selfie_mode === "disabled" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
+                    <input type="radio" name="attendance_selfie_mode" checked={attendancePolicy.attendance_selfie_mode === "disabled"} onChange={() => setAttendancePolicy((current) => ({ ...current, attendance_selfie_mode: "disabled" }))} className="mr-2" />
+                    <span className="font-semibold block">Disabled</span>
+                  </label>
+                  <label className={`rounded-xl border px-4 py-3 text-sm cursor-pointer ${attendancePolicy.attendance_selfie_mode === "punch_in" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
+                    <input type="radio" name="attendance_selfie_mode" checked={attendancePolicy.attendance_selfie_mode === "punch_in"} onChange={() => setAttendancePolicy((current) => ({ ...current, attendance_selfie_mode: "punch_in" }))} className="mr-2" />
+                    <span className="font-semibold block">Punch In Only</span>
+                  </label>
+                  <label className={`rounded-xl border px-4 py-3 text-sm cursor-pointer ${attendancePolicy.attendance_selfie_mode === "punch_out" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
+                    <input type="radio" name="attendance_selfie_mode" checked={attendancePolicy.attendance_selfie_mode === "punch_out"} onChange={() => setAttendancePolicy((current) => ({ ...current, attendance_selfie_mode: "punch_out" }))} className="mr-2" />
+                    <span className="font-semibold block">Punch Out Only</span>
+                  </label>
+                  <label className={`rounded-xl border px-4 py-3 text-sm cursor-pointer ${attendancePolicy.attendance_selfie_mode === "both" ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white"}`}>
+                    <input type="radio" name="attendance_selfie_mode" checked={attendancePolicy.attendance_selfie_mode === "both"} onChange={() => setAttendancePolicy((current) => ({ ...current, attendance_selfie_mode: "both" }))} className="mr-2" />
+                    <span className="font-semibold block">In & Out Both</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-semibold text-slate-600">Selfie Retention Policy</p>
+                <select
+                  value={attendancePolicy.selfie_retention_days}
+                  onChange={(event) => setAttendancePolicy((current) => ({ ...current, selfie_retention_days: event.target.value as any }))}
+                  className={inputClass}
+                >
+                  <option value="30">30 Days</option>
+                  <option value="90">90 Days</option>
+                  <option value="180">180 Days</option>
+                  <option value="365">1 Year</option>
+                  <option value="forever">Forever</option>
+                </select>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <FieldLabel label="High Confidence Limit (meters)">
+                  <input type="number" min={5} value={attendancePolicy.high_confidence_max} onChange={(event) => setAttendancePolicy((current) => ({ ...current, high_confidence_max: event.target.value }))} className={inputClass} />
+                </FieldLabel>
+                <FieldLabel label="Medium Confidence Limit (meters)">
+                  <input type="number" min={5} value={attendancePolicy.medium_confidence_max} onChange={(event) => setAttendancePolicy((current) => ({ ...current, medium_confidence_max: event.target.value }))} className={inputClass} />
+                </FieldLabel>
+                <FieldLabel label="Low Confidence Limit (meters)">
+                  <input type="number" min={5} value={attendancePolicy.low_confidence_max} onChange={(event) => setAttendancePolicy((current) => ({ ...current, low_confidence_max: event.target.value }))} className={inputClass} />
+                </FieldLabel>
+              </div>
             </div>
           </SectionCard>
 

@@ -6,14 +6,12 @@ import type { Employee, Holiday, Leave } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
-import { useEmployee } from "../hooks/useEmployee";
 import { useToast } from "../shared/ToastContext";
 import { ConfirmModal } from "../shared/ConfirmModal";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { SelectDropdown } from "../shared/components/SelectDropdown";
 import { formatLocalMonthBoundary } from "../utils/date";
-import { calculateBusinessDays } from "../utils/leave";
 
 type Tab = "pending" | "all" | "holidays";
 
@@ -45,9 +43,7 @@ function exportCSV(rows: string[][], filename: string) {
   a.click();
 }
 
-export default function LeaveManagement() {
-  const { employee: hrEmployee } = useEmployee();
-  const { tenantId } = useTenant();
+export default function LeaveManagement() {  const { tenantId } = useTenant();
   const { logAction } = useAuditLog();
   const location = useLocation();
   const [tab, setTab] = useState<Tab>(() => {
@@ -114,52 +110,15 @@ export default function LeaveManagement() {
   }, [tab, fetchPending, employees]);
 
   async function handleApprove(leave: LeaveWithEmployee) {
-    if (!hrEmployee?.id) return;
     setActionLoading(true);
     try {
-      // 1. Resolve Employee Shift Working Days
-      const { data: shifts } = await db.from("shifts").select("*").eq("tenant_id", tenantId).eq("is_active", true);
-      const defaultShift = shifts?.find(s => s.is_default);
-      let workingDays = defaultShift?.working_days ? (Array.isArray(defaultShift.working_days) ? defaultShift.working_days.map(Number) : [1,2,3,4,5,6]) : [1,2,3,4,5,6];
-      
-      const { data: empShift } = await db.from("employee_shifts")
-        .select("shift_id")
-        .eq("tenant_id", tenantId)
-        .eq("employee_id", leave.employee_id)
-        .lte("effective_from", leave.start_date)
-        .order("effective_from", { ascending: false })
-        .limit(1)
-        .single();
-        
-      if (empShift) {
-         const s = shifts?.find(x => x.id === empShift.shift_id);
-         if (s && s.working_days) workingDays = Array.isArray(s.working_days) ? s.working_days.map(Number) : [1,2,3,4,5,6];
-      }
-
-      // 2. Calculate true business days
-      const holidayDates = holidays.map(h => h.date);
-      const { total_days, working_dates } = calculateBusinessDays(leave.start_date, leave.end_date, workingDays, holidayDates);
-
-      // p_hr_employee_id removed — reviewer is derived server-side from auth.uid()
-      const { error: rpcErr } = await db.rpc('approve_leave_request', {
+      const { error: rpcErr } = await db.rpc("approve_leave_request", {
         p_leave_id: leave.id,
-        p_working_dates: working_dates,
-        p_approved_business_days: total_days
+        p_working_dates: null,
+        p_approved_business_days: null,
       });
 
       if (rpcErr) throw rpcErr;
-
-      // 4. Notifications & Logs
-      await db.from("notifications").insert([{
-        tenant_id: tenantId,
-        employee_id: leave.employee_id,
-        title: "Leave Approved",
-        body: `Your ${leave.typeName ?? "leave"} from ${fmt(leave.start_date)} to ${fmt(leave.end_date)} has been approved.`,
-        type: "leave_approved",
-        reference_id: leave.id,
-      }]);
-
-      void logAction("leave.approved", "leave", leave.id, { approved_business_days: total_days, working_dates });
       success("Leave approved.");
     } catch (err: any) {
       console.error(err);
@@ -171,28 +130,15 @@ export default function LeaveManagement() {
   }
 
   async function handleReject(leave: LeaveWithEmployee) {
-    if (!hrEmployee?.id) return;
     setActionLoading(true);
     try {
-      // p_hr_employee_id removed — reviewer is derived server-side from auth.uid()
-      const { error: rpcErr } = await db.rpc('cancel_leave_request', {
+      const { error: rpcErr } = await db.rpc("cancel_leave_request", {
         p_leave_id: leave.id,
         p_rejection_reason: rejectReason || null,
-        p_new_status: 'rejected'
+        p_new_status: "rejected",
       });
       
       if (rpcErr) throw rpcErr;
-
-      await db.from("notifications").insert([{
-        tenant_id: tenantId,
-        employee_id: leave.employee_id,
-        title: "Leave Rejected",
-        body: `Your ${leave.typeName ?? "leave"} request was rejected. ${rejectReason ? `Reason: ${rejectReason}` : ""}`,
-        type: "leave_rejected",
-        reference_id: leave.id,
-      }]);
-      
-      void logAction("leave.rejected", "leave", leave.id, { reason: rejectReason });
       success("Leave rejected.");
       setRejectId(null);
       setRejectReason("");

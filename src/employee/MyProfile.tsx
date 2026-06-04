@@ -1,7 +1,10 @@
-import { useState } from "react";
-import { Eye, EyeOff, MessageCircle } from "lucide-react";
+import { useState, useRef } from "react";
+import { Eye, EyeOff, MessageCircle, Camera, Loader2 } from "lucide-react";
 import { useEmployee } from "../hooks/useEmployee";
 import { Skeleton } from "../shared/Skeleton";
+import { useTenant } from "../contexts/TenantContext";
+import { useToast } from "../shared/ToastContext";
+import { db, storage } from "../insforge/client";
 
 function MaskedField({ value, label }: { value: string | null; label: string }) {
   const [shown, setShown] = useState(false);
@@ -21,18 +24,72 @@ function MaskedField({ value, label }: { value: string | null; label: string }) 
   );
 }
 
-function Field({ label, value }: { label: string; value: string | null | undefined }) {
+function Field({ label, value, className = "capitalize" }: { label: string; value: string | null | undefined; className?: string }) {
   return (
     <div>
       <p className="text-xs font-medium text-slate-500 mb-0.5">{label}</p>
-      <p className="text-sm font-medium text-slate-900 capitalize">{value || "—"}</p>
+      <p className={`text-sm font-medium text-slate-900 ${className}`}>{value || "—"}</p>
     </div>
   );
 }
 
 export default function MyProfile() {
-  const { employee } = useEmployee();
+  const { employee, refreshEmployee } = useEmployee();
+  const { tenantId } = useTenant();
+  const { success, error: toastError } = useToast();
   const [showContact, setShowContact] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !employee || !tenantId) return;
+
+    if (!['image/jpeg', 'image/png'].includes(file.type)) {
+      toastError("Please upload a JPEG or PNG image.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toastError("Image size must be less than 5MB.");
+      return;
+    }
+
+    setUploadingAvatar(true);
+    try {
+      const getUuid = () => {
+        if (typeof window !== "undefined" && window.crypto && window.crypto.randomUUID) {
+          return window.crypto.randomUUID();
+        }
+        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+          const r = (Math.random() * 16) | 0;
+          const v = c === "x" ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
+        });
+      };
+      const fileExt = file.name.split('.').pop() || "jpg";
+      const path = `${tenantId}/${employee.id}/${getUuid()}.${fileExt}`;
+      
+      const { data: uploadData, error: uploadError } = await storage.from("employee-profile-photos").upload(path, file);
+      if (uploadError || !uploadData) throw uploadError || new Error("Upload failed");
+
+      const { error: updateError } = await db
+        .from("employees")
+        .update({ profile_photo_url: uploadData.url })
+        .eq("tenant_id", tenantId)
+        .eq("id", employee.id);
+
+      if (updateError) throw updateError;
+
+      success("Profile picture updated successfully.");
+      await refreshEmployee();
+    } catch (err) {
+      console.error(err);
+      toastError("Failed to update profile picture.");
+    } finally {
+      setUploadingAvatar(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+    }
+  };
 
   if (!employee) return (
     <div className="space-y-6">
@@ -63,13 +120,39 @@ export default function MyProfile() {
 
       {/* Avatar & Basic */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        {employee.profile_photo_url ? (
-          <img src={employee.profile_photo_url} alt="" className="h-24 w-24 rounded-2xl object-cover shadow-sm ring-2 ring-brand-100" />
-        ) : (
-          <div className="grid h-24 w-24 place-items-center rounded-2xl bg-brand-100 text-2xl font-bold text-brand-700 shadow-sm">
-            {employee.full_name.slice(0, 2).toUpperCase()}
+        <div 
+          onClick={() => avatarInputRef.current?.click()}
+          className="relative group cursor-pointer h-24 w-24 rounded-2xl overflow-hidden shrink-0 shadow-sm"
+          title="Change profile picture"
+        >
+          {employee.profile_photo_url ? (
+            <img src={employee.profile_photo_url} alt="" className="h-full w-full object-cover ring-2 ring-brand-100 rounded-2xl" />
+          ) : (
+            <div className="grid h-full w-full place-items-center bg-brand-100 text-2xl font-bold text-brand-700">
+              {employee.full_name.slice(0, 2).toUpperCase()}
+            </div>
+          )}
+
+          {/* Hover Camera Overlay */}
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <Camera className="h-6 w-6 text-white" />
           </div>
-        )}
+
+          {/* Uploading overlay */}
+          {uploadingAvatar && (
+            <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+              <Loader2 className="h-6 w-6 text-white animate-spin" />
+            </div>
+          )}
+
+          <input
+            type="file"
+            ref={avatarInputRef}
+            onChange={handleAvatarChange}
+            accept="image/jpeg,image/png"
+            className="hidden"
+          />
+        </div>
         <div className="flex-1">
           <h3 className="text-2xl font-bold text-slate-900">{employee.full_name}</h3>
           <p className="text-slate-500 mt-0.5">{employee.designation ?? "—"}</p>
@@ -79,6 +162,9 @@ export default function MyProfile() {
             )}
             {employee.employment_type && (
               <span className="rounded-full bg-slate-100 text-slate-600 px-3 py-1 text-xs font-semibold capitalize">{employee.employment_type.replace("_", " ")}</span>
+            )}
+            {employee.work_mode && (
+              <span className="rounded-full bg-indigo-100 text-indigo-700 px-3 py-1 text-xs font-semibold capitalize">Mode: {employee.work_mode}</span>
             )}
             <span className={`rounded-full px-3 py-1 text-xs font-semibold capitalize ${employee.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-600"}`}>
               {employee.status}
@@ -93,7 +179,7 @@ export default function MyProfile() {
           <h3 className="font-semibold text-slate-800 mb-4 pb-2 border-b border-slate-100">Personal Information</h3>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Full Name" value={employee.full_name} />
-            <Field label="Email" value={employee.email} />
+            <Field label="Email" value={employee.email} className="lowercase" />
             <Field label="Phone" value={employee.phone} />
             <Field label="Gender" value={employee.gender} />
             <Field label="Date of Birth" value={employee.date_of_birth} />
@@ -114,6 +200,7 @@ export default function MyProfile() {
             <Field label="Employment Type" value={employee.employment_type?.replace("_", " ")} />
             <Field label="Date of Joining" value={employee.date_of_joining} />
             <Field label="Status" value={employee.status} />
+            <Field label="Work Mode" value={employee.work_mode} />
           </div>
         </div>
 

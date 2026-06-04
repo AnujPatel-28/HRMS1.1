@@ -40,7 +40,7 @@ BEGIN
   -- 2. Resolve the employee record for this caller within this tenant.
   SELECT id INTO v_employee_id
   FROM public.employees
-  WHERE auth_user_id = v_caller_uid
+  WHERE user_id = v_caller_uid
     AND tenant_id = v_tenant_id;
 
   IF NOT FOUND THEN
@@ -111,7 +111,7 @@ BEGIN
   -- 2. Verify caller is an HR employee of this tenant.
   SELECT id INTO v_hr_employee_id
   FROM public.employees
-  WHERE auth_user_id = v_caller_uid
+  WHERE user_id = v_caller_uid
     AND tenant_id = v_tenant_id;
 
   IF NOT FOUND THEN
@@ -122,7 +122,7 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM auth.users
     WHERE id = v_caller_uid
-      AND raw_app_meta_data->>'role' = 'hr'
+      AND metadata->>'role' = 'hr'
   ) THEN
     RAISE EXCEPTION 'Insufficient role: HR privileges required';
   END IF;
@@ -209,7 +209,7 @@ BEGIN
   -- 2. Verify caller is an HR employee of this tenant.
   SELECT id INTO v_hr_employee_id
   FROM public.employees
-  WHERE auth_user_id = v_caller_uid
+  WHERE user_id = v_caller_uid
     AND tenant_id = v_tenant_id;
 
   IF NOT FOUND THEN
@@ -220,7 +220,7 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM auth.users
     WHERE id = v_caller_uid
-      AND raw_app_meta_data->>'role' = 'hr'
+      AND metadata->>'role' = 'hr'
   ) THEN
     RAISE EXCEPTION 'Insufficient role: HR privileges required';
   END IF;

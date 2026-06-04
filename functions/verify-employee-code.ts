@@ -2,10 +2,10 @@
 // This file runs in Deno (InsForge edge function runtime).
 
 const BASE_URL  = Deno.env.get("INSFORGE_BASE_URL") || Deno.env.get("INSFORGE_URL") || "https://rq3qmu8y.ap-southeast.insforge.app";
-const ADMIN_KEY = Deno.env.get("INSFORGE_ADMIN_KEY");
+const ADMIN_KEY = Deno.env.get("INSFORGE_ADMIN_KEY") || Deno.env.get("API_KEY");
 
 if (!BASE_URL || !ADMIN_KEY) {
-  throw new Error("Missing INSFORGE_BASE_URL or INSFORGE_ADMIN_KEY in environment.");
+  console.warn("[verify-employee-code] Missing env vars BASE_URL or ADMIN_KEY.");
 }
 
 const CORS = {
@@ -23,21 +23,28 @@ const json = (body, status = 200) =>
 import { createClient } from "npm:@insforge/sdk";
 
 const logAudit = async (tenantId, actorId, actorRole, action, targetType, targetId, details) => {
-  const client = createClient(BASE_URL, ADMIN_KEY);
-  await client.from("audit_logs").insert([{
-    tenant_id: tenantId,
-    actor_id: actorId,
-    actor_role: actorRole,
-    action,
-    target_type: targetType,
-    target_id: targetId,
-    details
-  }]).catch(e => console.error("[verify-employee-code] Audit log failed", e));
+  try {
+    const client = createClient({ baseUrl: BASE_URL, anonKey: ADMIN_KEY });
+    await client.database.from("audit_logs").insert([{
+      tenant_id: tenantId,
+      actor_id: actorId,
+      actor_role: actorRole,
+      action,
+      target_type: targetType,
+      target_id: targetId,
+      details
+    }]);
+  } catch (e) {
+    console.error("[verify-employee-code] Audit log failed", e);
+  }
 };
 
 export default async function (req) {
   // ⚠️ OPTIONS must be handled FIRST — before any other logic — to avoid CORS errors
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+  if (!BASE_URL || !ADMIN_KEY) {
+    return json({ error: "Server configuration error. Missing required environment variables." }, 500);
+  }
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   let body;
@@ -57,12 +64,13 @@ export default async function (req) {
   let tenantId = null;
 
   if (callerToken) {
-    const client = createClient(BASE_URL, callerToken);
-    const { data: { user } } = await client.auth.getUser();
+    const client = createClient({ baseUrl: BASE_URL, edgeFunctionToken: callerToken });
+    const { data: userData } = await client.auth.getCurrentUser();
+    const user = userData?.user;
     if (user) {
       actorId = user.id;
-      actorRole = user.user_metadata?.role || user.app_metadata?.role || "unknown";
-      tenantId = user.user_metadata?.tenant_id || user.app_metadata?.tenant_id || null;
+      actorRole = user.metadata?.role || user.user_metadata?.role || user.app_metadata?.role || "unknown";
+      tenantId = user.metadata?.tenant_id || user.user_metadata?.tenant_id || user.app_metadata?.tenant_id || null;
     }
   }
 
@@ -71,8 +79,8 @@ export default async function (req) {
   }
 
   if (tenantId && actorId) {
-    const client = createClient(BASE_URL, callerToken);
-    const { data: rateLimitOk, error: rateLimitErr } = await client.rpc("check_rate_limit", {
+    const client = createClient({ baseUrl: BASE_URL, edgeFunctionToken: callerToken });
+    const { data: rateLimitOk, error: rateLimitErr } = await client.database.rpc("check_rate_limit", {
       p_tenant_id: tenantId,
       p_user_id: actorId,
       p_endpoint: 'verify-employee-code',
@@ -112,7 +120,7 @@ export default async function (req) {
     
     // Log audit event
     if (tenantId) {
-      const client = createClient(BASE_URL, ADMIN_KEY);
+      const client = createClient({ baseUrl: BASE_URL, anonKey: ADMIN_KEY });
       
       // We must first get the auth user ID from the email so we can update the onboarding state
       let targetAuthUserId = null;
@@ -129,11 +137,14 @@ export default async function (req) {
       }
 
       if (targetAuthUserId) {
-        await client.from("employee_onboarding")
-          .update({ status: 'otp_verified' })
-          .eq('auth_user_id', targetAuthUserId)
-          .eq('tenant_id', tenantId)
-          .catch(e => console.error("[verify-employee-code] Onboarding status update failed", e));
+        try {
+          await client.database.from("employee_onboarding")
+            .update({ status: 'otp_verified' })
+            .eq('auth_user_id', targetAuthUserId)
+            .eq('tenant_id', tenantId);
+        } catch (e) {
+          console.error("[verify-employee-code] Onboarding status update failed", e);
+        }
       }
 
       await logAudit(

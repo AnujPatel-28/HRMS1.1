@@ -48,7 +48,7 @@ BEGIN
     -- 2. Verify caller is an HR employee of the leave's tenant.
     SELECT id INTO v_hr_employee_id
     FROM employees
-    WHERE auth_user_id = v_caller_uid
+    WHERE user_id = v_caller_uid
       AND tenant_id = v_leave.tenant_id;
 
     IF NOT FOUND THEN
@@ -59,7 +59,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM auth.users
         WHERE id = v_caller_uid
-          AND raw_app_meta_data->>'role' = 'hr'
+          AND metadata->>'role' = 'hr'
     ) THEN
         RAISE EXCEPTION 'Insufficient role: HR privileges required';
     END IF;
@@ -101,10 +101,10 @@ BEGIN
     IF p_working_dates IS NOT NULL THEN
         FOREACH v_date IN ARRAY p_working_dates
         LOOP
-            INSERT INTO attendance (tenant_id, employee_id, date, status, punch_out_allowed, session_status)
-            VALUES (v_leave.tenant_id, v_leave.employee_id, v_date, 'on_leave', true, 'closed')
+            INSERT INTO attendance (tenant_id, employee_id, date, punch_in, status, punch_out_allowed, session_status)
+            VALUES (v_leave.tenant_id, v_leave.employee_id, v_date, NULL, 'on_leave', true, 'closed')
             ON CONFLICT (employee_id, date) 
-            DO UPDATE SET status = 'on_leave', punch_out_allowed = true, session_status = 'closed';
+            DO UPDATE SET status = 'on_leave', punch_in = NULL, punch_out_allowed = true, session_status = 'closed';
         END LOOP;
     END IF;
 

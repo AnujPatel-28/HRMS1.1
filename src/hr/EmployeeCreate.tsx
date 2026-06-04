@@ -29,6 +29,7 @@ interface FormState {
   emergency_contact_name: string;
   emergency_contact_phone: string;
   emergency_contact_relation: string;
+  work_mode: "office" | "remote" | "hybrid";
 }
 
 const initialState: FormState = {
@@ -54,6 +55,7 @@ const initialState: FormState = {
   emergency_contact_name: "",
   emergency_contact_phone: "",
   emergency_contact_relation: "",
+  work_mode: "office",
 };
 
 const stepTitles = [
@@ -88,6 +90,8 @@ export default function EmployeeCreate() {
   
   type AuthStep = "idle" | "verifying" | "setting-password" | "done";
   const [authStep, setAuthStep] = useState<AuthStep>("idle");
+  const [hasDraft, setHasDraft] = useState(false);
+  const [draftData, setDraftData] = useState<any>(null);
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
@@ -145,15 +149,21 @@ export default function EmployeeCreate() {
     if (draft) {
       try {
         const parsed = JSON.parse(draft);
-        if (parsed.form) setForm(parsed.form);
-        if (parsed.createdUserId) setCreatedUserId(parsed.createdUserId);
-        if (parsed.authStep) setAuthStep(parsed.authStep);
-        if (parsed.insertedEmployeeId) setInsertedEmployeeId(parsed.insertedEmployeeId);
-        if (parsed.uploadStatus) setUploadStatus(parsed.uploadStatus);
-        if (parsed.step) setStep(parsed.step);
-        if (parsed.credentials) setCredentials(parsed.credentials);
-        if (parsed.pendingEmail) setPendingEmail(parsed.pendingEmail);
-        if (parsed.isCreated) setIsCreated(parsed.isCreated);
+        if (parsed && !parsed.isCreated) {
+          const isEmpty =
+            !parsed.form?.full_name?.trim() &&
+            !parsed.form?.email?.trim() &&
+            !parsed.form?.phone?.trim() &&
+            parsed.authStep === "idle" &&
+            !parsed.insertedEmployeeId;
+
+          if (!isEmpty) {
+            setDraftData(parsed);
+            setHasDraft(true);
+          } else {
+            sessionStorage.removeItem(`hrms_employee_draft_${tenantId}`);
+          }
+        }
       } catch (e) {
         console.error("Failed to parse employee draft", e);
       }
@@ -165,14 +175,60 @@ export default function EmployeeCreate() {
       if (isCreated) {
         sessionStorage.removeItem(`hrms_employee_draft_${tenantId}`);
       } else {
-        // Do not store the actual password in the draft for security reasons
-        const safeCredentials = credentials ? { email: credentials.email, password: "" } : null;
-        sessionStorage.setItem(`hrms_employee_draft_${tenantId}`, JSON.stringify({
-          form, createdUserId, authStep, insertedEmployeeId, uploadStatus, step, credentials: safeCredentials, pendingEmail, isCreated
-        }));
+        const isEmpty =
+          form.full_name.trim() === "" &&
+          form.email.trim() === "" &&
+          form.phone.trim() === "" &&
+          authStep === "idle" &&
+          !insertedEmployeeId;
+
+        if (isEmpty) {
+          sessionStorage.removeItem(`hrms_employee_draft_${tenantId}`);
+        } else if (!hasDraft) {
+          // Do not store the actual password in the draft for security reasons
+          const safeCredentials = credentials ? { email: credentials.email, password: "" } : null;
+          sessionStorage.setItem(`hrms_employee_draft_${tenantId}`, JSON.stringify({
+            form, createdUserId, authStep, insertedEmployeeId, uploadStatus, step, credentials: safeCredentials, pendingEmail, isCreated
+          }));
+        }
       }
     }
-  }, [form, createdUserId, authStep, insertedEmployeeId, uploadStatus, step, credentials, pendingEmail, isCreated, tenantId]);
+  }, [form, createdUserId, authStep, insertedEmployeeId, uploadStatus, step, credentials, pendingEmail, isCreated, tenantId, hasDraft]);
+
+  const handleResumeDraft = () => {
+    if (draftData) {
+      if (draftData.form) setForm(draftData.form);
+      if (draftData.createdUserId) setCreatedUserId(draftData.createdUserId);
+      if (draftData.authStep) setAuthStep(draftData.authStep);
+      if (draftData.insertedEmployeeId) setInsertedEmployeeId(draftData.insertedEmployeeId);
+      if (draftData.uploadStatus) setUploadStatus(draftData.uploadStatus);
+      if (draftData.step) setStep(draftData.step);
+      if (draftData.credentials) setCredentials(draftData.credentials);
+      if (draftData.pendingEmail) setPendingEmail(draftData.pendingEmail);
+      if (draftData.isCreated) setIsCreated(draftData.isCreated);
+    }
+    setHasDraft(false);
+  };
+
+  const handleDiscardDraft = () => {
+    if (window.confirm("Are you sure you want to discard this draft? This will clear all entered details and start a fresh onboarding.")) {
+      sessionStorage.removeItem(`hrms_employee_draft_${tenantId}`);
+      setForm(initialState);
+      setProfilePhoto(null);
+      setAadhaarDoc(null);
+      setPanDoc(null);
+      setCredentials(null);
+      setAuthStep("idle");
+      setPendingEmail(null);
+      setCreatedUserId(null);
+      setInsertedEmployeeId(null);
+      setUploadStatus({ profile: false, aadhaar: false, pan: false });
+      setStep(1);
+      setError(null);
+      setHasDraft(false);
+      setDraftData(null);
+    }
+  };
 
   const handleChange = (key: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -282,6 +338,10 @@ export default function EmployeeCreate() {
             // Fetch the employee details to pre-populate the form
             const { data: empData } = await db.from("employees").select("*").eq("id", flow.employee_id).single();
             if (empData) {
+              // Defense-in-depth: verify that the employee belongs to the current tenant
+              if (empData.tenant_id !== tenantId) {
+                throw new Error("Security check failed: Tenant mismatch.");
+              }
               setForm({
                 full_name: empData.full_name || "",
                 email: empData.email || "",
@@ -305,6 +365,7 @@ export default function EmployeeCreate() {
                 emergency_contact_name: empData.emergency_contact_name || "",
                 emergency_contact_phone: empData.emergency_contact_phone || "",
                 emergency_contact_relation: empData.emergency_contact_relation || "",
+                work_mode: empData.work_mode || "office",
               });
             }
           }
@@ -356,9 +417,12 @@ export default function EmployeeCreate() {
           "Failed to create auth account (Unknown Error)";
           
         const isOrphaned = parsedData?.code === "ORPHANED_AUTH_USER";
-        const displayMsg = isOrphaned
-          ? `This email already has an auth account from a previous attempt. Go to InsForge Dashboard → Authentication → Users, delete "${normalizedEmail}", then try again.`
-          : serverMsg || "Failed to create auth account. Please try again.";
+        const isCrossTenant = parsedData?.code === "CROSS_TENANT_EMAIL_CONFLICT";
+        const displayMsg = isCrossTenant
+          ? "This email is already being used by another organization. Please use a different email address."
+          : isOrphaned
+            ? `This email already has an auth account from a previous attempt. Go to InsForge Dashboard → Authentication → Users, delete "${normalizedEmail}", then try again.`
+            : serverMsg || "Failed to create auth account. Please try again.";
         throw new Error(displayMsg);
       }
 
@@ -443,6 +507,7 @@ export default function EmployeeCreate() {
               emergency_contact_phone: form.emergency_contact_phone.trim(),
               emergency_contact_relation: form.emergency_contact_relation.trim() || null,
               status: "active",
+              work_mode: form.work_mode,
             },
           ])
           .select()
@@ -528,6 +593,7 @@ export default function EmployeeCreate() {
             emergency_contact_name: form.emergency_contact_name.trim(),
             emergency_contact_phone: form.emergency_contact_phone.trim(),
             emergency_contact_relation: form.emergency_contact_relation.trim() || null,
+            work_mode: form.work_mode,
           })
           .eq("tenant_id", tenantId)
           .eq("id", currentEmployeeId);
@@ -579,12 +645,15 @@ export default function EmployeeCreate() {
       }
 
       // ── Finalize Onboarding State ──
-      try {
-        await insforge.functions.invoke("finalize-onboarding", {
-          body: { email: form.email.trim().toLowerCase(), tenant_id: tenantId },
-        });
-      } catch (finalizeErr) {
-        console.warn("Failed to update finalize-onboarding state:", finalizeErr);
+      const finalizeRes = await insforge.functions.invoke("finalize-onboarding", {
+        body: { email: form.email.trim().toLowerCase(), tenant_id: tenantId },
+      });
+      if (finalizeRes.error || !finalizeRes.data?.success) {
+        throw new Error(
+          finalizeRes.data?.error ?? 
+          finalizeRes.error?.message ?? 
+          "Failed to finalize onboarding status in database. Please click 'Confirm & Create' to retry."
+        );
       }
 
       setIsCreated(true);
@@ -668,14 +737,52 @@ export default function EmployeeCreate() {
           <h2 className="text-xl font-semibold text-slate-900">Create Employee</h2>
           <p className="text-sm text-slate-500">Step {step} of 5 — {stepTitles[step - 1]}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => navigate("/hr/employees")}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
-        >
-          Back to list
-        </button>
+        <div className="flex gap-2">
+          {authStep !== "idle" && !isCreated && (
+            <button
+              type="button"
+              onClick={handleDiscardDraft}
+              className="rounded-lg border border-rose-300 px-3 py-2 text-sm text-rose-700 hover:bg-rose-50 font-medium"
+            >
+              Discard Draft
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => navigate("/hr/employees")}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+          >
+            Back to list
+          </button>
+        </div>
       </div>
+
+      {hasDraft && draftData && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm text-amber-800 animate-fade-in">
+          <div>
+            <p className="font-semibold">Unsaved onboarding draft detected</p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              An incomplete onboarding form was found for <strong>{draftData.form?.full_name || "a new employee"}</strong> ({draftData.form?.email || "no email"}).
+            </p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleResumeDraft}
+              className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+            >
+              Resume Draft
+            </button>
+            <button
+              type="button"
+              onClick={handleDiscardDraft}
+              className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-50"
+            >
+              Discard Draft
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="hide-scrollbar mb-5 flex gap-2 overflow-x-auto pb-1">
         {stepTitles.map((label, index) => {
@@ -995,6 +1102,18 @@ export default function EmployeeCreate() {
                   <option value="part_time">Part Time</option>
                   <option value="contract">Contract</option>
                   <option value="intern">Intern</option>
+                </select>
+              </label>
+              <label className="text-sm md:col-span-2">
+                <span className="mb-1 block text-slate-600">Work Mode</span>
+                <select
+                  value={form.work_mode}
+                  onChange={(event) => handleChange("work_mode", event.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
+                >
+                  <option value="office">Office</option>
+                  <option value="remote">Remote</option>
+                  <option value="hybrid">Hybrid</option>
                 </select>
               </label>
             </div>

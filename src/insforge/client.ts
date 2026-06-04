@@ -64,7 +64,28 @@ export const insforge = {
   functions,
 };
 
-export const db = insforge.database;
+const database = baseInsforge.database;
+const originalRpc = database.rpc.bind(database);
+
+(database as any).rpc = async (fn: string, args?: Record<string, unknown>) => {
+  const res = await originalRpc(fn, args);
+  if (
+    res.error &&
+    (res.error.message?.toLowerCase().includes("invalid token") ||
+      res.error.message?.toLowerCase().includes("jwt") ||
+      (res.error as any).statusCode === 401)
+  ) {
+    console.warn(`RPC ${fn} failed due to expired token. Attempting session refresh...`);
+    const refresh = await baseInsforge.auth.getCurrentUser();
+    if (refresh.data?.user) {
+      console.log("Session refreshed successfully. Retrying RPC...");
+      return originalRpc(fn, args);
+    }
+  }
+  return res;
+};
+
+export const db = database;
 export const auth = insforge.auth;
 export const storage = insforge.storage;
 export const realtime = insforge.realtime;

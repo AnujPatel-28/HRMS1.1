@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Calendar, ChevronLeft, ChevronRight, Download, Users, BarChart3, Clock, Pencil, Check, X, ClipboardList, MapPin, FileEdit } from "lucide-react";
-import type { Attendance, Employee, Shift, EmployeeShift } from "../types";
+import { Calendar, ChevronLeft, ChevronRight, Download, Users, BarChart3, Clock, Pencil, Check, X, ClipboardList, MapPin, FileEdit, Camera } from "lucide-react";
+import type { Attendance, Employee, Shift, EmployeeShift, AttendanceSelfie } from "../types";
 import { useTenant } from "../contexts/TenantContext";
-import { db } from "../insforge/client";
+import { db, storage } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
 import { useAuditLog } from "../hooks/useAuditLog";
 import { useToast } from "../shared/ToastContext";
@@ -15,7 +15,6 @@ import { functions } from "../insforge/client";
 import type { SalaryStructure } from "../payroll/hr/SalaryStructures";
 import { getWorkingDays, formatCurrency } from "../payroll/hr/payroll-calc";
 import { formatLocalDate } from "../utils/date";
-import { calculateShiftDuration, calculateLateness, toAttendanceTimestamp, normalizeShiftTimes } from "../utils/attendance";
 
 type ViewMode = "daily" | "employee" | "summary" | "overtime" | "corrections";
 type AttendanceStatus = "present" | "absent" | "half_day" | "on_leave";
@@ -182,6 +181,194 @@ export default function HRAttendance() {
 
   const [dailyDate, setDailyDate] = useState(fmt(new Date()));
   const [dailyRows, setDailyRows] = useState<AttendanceWithEmployee[]>([]);
+  const [dailySelfies, setDailySelfies] = useState<AttendanceSelfie[]>([]);
+  const [selectedVerificationRow, setSelectedVerificationRow] = useState<AttendanceWithEmployee | null>(null);
+  const [previewSelfieUrl, setPreviewSelfieUrl] = useState<string | null>(null);
+  const [activeMapTab, setActiveMapTab] = useState<"punch_in" | "punch_out">("punch_in");
+
+  useEffect(() => {
+    if (selectedVerificationRow) {
+      if (selectedVerificationRow.punch_in_lat != null) {
+        setActiveMapTab("punch_in");
+      } else if (selectedVerificationRow.punch_out_lat != null) {
+        setActiveMapTab("punch_out");
+      }
+    }
+  }, [selectedVerificationRow]);
+
+  // Quick Action "Allow Remote Work" Modal States
+  const [quickExceptionModalOpen, setQuickExceptionModalOpen] = useState(false);
+  const [quickEmployeeId, setQuickEmployeeId] = useState("");
+  const [quickStartDate, setQuickStartDate] = useState(fmt(new Date()));
+  const [quickEndDate, setQuickEndDate] = useState(fmt(new Date()));
+  const [quickType, setQuickType] = useState<"work_from_home" | "client_visit" | "business_travel" | "field_work" | "other">("work_from_home");
+  const [quickReason, setQuickReason] = useState("");
+  const [submittingException, setSubmittingException] = useState(false);
+
+  const checkExceptionOverlap = async (employeeId: string, start: string, end: string): Promise<boolean> => {
+    const { data: overlaps, error } = await db
+      .from("attendance_location_exceptions")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("employee_id", employeeId)
+      .eq("status", "approved")
+      .lte("start_date", end)
+      .gte("end_date", start);
+    
+    if (error) {
+      console.error("Overlap check failed", error);
+      return false;
+    }
+    return (overlaps ?? []).length > 0;
+  };
+
+  const saveQuickException = async () => {
+    if (!quickEmployeeId || !quickReason.trim()) {
+      toastError("Please fill out all fields.");
+      return;
+    }
+    if (quickEndDate < quickStartDate) {
+      toastError("End date cannot be before start date.");
+      return;
+    }
+    
+    setSubmittingException(true);
+    try {
+      const hasOverlap = await checkExceptionOverlap(quickEmployeeId, quickStartDate, quickEndDate);
+      if (hasOverlap) {
+        toastError("An approved remote exception already exists for this employee within the selected date range.");
+        setSubmittingException(false);
+        return;
+      }
+      
+      const { error: insErr } = await db.rpc("hr_create_remote_exception", {
+        p_tenant_id: tenantId,
+        p_employee_id: quickEmployeeId,
+        p_exception_type: quickType,
+        p_start_date: quickStartDate,
+        p_end_date: quickEndDate,
+        p_reason: quickReason.trim(),
+      });
+        
+      if (insErr) throw insErr;
+      
+      void logAction("attendance.remote_exception_created", "attendance_location_exceptions", null, {
+        employee_id: quickEmployeeId,
+        start_date: quickStartDate,
+        end_date: quickEndDate,
+        type: quickType,
+      });
+      
+      success("Remote exception created and approved successfully.");
+      setQuickExceptionModalOpen(false);
+      setQuickEmployeeId("");
+      setQuickReason("");
+    } catch (err) {
+      console.error(err);
+      toastError("Failed to create remote exception.");
+    } finally {
+      setSubmittingException(false);
+    }
+  };
+
+  function verificationBadge(status: string | null | undefined) {
+    if (!status) return null;
+    const map: Record<string, { cls: string; label: string }> = {
+      office_verified: { cls: "border border-emerald-200 bg-emerald-50 text-emerald-700", label: "✓ Office Verified" },
+      remote_approved: { cls: "border border-blue-200 bg-blue-50 text-blue-700", label: "🏠 Remote Approved" },
+      outside_geofence: { cls: "border border-rose-200 bg-rose-50 text-rose-700", label: "⚠ Outside Geofence" },
+      gps_low_confidence: { cls: "border border-amber-200 bg-amber-50 text-amber-700", label: "⚠ Low GPS Confidence" },
+      gps_denied: { cls: "border border-slate-200 bg-slate-50 text-slate-700", label: "⚠ GPS Denied" },
+      gps_unavailable: { cls: "border border-slate-200 bg-slate-50 text-slate-700", label: "⚠ GPS Unavailable" },
+      manual_override: { cls: "border border-indigo-200 bg-indigo-50 text-indigo-700", label: "✏️ Manual Override" },
+      selfie_missing: { cls: "border border-amber-200 bg-amber-50 text-amber-700", label: "📷 Selfie Missing" },
+    };
+    return map[status] ?? null;
+  }
+
+  function SelfieThumbnail({ storagePath }: { storagePath: string }) {
+    const [url, setUrl] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+      let active = true;
+      const fetchSelfie = async () => {
+        setLoading(true);
+        try {
+          const { data, error } = await storage.from("attendance-selfies").download(storagePath);
+          if (error) throw error;
+          if (data && active) {
+            const blobUrl = URL.createObjectURL(data);
+            setUrl(blobUrl);
+          }
+        } catch (err) {
+          console.error("Failed to load selfie", err);
+        } finally {
+          if (active) setLoading(false);
+        }
+      };
+      void fetchSelfie();
+      return () => {
+        active = false;
+        if (url) URL.revokeObjectURL(url);
+      };
+    }, [storagePath]);
+
+    if (loading) return <div className="h-8 w-8 rounded-lg bg-slate-100 animate-pulse border border-slate-200" />;
+    if (!url) return <div className="h-8 w-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-[10px] text-slate-400">📷</div>;
+
+    return (
+      <div className="relative group h-8 w-8 rounded-lg overflow-hidden border border-slate-200 shadow-sm shrink-0">
+        <img src={url} alt="Selfie" className="h-full w-full object-cover cursor-pointer" onClick={() => setPreviewSelfieUrl(url)} />
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+          <span className="text-[8px] text-white font-bold">VIEW</span>
+        </div>
+      </div>
+    );
+  }
+
+  function SelfieImage({ storagePath, className = "h-24 w-24 rounded-xl" }: { storagePath: string; className?: string }) {
+    const [url, setUrl] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+      let active = true;
+      const fetchSelfie = async () => {
+        setLoading(true);
+        try {
+          const { data, error } = await storage.from("attendance-selfies").download(storagePath);
+          if (error) throw error;
+          if (data && active) {
+            const blobUrl = URL.createObjectURL(data);
+            setUrl(blobUrl);
+          }
+        } catch (err) {
+          console.error("Failed to load selfie", err);
+        } finally {
+          if (active) setLoading(false);
+        }
+      };
+      void fetchSelfie();
+      return () => {
+        active = false;
+        if (url) URL.revokeObjectURL(url);
+      };
+    }, [storagePath]);
+
+    if (loading) return <div className={`${className} bg-slate-100 animate-pulse border border-slate-200`} />;
+    if (!url) return <div className={`${className} bg-slate-100 border border-slate-200 flex items-center justify-center text-xs text-slate-400`}>📷 Failed to load</div>;
+
+    return (
+      <img
+        src={url}
+        alt="Selfie"
+        data-selfie-path={storagePath}
+        className={`${className} object-cover cursor-pointer border border-slate-200 shadow-sm hover:opacity-90 transition`}
+        onClick={() => setPreviewSelfieUrl(url)}
+      />
+    );
+  }
+
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [employeeShifts, setEmployeeShifts] = useState<EmployeeShift[]>([]);
@@ -194,6 +381,7 @@ export default function HRAttendance() {
   const [saving, setSaving] = useState(false);
   const [tenantSettings, setTenantSettings] = useState<Record<string, string>>({});
   const [selectedLocationRow, setSelectedLocationRow] = useState<AttendanceWithEmployee | null>(null);
+  const [activeBreaks, setActiveBreaks] = useState<{ id: string; employee_id: string; break_type: string; started_at: string }[]>([]);
 
   const [empViewEmployee, setEmpViewEmployee] = useState<string>("");
   const [empViewYear, setEmpViewYear] = useState(new Date().getFullYear());
@@ -256,20 +444,26 @@ export default function HRAttendance() {
   const fetchDaily = useCallback(async () => {
     setDailyLoading(true);
     try {
-      const [attRes, shiftRes, empShiftRes] = await Promise.all([
+      const [attRes, shiftRes, empShiftRes, activeBreaksRes, selfiesRes] = await Promise.all([
         db.from("attendance").select("*").eq("tenant_id", tenantId).eq("date", dailyDate),
         db.from("shifts").select("*").eq("tenant_id", tenantId).eq("is_active", true),
         db.from("employee_shifts").select("*").eq("tenant_id", tenantId)
           .lte("effective_from", dailyDate)
           .or(`effective_to.is.null,effective_to.gte.${dailyDate}`),
+        db.from("attendance_breaks").select("id, employee_id, break_type, started_at").eq("tenant_id", tenantId).is("ended_at", null),
+        db.from("attendance_selfies").select("*").eq("tenant_id", tenantId),
       ]);
 
       if (attRes.error) throw attRes.error;
       if (shiftRes.error) throw shiftRes.error;
       if (empShiftRes.error) throw empShiftRes.error;
+      if (activeBreaksRes.error) throw activeBreaksRes.error;
+      if (selfiesRes.error) throw selfiesRes.error;
 
       setShifts((shiftRes.data ?? []) as Shift[]);
       setEmployeeShifts((empShiftRes.data ?? []) as EmployeeShift[]);
+      setActiveBreaks((activeBreaksRes.data ?? []) as any[]);
+      setDailySelfies((selfiesRes.data ?? []) as AttendanceSelfie[]);
 
       const att = (attRes.data ?? []) as AttendanceWithEmployee[];
       const merged: AttendanceWithEmployee[] = allEmployees.map((emp) => {
@@ -298,6 +492,9 @@ export default function HRAttendance() {
           punch_out_lng: null,
           punch_out_location_accuracy: null,
           punch_out_location_status: null,
+          total_break_minutes: 0,
+          current_break_id: null,
+          current_break_start: null,
           employee: emp,
         };
       });
@@ -524,67 +721,24 @@ export default function HRAttendance() {
     }
     setSaving(true);
     try {
-      let punchIn = null;
-      let punchOut = null;
-      let workHours = null;
-
-      if (editPunchIn && editPunchOut) {
-        const durationResult = calculateShiftDuration(editPunchIn, editPunchOut, tenant?.lunch_break_minutes || 0);
-        if (durationResult.error) {
-          toastError(durationResult.error);
-          setSaving(false);
-          return;
-        }
-        workHours = durationResult.hours;
-
-        const { inDate, outDate } = normalizeShiftTimes(dailyDate, editPunchIn, editPunchOut);
-        punchIn = inDate.toISOString();
-        punchOut = outDate.toISOString();
-      } else {
-        punchIn = editPunchIn ? new Date(`${dailyDate}T${editPunchIn}:00`).toISOString() : null;
-        punchOut = editPunchOut ? new Date(`${dailyDate}T${editPunchOut}:00`).toISOString() : null;
-      }
-
       const finalIsLate = (editStatus === "half_day" || editStatus === "absent") ? false : row.is_late;
-
-      if (row.id) {
-        // Fix orphaned open sessions: if HR is setting a punch_out time, mark the session closed.
-        // Without this, session_status stays 'open' even after manual edits, which breaks the
-        // "single open session" constraint and leaves attendance calendar in a stale state.
-        const sessionStatusUpdate = punchOut ? { session_status: "closed" } : {};
-        await db.from("attendance").update({
-          punch_in: punchIn,
-          punch_out: punchOut,
-          status: editStatus,
-          work_hours: workHours,
-          is_late: finalIsLate,
-          ...sessionStatusUpdate,
-        }).eq("tenant_id", tenantId).eq("id", row.id);
-      } else {
-        await db.from("attendance").insert([{
-          employee_id: row.employee_id,
-          date: dailyDate,
-          tenant_id: tenantId,
-          punch_in: punchIn,
-          punch_out: punchOut,
-          status: editStatus,
-          work_hours: workHours,
-          is_late: finalIsLate,
-        }]);
-      }
-      void logAction("attendance.edited", "attendance", row.id || "new", {
-        employee_id: row.employee_id,
-        date: dailyDate,
-        old_status: row.status,
-        new_status: editStatus,
-        punch_in: punchIn,
-        punch_out: punchOut,
-        severity: "WARNING",
+      const { error: rpcError } = await db.rpc("hr_update_attendance", {
+        p_tenant_id: tenantId,
+        p_attendance_id: row.id || null,
+        p_employee_id: row.employee_id,
+        p_date: dailyDate,
+        p_punch_in: editPunchIn || null,
+        p_punch_out: editPunchOut || null,
+        p_status: editStatus,
+        p_is_late: finalIsLate ?? null,
+        p_expected_status: row.status || null,
       });
+      if (rpcError) throw rpcError;
+
       success("Attendance updated.");
       setEditId(null);
     } catch (err) {
-      toastError("Failed to update attendance.");
+      toastError(err instanceof Error ? err.message : "Failed to update attendance.");
     } finally {
       setSaving(false);
       void fetchDaily();
@@ -641,11 +795,11 @@ export default function HRAttendance() {
       return;
     }
     try {
-      const { error } = await db
-        .from("overtime_records")
-        .update({ approved: true, approved_by: hrEmployee?.id ?? null })
-        .eq("tenant_id", tenantId)
-        .eq("id", recordId);
+      const { error } = await db.rpc("hr_set_overtime_status", {
+        p_tenant_id: tenantId,
+        p_overtime_id: recordId,
+        p_approved: true,
+      });
       if (error) throw error;
       void logAction("overtime.approved", "overtime_records", recordId, {
         record_id: recordId,
@@ -668,11 +822,11 @@ export default function HRAttendance() {
       return;
     }
     try {
-      const { error } = await db
-        .from("overtime_records")
-        .delete()
-        .eq("tenant_id", tenantId)
-        .eq("id", recordId);
+      const { error } = await db.rpc("hr_set_overtime_status", {
+        p_tenant_id: tenantId,
+        p_overtime_id: recordId,
+        p_approved: false,
+      });
       if (error) throw error;
       success("Overtime record rejected and removed.");
       void fetchOvertime();
@@ -698,11 +852,11 @@ export default function HRAttendance() {
         continue;
       }
       try {
-        const { error } = await db
-          .from("overtime_records")
-          .update({ approved: true, approved_by: hrEmployee?.id ?? null })
-          .eq("tenant_id", tenantId)
-          .eq("id", row.id);
+        const { error } = await db.rpc("hr_set_overtime_status", {
+          p_tenant_id: tenantId,
+          p_overtime_id: row.id,
+          p_approved: true,
+        });
         if (error) throw error;
         successCount++;
       } catch (err) {
@@ -726,45 +880,6 @@ export default function HRAttendance() {
     void fetchOvertime();
   }
 
-  async function resolveShiftStartTime(employeeId: string, attendanceDate: string) {
-    const { data: assignment, error: assignmentError } = await db
-      .from("employee_shifts")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .eq("employee_id", employeeId)
-      .lte("effective_from", attendanceDate)
-      .or(`effective_to.is.null,effective_to.gte.${attendanceDate}`)
-      .order("effective_from", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (assignmentError) throw assignmentError;
-
-    if (assignment) {
-      const { data: shiftData, error: shiftError } = await db
-        .from("shifts")
-        .select("start_time")
-        .eq("tenant_id", tenantId)
-        .eq("id", (assignment as { shift_id: string }).shift_id)
-        .maybeSingle();
-      if (shiftError) throw shiftError;
-      if ((shiftData as { start_time?: string } | null)?.start_time) {
-        return (shiftData as { start_time: string }).start_time.slice(0, 5);
-      }
-    }
-
-    const { data: defaultShift, error: defaultShiftError } = await db
-      .from("shifts")
-      .select("start_time")
-      .eq("tenant_id", tenantId)
-      .eq("is_default", true)
-      .eq("is_active", true)
-      .limit(1)
-      .maybeSingle();
-    if (defaultShiftError) throw defaultShiftError;
-
-    return (defaultShift as { start_time?: string } | null)?.start_time?.slice(0, 5) ?? tenant?.punch_in_start ?? "09:00";
-  }
-
   async function approveCorrection(correction: AttendanceCorrectionRow) {
     if (!hrEmployee?.id || !tenant) return;
 
@@ -773,9 +888,6 @@ export default function HRAttendance() {
       return;
     }
 
-    // ── Guard: reject empty corrections (both sides null) ──────────────────────
-    // Prevents HR from accidentally approving a no-op correction that would
-    // recalculate work_hours to null and overwrite a valid attendance record.
     if (!correction.requested_punch_in && !correction.requested_punch_out) {
       toastError("Cannot approve a correction with no requested punch times.");
       return;
@@ -783,176 +895,11 @@ export default function HRAttendance() {
 
     setCorrectionActionLoading(true);
     try {
-      const reviewedAt = new Date().toISOString();
-      const graceMinutes = parseInt(tenantSettings["late_mark_grace_minutes"] || "0", 10);
-      const shiftStart = await resolveShiftStartTime(correction.employee_id, correction.attendance_date);
-
-      // ── Fetch existing attendance FIRST so we can do a partial update ────────
-      // This must happen before we compute effective times so we can fall back
-      // to the existing timestamps for whichever side was not requested.
-      const { data: existingAttendance, error: attendanceLookupError } = await db
-        .from("attendance")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .eq("employee_id", correction.employee_id)
-        .eq("date", correction.attendance_date)
-        .maybeSingle();
-      if (attendanceLookupError) throw attendanceLookupError;
-
-      // Extract existing HH:MM strings from the DB timestamps (if any).
-      // These are used as fallbacks when the correction only covers one side.
-      const existingPunchInHHMM = existingAttendance?.punch_in
-        ? new Date(existingAttendance.punch_in).toTimeString().slice(0, 5)
-        : null;
-      const existingPunchOutHHMM = existingAttendance?.punch_out
-        ? new Date(existingAttendance.punch_out).toTimeString().slice(0, 5)
-        : null;
-
-      // ── Merge: requested value takes priority; fall back to existing DB value.
-      // Use nullish coalescing (??) so an explicit empty string from the request
-      // still falls through to the existing value (not treating "" as a value).
-      // This ensures corrections are always PARTIAL updates, never full rewrites.
-      const effectivePunchIn = correction.requested_punch_in ?? existingPunchInHHMM;
-      const effectivePunchOut = correction.requested_punch_out ?? existingPunchOutHHMM;
-
-      // ── Calculate duration using MERGED effective times ──────────────────────
-      // Both sides must be present to calculate work_hours; if only one side
-      // is available (e.g. employee only correcting punch-in), hours stay null.
-      const durationResult = calculateShiftDuration(
-        effectivePunchIn,
-        effectivePunchOut,
-        tenant.lunch_break_minutes,
-      );
-      if (durationResult.error) {
-        throw new Error(durationResult.error);
-      }
-      const workHours = durationResult.hours;
-
-      // ── Lateness uses merged punch-in (correction may only fix punch-out) ────
-      const isLate = (existingAttendance?.status === "half_day" || existingAttendance?.status === "absent")
-        ? false
-        : effectivePunchIn
-          ? calculateLateness(correction.attendance_date, shiftStart, effectivePunchIn, graceMinutes)
-          : (existingAttendance?.is_late ?? false);
-
-      // ── Build ISO timestamps from merged effective times ──────────────────────
-      // normalizeShiftTimes handles night shifts (punch-out before punch-in means +1 day).
-      let punchInIso: string | null = existingAttendance?.punch_in ?? null;
-      let punchOutIso: string | null = existingAttendance?.punch_out ?? null;
-
-      if (effectivePunchIn && effectivePunchOut) {
-        // Both sides known — can normalize for night shifts correctly.
-        const { inDate, outDate } = normalizeShiftTimes(
-          correction.attendance_date,
-          effectivePunchIn,
-          effectivePunchOut,
-        );
-        punchInIso = inDate.toISOString();
-        punchOutIso = outDate.toISOString();
-      } else if (effectivePunchIn) {
-        // Only punch-in is known — update only that side.
-        punchInIso = toAttendanceTimestamp(correction.attendance_date, effectivePunchIn);
-        // punchOutIso stays as the existing DB value (already set above).
-      } else if (effectivePunchOut) {
-        // Only punch-out is known — update only that side.
-        // punchInIso stays as the existing DB value (already set above).
-        punchOutIso = toAttendanceTimestamp(correction.attendance_date, effectivePunchOut);
-      }
-
-      // ── Mark the correction as approved ─────────────────────────────────────
-      const { error: correctionError } = await db
-        .from("attendance_corrections")
-        .update({
-          status: "approved",
-          reviewed_by: hrEmployee.id,
-          reviewed_at: reviewedAt,
-          rejection_reason: null,
-        })
-        .eq("tenant_id", tenantId)
-        .eq("id", correction.id);
-      if (correctionError) throw correctionError;
-
-      // ── Build the attendance payload ──────────────────────────────────────────
-      // Only include fields that changed to keep the update minimal and safe.
-      const attendancePayload: Record<string, unknown> = {
-        punch_in: punchInIso,
-        punch_out: punchOutIso,
-        is_late: isLate,
-      };
-      // Only overwrite work_hours if we could compute it from merged values.
-      // If only one side was provided and no existing counterpart, leave hours as-is.
-      if (workHours != null) {
-        attendancePayload.work_hours = parseFloat(workHours.toFixed(2));
-      }
-
-      if (existingAttendance?.id) {
-        // ── Partial update: preserves session_status, status, location data, etc.
-        const { error: attendanceUpdateError } = await db
-          .from("attendance")
-          .update(attendancePayload)
-          .eq("tenant_id", tenantId)
-          .eq("id", existingAttendance.id);
-        if (attendanceUpdateError) throw attendanceUpdateError;
-      } else {
-        // ── Insert new record when no attendance row exists yet for this date ───
-        const { error: attendanceInsertError } = await db
-          .from("attendance")
-          .insert([{
-            tenant_id: tenantId,
-            employee_id: correction.employee_id,
-            date: correction.attendance_date,
-            punch_in: punchInIso,
-            punch_out: punchOutIso,
-            work_hours: workHours != null ? parseFloat(workHours.toFixed(2)) : null,
-            is_late: isLate,
-            status: "present",
-            punch_out_allowed: true,
-          }]);
-        if (attendanceInsertError) throw attendanceInsertError;
-      }
-
-      // ── Audit log: capture before/after snapshot ─────────────────────────────
-      // Uses existing audit_logs table (tenant-scoped, RLS-safe) via useAuditLog.
-      // UTC timestamps are intentional here — audit logs must always be in UTC.
-      void logAction(
-        "attendance_correction.approved",
-        "attendance_corrections",
-        correction.id,
-        {
-          employee_id: correction.employee_id,
-          attendance_date: correction.attendance_date,
-          approver_id: hrEmployee.id,
-          approved_at: reviewedAt,
-          before: {
-            punch_in: existingAttendance?.punch_in ?? null,
-            punch_out: existingAttendance?.punch_out ?? null,
-            work_hours: existingAttendance?.work_hours ?? null,
-            is_late: existingAttendance?.is_late ?? null,
-          },
-          after: {
-            punch_in: punchInIso,
-            punch_out: punchOutIso,
-            work_hours: workHours != null ? parseFloat(workHours.toFixed(2)) : null,
-            is_late: isLate,
-          },
-          requested: {
-            punch_in: correction.requested_punch_in,
-            punch_out: correction.requested_punch_out,
-          },
-          reason: correction.reason,
-          severity: "CRITICAL",
-        },
-      );
-
-      const { error: notificationError } = await db.from("notifications").insert([{
-        tenant_id: tenantId,
-        employee_id: correction.employee_id,
-        title: "Attendance Correction Approved",
-        body: `Your attendance correction for ${fmt(new Date(correction.attendance_date))} has been approved and updated.`,
-        type: "general",
-        reference_id: correction.id,
-      }]);
-      if (notificationError) throw notificationError;
+      const { error: rpcError } = await db.rpc("hr_approve_attendance_correction", {
+        p_tenant_id: tenantId,
+        p_correction_id: correction.id,
+      });
+      if (rpcError) throw rpcError;
 
       success("Attendance correction approved.");
       void fetchCorrections();
@@ -977,34 +924,13 @@ export default function HRAttendance() {
 
     setCorrectionActionLoading(true);
     try {
-      const { error: rejectError } = await db
-        .from("attendance_corrections")
-        .update({
-          status: "rejected",
-          reviewed_by: hrEmployee.id,
-          reviewed_at: new Date().toISOString(),
-          rejection_reason: rejectCorrectionReason.trim(),
-        })
-        .eq("tenant_id", tenantId)
-        .eq("id", rejectCorrection.id);
+      const { error: rejectError } = await db.rpc("hr_reject_attendance_correction", {
+        p_tenant_id: tenantId,
+        p_correction_id: rejectCorrection.id,
+        p_rejection_reason: rejectCorrectionReason.trim(),
+      });
       if (rejectError) throw rejectError;
 
-      const { error: notificationError } = await db.from("notifications").insert([{
-        tenant_id: tenantId,
-        employee_id: rejectCorrection.employee_id,
-        title: "Attendance Correction Rejected",
-        body: `Your correction request for ${fmt(new Date(rejectCorrection.attendance_date))} was rejected. Reason: ${rejectCorrectionReason.trim()}`,
-        type: "general",
-        reference_id: rejectCorrection.id,
-      }]);
-      if (notificationError) throw notificationError;
-
-      void logAction("correction.rejected", "attendance_corrections", rejectCorrection.id, {
-        correction_id: rejectCorrection.id,
-        employee_id: rejectCorrection.employee_id,
-        rejection_reason: rejectCorrectionReason.trim(),
-        severity: "WARNING",
-      });
       success("Attendance correction rejected.");
       setRejectCorrection(null);
       setRejectCorrectionReason("");
@@ -1119,12 +1045,20 @@ export default function HRAttendance() {
                 />
               </div>
             </div>
-            <button
-              onClick={exportDaily}
-              className="w-full sm:w-auto justify-center inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition shadow-sm"
-            >
-              <Download className="h-4 w-4" /> Export CSV
-            </button>
+            <div className="flex gap-2 w-full sm:w-auto">
+              <button
+                onClick={() => setQuickExceptionModalOpen(true)}
+                className="w-full sm:w-auto justify-center inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition shadow-sm"
+              >
+                Allow Remote Work
+              </button>
+              <button
+                onClick={exportDaily}
+                className="w-full sm:w-auto justify-center inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition shadow-sm"
+              >
+                <Download className="h-4 w-4" /> Export CSV
+              </button>
+            </div>
           </div>
 
           {!dailyLoading && filteredDailyRows.length === 0 ? (
@@ -1132,32 +1066,76 @@ export default function HRAttendance() {
               <EmptyState icon={Users} title="No employees found" description="There are no employees to display attendance for." minimal />
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-slate-200">
-              <table className="min-w-full divide-y divide-slate-200 text-sm block md:table">
-                <thead className="hidden md:table-header-group bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-200">
-                  <tr>
-                    <th className="px-4 py-3">Employee</th>
-                    <th className="px-4 py-3">Punch In</th>
-                    <th className="px-4 py-3">Punch Out</th>
-                    <th className="px-4 py-3">Work Hours</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Location</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 bg-white block md:table-row-group">
-                  {dailyLoading ? (
-                    [...Array(5)].map((_, index) => (
-                      <tr key={index} className="block md:table-row border-b border-slate-100 md:border-0 mb-3 md:mb-0 p-4 md:p-0">
-                        <td className="md:hidden block">
-                          <div className="flex justify-between mb-3"><Skeleton className="h-5 w-32" /><Skeleton className="h-5 w-16" /></div>
-                          <Skeleton className="h-16 w-full rounded-lg mb-3" />
-                          <div className="flex justify-between"><Skeleton className="h-8 w-8 rounded-lg" /><Skeleton className="h-8 w-20 rounded-lg" /></div>
-                        </td>
-                        {[...Array(7)].map((__, cellIndex) => (
-                          <td key={cellIndex} className="hidden md:table-cell px-4 py-3"><Skeleton className="h-4 w-full max-w-[100px]" /></td>
-                        ))}
-                      </tr>
+            <div className="space-y-4">
+              {/* Active Breaks Widget */}
+              {tenantSettings["break_tracking_enabled"] === "true" && activeBreaks.length > 0 && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50/30 p-5 shadow-sm">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-amber-800 mb-3 flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                    Employees Currently On Break ({activeBreaks.length})
+                  </h4>
+                  <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                    {activeBreaks.map((brk) => {
+                      const emp = allEmployees.find(e => e.id === brk.employee_id);
+                      const start = new Date(brk.started_at);
+                      const elapsedMins = Math.max(0, Math.floor((Date.now() - start.getTime()) / 60000));
+                      const limit = brk.break_type === "lunch"
+                        ? (tenant?.lunch_break_minutes || 60)
+                        : parseInt(tenantSettings["short_break_limit_minutes"] || "15", 10);
+                      const isOver = elapsedMins >= limit;
+                      const overMins = isOver ? elapsedMins - limit : 0;
+                      
+                      return (
+                        <div key={brk.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm flex flex-col justify-between">
+                          <div>
+                            <p className="font-semibold text-slate-800 text-sm">{emp?.full_name ?? "Employee"}</p>
+                            <p className="text-[10px] text-slate-500 capitalize">{emp?.department ?? "Operations"} • {brk.break_type.replace("_", " ")}</p>
+                          </div>
+                          <div className="mt-3 flex items-center justify-between">
+                            <span className="text-[10px] text-slate-400">Started {start.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+                            <div className="flex flex-col items-end">
+                              <span className={`font-mono text-xs font-bold ${isOver ? "text-rose-600 animate-pulse" : "text-amber-600"}`}>
+                                {elapsedMins} mins
+                              </span>
+                              {isOver && (
+                                <span className="text-[9px] text-rose-500 font-semibold">Over by {overMins}m</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                <table className="min-w-full divide-y divide-slate-200 text-sm block md:table">
+                  <thead className="hidden md:table-header-group bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                    <tr>
+                      <th className="px-4 py-3">Employee</th>
+                      <th className="px-4 py-3">Punch In</th>
+                      <th className="px-4 py-3">Punch Out</th>
+                      <th className="px-4 py-3">Work Hours</th>
+                      <th className="px-4 py-3">Break Time</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Verification</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white block md:table-row-group">
+                    {dailyLoading ? (
+                      [...Array(5)].map((_, index) => (
+                        <tr key={index} className="block md:table-row border-b border-slate-100 md:border-0 mb-3 md:mb-0 p-4 md:p-0">
+                          <td className="md:hidden block">
+                            <div className="flex justify-between mb-3"><Skeleton className="h-5 w-32" /><Skeleton className="h-5 w-16" /></div>
+                            <Skeleton className="h-16 w-full rounded-lg mb-3" />
+                            <div className="flex justify-between"><Skeleton className="h-8 w-8 rounded-lg" /><Skeleton className="h-8 w-20 rounded-lg" /></div>
+                          </td>
+                          {[...Array(8)].map((__, cellIndex) => (
+                            <td key={cellIndex} className="hidden md:table-cell px-4 py-3"><Skeleton className="h-4 w-full max-w-[100px]" /></td>
+                          ))}
+                        </tr>
                     ))
                   ) : (
                   filteredDailyRows.map((row) => {
@@ -1170,7 +1148,14 @@ export default function HRAttendance() {
                         {/* MOBILE COMPACT TILE VIEW */}
                         <td className="md:hidden block">
                           <div className="flex items-center justify-between mb-3">
-                            <span className="font-bold text-slate-900">{row.employee?.full_name ?? "-"}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-900">{row.employee?.full_name ?? "-"}</span>
+                              {row.current_break_id && (
+                                <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-800 uppercase tracking-wide animate-pulse">
+                                  On Break
+                                </span>
+                              )}
+                            </div>
                             {isEditing ? (
                               <select value={editStatus} onChange={(event) => setEditStatus(event.target.value as AttendanceStatus)} className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold uppercase outline-none focus:ring-2 focus:ring-brand-500 bg-white">
                                 <option value="present">Present</option>
@@ -1186,46 +1171,62 @@ export default function HRAttendance() {
                             )}
                           </div>
                           
-                          <div className="grid grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-lg text-center mb-3 border border-slate-100">
+                          <div className="grid grid-cols-4 gap-1 bg-slate-50 p-2.5 rounded-lg text-center mb-3 border border-slate-100">
                             <div className="flex flex-col justify-center">
                               <span className="text-[10px] font-bold uppercase text-slate-400 mb-1 tracking-wider">In</span>
                               {isEditing ? (
                                 <input type="time" value={editPunchIn} onChange={(event) => setEditPunchIn(event.target.value)} className="w-full rounded-md border border-slate-300 px-1 py-1 text-xs text-center outline-none focus:ring-2 focus:ring-brand-500 bg-white" />
                               ) : (
                                 <div className="flex flex-col items-center">
-                                  <span className="font-semibold text-slate-800 text-sm">{fmtTime(row.punch_in)}</span>
-                                  {row.is_late ? <span className="mt-0.5 rounded px-1 py-0.5 bg-rose-100 text-[9px] font-bold text-rose-700 uppercase">Late</span> : null}
+                                  <span className="font-semibold text-slate-800 text-xs">{fmtTime(row.punch_in)}</span>
+                                  {row.is_late ? <span className="mt-0.5 rounded px-1 py-0.5 bg-rose-100 text-[8px] font-bold text-rose-700 uppercase">Late</span> : null}
                                 </div>
                               )}
                             </div>
-                            <div className="flex flex-col justify-center border-x border-slate-200">
+                            <div className="flex flex-col justify-center border-l border-slate-200">
                               <span className="text-[10px] font-bold uppercase text-slate-400 mb-1 tracking-wider">Out</span>
                               {isEditing ? (
                                 <input type="time" value={editPunchOut} onChange={(event) => setEditPunchOut(event.target.value)} className="w-full rounded-md border border-slate-300 px-1 py-1 text-xs text-center outline-none focus:ring-2 focus:ring-brand-500 bg-white" />
                               ) : (
-                                <span className="font-semibold text-slate-800 text-sm">{fmtTime(row.punch_out)}</span>
+                                <span className="font-semibold text-slate-800 text-xs">{fmtTime(row.punch_out)}</span>
                               )}
                             </div>
-                            <div className="flex flex-col justify-center">
+                            <div className="flex flex-col justify-center border-l border-slate-200">
                               <span className="text-[10px] font-bold uppercase text-slate-400 mb-1 tracking-wider">Hours</span>
-                              <span className="font-semibold text-slate-800 text-sm">{row.work_hours != null ? `${row.work_hours.toFixed(2)}h` : "-"}</span>
+                              <span className="font-semibold text-slate-800 text-xs">{row.work_hours != null ? `${row.work_hours.toFixed(2)}h` : "-"}</span>
+                            </div>
+                            <div className="flex flex-col justify-center border-l border-slate-200">
+                              <span className="text-[10px] font-bold uppercase text-slate-400 mb-1 tracking-wider">Break</span>
+                              <span className="font-semibold text-slate-800 text-xs">{row.total_break_minutes > 0 ? `${row.total_break_minutes}m` : "-"}</span>
                             </div>
                           </div>
                           
                           <div className="flex items-center justify-between">
-                            <div>
-                              {punchInLat != null ? (
+                            <div className="flex items-center gap-2">
+                              {row.location_status ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedVerificationRow(row)}
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold transition hover:scale-[1.02] ${verificationBadge(row.location_status)?.cls}`}
+                                >
+                                  {verificationBadge(row.location_status)?.label}
+                                </button>
+                              ) : punchInLat != null ? (
                                 <button
                                   type="button"
                                   onClick={() => setSelectedLocationRow(row)}
-                                  className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-all hover:scale-105 active:scale-95 ${row.punch_in_location_status === "outside_fence"
-                                      ? "border-rose-200 bg-rose-50 text-rose-600 shadow-sm"
-                                      : "border-emerald-200 bg-emerald-50 text-emerald-600 shadow-sm"
-                                    }`}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-600 shadow-sm"
                                 >
                                   <MapPin className="h-4 w-4" />
                                 </button>
                               ) : <span className="text-xs text-slate-400 font-medium">No Location</span>}
+                              
+                              {dailySelfies.find(s => s.attendance_id === row.id && s.type === "punch_in") && (
+                                <SelfieThumbnail storagePath={dailySelfies.find(s => s.attendance_id === row.id && s.type === "punch_in")!.storage_path} />
+                              )}
+                              {dailySelfies.find(s => s.attendance_id === row.id && s.type === "punch_out") && (
+                                <SelfieThumbnail storagePath={dailySelfies.find(s => s.attendance_id === row.id && s.type === "punch_out")!.storage_path} />
+                              )}
                             </div>
                             <div>
                               {isEditing ? (
@@ -1268,6 +1269,11 @@ export default function HRAttendance() {
                         <td className="hidden md:table-cell px-4 py-3 text-slate-700">
                           <span className="font-medium text-slate-800">{row.work_hours != null ? `${row.work_hours.toFixed(2)}h` : "-"}</span>
                         </td>
+                        <td className="hidden md:table-cell px-4 py-3 text-slate-700">
+                          <span className="font-medium text-slate-800">
+                            {row.total_break_minutes > 0 ? `${row.total_break_minutes} mins` : "-"}
+                          </span>
+                        </td>
                         <td className="hidden md:table-cell px-4 py-3">
                           {isEditing ? (
                             <select value={editStatus} onChange={(event) => setEditStatus(event.target.value as AttendanceStatus)} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-brand-500">
@@ -1284,19 +1290,38 @@ export default function HRAttendance() {
                           )}
                         </td>
                         <td className="hidden md:table-cell px-4 py-3">
-                          {punchInLat != null ? (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedLocationRow(row)}
-                              className={`inline-flex h-8 w-8 items-center justify-center rounded-xl border transition-all hover:scale-105 active:scale-95 ${row.punch_in_location_status === "outside_fence"
-                                  ? "border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 shadow-[0_2px_8px_-2px_rgba(225,29,72,0.2)]"
-                                  : "border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 shadow-[0_2px_8px_-2px_rgba(16,185,129,0.2)]"
-                                }`}
-                              title="View location details"
-                            >
-                              <MapPin className="h-4 w-4" />
-                            </button>
-                          ) : "-"}
+                          <div className="flex items-center gap-2">
+                            {row.location_status ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedVerificationRow(row)}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold transition hover:scale-[1.02] ${verificationBadge(row.location_status)?.cls}`}
+                              >
+                                {verificationBadge(row.location_status)?.label}
+                              </button>
+                            ) : punchInLat != null ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedLocationRow(row)}
+                                className={`inline-flex h-8 w-8 items-center justify-center rounded-xl border transition-all hover:scale-105 active:scale-95 ${row.punch_in_location_status === "outside_fence"
+                                    ? "border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 shadow-[0_2px_8px_-2px_rgba(225,29,72,0.2)]"
+                                    : "border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 shadow-[0_2px_8px_-2px_rgba(16,185,129,0.2)]"
+                                  }`}
+                                title="View location details"
+                              >
+                                <MapPin className="h-4 w-4" />
+                              </button>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                            
+                            {dailySelfies.find(s => s.attendance_id === row.id && s.type === "punch_in") && (
+                              <SelfieThumbnail storagePath={dailySelfies.find(s => s.attendance_id === row.id && s.type === "punch_in")!.storage_path} />
+                            )}
+                            {dailySelfies.find(s => s.attendance_id === row.id && s.type === "punch_out") && (
+                              <SelfieThumbnail storagePath={dailySelfies.find(s => s.attendance_id === row.id && s.type === "punch_out")!.storage_path} />
+                            )}
+                          </div>
                         </td>
                         <td className="hidden md:table-cell px-4 py-3 text-right">
                           {isEditing ? (
@@ -1321,9 +1346,10 @@ export default function HRAttendance() {
               </tbody>
             </table>
           </div>
-          )}
         </div>
-      ) : null}
+      )}
+    </div>
+  ) : null}
 
       {view === "employee" ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-5 shadow-sm">
@@ -2074,6 +2100,386 @@ export default function HRAttendance() {
           </div>
         </div>
       ) : null}
+
+      {selectedVerificationRow && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm animate-fade-in" onClick={() => setSelectedVerificationRow(null)}>
+          <div className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2 flex-wrap">
+                  <span>Attendance Verification Details</span>
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold ${verificationBadge(selectedVerificationRow.location_status)?.cls}`}>
+                    {verificationBadge(selectedVerificationRow.location_status)?.label || "No Status"}
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Audit logs and geolocation verification for punch records on {selectedVerificationRow.date}
+                </p>
+              </div>
+              <button onClick={() => setSelectedVerificationRow(null)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition border border-slate-200">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            {/* 2-Column Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* Left Column: Verification Snapshot details */}
+              <div className="space-y-4">
+                {/* Employee Details Card */}
+                <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 space-y-3">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Employee Information</h4>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">Full Name</p>
+                      <p className="font-semibold text-slate-900 mt-0.5">{selectedVerificationRow.employee?.full_name}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">Employee Code</p>
+                      <p className="font-semibold text-slate-900 mt-0.5">{selectedVerificationRow.employee?.employee_code || "N/A"}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Audit & Policy Card */}
+                {selectedVerificationRow.verification_snapshot ? (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 space-y-3">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Verification Snapshot</h4>
+                    <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-sm">
+                      <div>
+                        <p className="text-xs font-medium text-slate-500">Work Mode</p>
+                        <p className="font-semibold text-slate-900 capitalize mt-0.5">
+                          {selectedVerificationRow.verification_snapshot.work_mode || "Office"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-slate-500">GPS Mode</p>
+                        <p className="font-semibold text-slate-900 capitalize mt-0.5">
+                          {selectedVerificationRow.verification_snapshot.gps_mode || "Warn"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-slate-500">Accuracy & Confidence</p>
+                        <p className="font-semibold text-slate-900 mt-0.5 flex items-center gap-1.5">
+                          <span>{selectedVerificationRow.verification_snapshot.accuracy != null ? `${selectedVerificationRow.verification_snapshot.accuracy}m` : "N/A"}</span>
+                          {selectedVerificationRow.verification_snapshot.confidence && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                              selectedVerificationRow.verification_snapshot.confidence === "high" ? "bg-emerald-100 text-emerald-800" :
+                              selectedVerificationRow.verification_snapshot.confidence === "medium" ? "bg-blue-100 text-blue-800" :
+                              "bg-amber-100 text-amber-800"
+                            }`}>
+                              {selectedVerificationRow.verification_snapshot.confidence}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-slate-500">Remote Exception</p>
+                        <p className="font-semibold text-slate-900 capitalize mt-0.5 truncate" title={selectedVerificationRow.verification_snapshot.exception_id ? selectedVerificationRow.verification_snapshot.exception_type : undefined}>
+                          {selectedVerificationRow.verification_snapshot.exception_id ? `${selectedVerificationRow.verification_snapshot.exception_type?.replace(/_/g, " ")}` : "No Exception"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-slate-500">Selfie Required</p>
+                        <p className="font-semibold text-slate-900 mt-0.5">
+                          {selectedVerificationRow.verification_snapshot.selfie_required ? "Yes" : "No"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-slate-500">Selfie Captured</p>
+                        <p className="font-semibold text-slate-900 mt-0.5">
+                          {selectedVerificationRow.verification_snapshot.selfie_captured ? "Yes" : "No"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+                    No verification snapshot available. This record was punched prior to verification layer activation.
+                  </div>
+                )}
+              </div>
+
+              {/* Right Column: GPS & Locations Map */}
+              <div className="space-y-4">
+                {selectedVerificationRow.punch_in_lat != null || selectedVerificationRow.punch_out_lat != null ? (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 space-y-3 h-full flex flex-col justify-between">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Location Mapping</h4>
+                      
+                      {/* Tabs / Switcher if both exist */}
+                      {selectedVerificationRow.punch_in_lat != null && selectedVerificationRow.punch_out_lat != null && (
+                        <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 mb-3">
+                          <button
+                            type="button"
+                            onClick={() => setActiveMapTab("punch_in")}
+                            className={`flex-1 text-center py-1 text-xs font-semibold rounded-md transition ${activeMapTab === "punch_in" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                          >
+                            Punch In Location
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActiveMapTab("punch_out")}
+                            className={`flex-1 text-center py-1 text-xs font-semibold rounded-md transition ${activeMapTab === "punch_out" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                          >
+                            Punch Out Location
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Coordinates Info based on active tab */}
+                      <div className="bg-white rounded-lg p-2.5 border border-slate-100 text-[11px] mb-2 space-y-1">
+                        {((activeMapTab === "punch_in" && selectedVerificationRow.punch_in_lat != null) || (selectedVerificationRow.punch_out_lat == null && selectedVerificationRow.punch_in_lat != null)) ? (
+                          <>
+                            <div className="flex justify-between">
+                              <span className="font-semibold text-slate-600">Punch-in Coordinates:</span>
+                              <span className="font-mono text-slate-900">{selectedVerificationRow.punch_in_lat}, {selectedVerificationRow.punch_in_lng}</span>
+                            </div>
+                            <div className="flex justify-between border-t border-slate-50 pt-1">
+                              <span className="font-semibold text-slate-600">Distance from Office:</span>
+                              <span className="font-bold text-slate-900">
+                                {(officeLat !== null && officeLng !== null) ? `${Math.round(calculateDistance(Number(selectedVerificationRow.punch_in_lat), Number(selectedVerificationRow.punch_in_lng), officeLat, officeLng))}m` : "N/A"}
+                              </span>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="flex justify-between">
+                              <span className="font-semibold text-slate-600">Punch-out Coordinates:</span>
+                              <span className="font-mono text-slate-900">{selectedVerificationRow.punch_out_lat}, {selectedVerificationRow.punch_out_lng}</span>
+                            </div>
+                            <div className="flex justify-between border-t border-slate-50 pt-1">
+                              <span className="font-semibold text-slate-600">Distance from Office:</span>
+                              <span className="font-bold text-slate-900">
+                                {(officeLat !== null && officeLng !== null) ? `${Math.round(calculateDistance(Number(selectedVerificationRow.punch_out_lat), Number(selectedVerificationRow.punch_out_lng), officeLat, officeLng))}m` : "N/A"}
+                              </span>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Leaflet map container */}
+                    <div className="flex-1 min-h-[170px] relative border border-slate-200 rounded-lg overflow-hidden shadow-inner bg-slate-100">
+                      {((activeMapTab === "punch_in" && selectedVerificationRow.punch_in_lat != null) || (selectedVerificationRow.punch_out_lat == null && selectedVerificationRow.punch_in_lat != null)) ? (
+                        <LocationMap
+                          key="punch_in_map"
+                          lat={Number(selectedVerificationRow.punch_in_lat)}
+                          lng={Number(selectedVerificationRow.punch_in_lng)}
+                          label={`${selectedVerificationRow.employee?.full_name ?? "Employee"} punch-in`}
+                          accuracy={selectedVerificationRow.punch_in_location_accuracy != null ? Number(selectedVerificationRow.punch_in_location_accuracy) : null}
+                        />
+                      ) : selectedVerificationRow.punch_out_lat != null ? (
+                        <LocationMap
+                          key="punch_out_map"
+                          lat={Number(selectedVerificationRow.punch_out_lat)}
+                          lng={Number(selectedVerificationRow.punch_out_lng)}
+                          label={`${selectedVerificationRow.employee?.full_name ?? "Employee"} punch-out`}
+                          accuracy={selectedVerificationRow.punch_out_location_accuracy != null ? Number(selectedVerificationRow.punch_out_location_accuracy) : null}
+                        />
+                      ) : null}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400 h-full flex flex-col items-center justify-center bg-slate-50/20">
+                    <MapPin className="h-8 w-8 text-slate-300 mb-2 animate-bounce" />
+                    <p className="font-medium text-slate-500">No GPS coordinates captured</p>
+                    {selectedVerificationRow.verification_snapshot?.gps_error_reason && (
+                      <p className="text-rose-600 mt-2 font-medium bg-rose-50 border border-rose-100 px-3 py-1.5 rounded-lg text-[11px]">
+                        Reason: {selectedVerificationRow.verification_snapshot.gps_error_reason}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Bottom Section: Selfie Verification */}
+            {(() => {
+              const punchInSelfie = dailySelfies.find(s => s.attendance_id === selectedVerificationRow.id && s.type === "punch_in");
+              const punchOutSelfie = dailySelfies.find(s => s.attendance_id === selectedVerificationRow.id && s.type === "punch_out");
+              if (!punchInSelfie && !punchOutSelfie) return null;
+              return (
+                <div className="border-t border-slate-100 pt-5 mt-2">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Selfie Verification</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    {punchInSelfie ? (
+                      <div className="rounded-xl border border-slate-100 bg-slate-50/30 p-3 flex flex-col items-center justify-center space-y-2 group hover:border-slate-200 hover:bg-slate-50 transition shadow-sm cursor-pointer" onClick={() => {
+                        // Trigger zoom via clicking the image container too
+                        const img = document.querySelector(`[data-selfie-path="${punchInSelfie.storage_path}"]`) as HTMLImageElement;
+                        if (img) img.click();
+                      }}>
+                        <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider">Punch In Selfie</p>
+                        <div className="relative rounded-lg overflow-hidden border border-slate-200 bg-white shadow-inner">
+                          <SelfieImage storagePath={punchInSelfie.storage_path} className="h-32 w-32 object-cover animate-fade-in" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                            <span className="text-[10px] text-white font-bold tracking-widest bg-black/60 px-2.5 py-1 rounded-md">ZOOM</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-slate-200 p-4 flex flex-col items-center justify-center text-center opacity-60 bg-slate-50/50">
+                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Punch In Selfie</p>
+                        <div className="h-32 w-32 rounded-lg bg-slate-100 border border-slate-200 flex flex-col items-center justify-center text-[10px] text-slate-400 gap-1.5 font-medium">
+                          <Camera className="h-5 w-5 text-slate-300" />
+                          <span>No Selfie Captured</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {punchOutSelfie ? (
+                      <div className="rounded-xl border border-slate-100 bg-slate-50/30 p-3 flex flex-col items-center justify-center space-y-2 group hover:border-slate-200 hover:bg-slate-50 transition shadow-sm cursor-pointer" onClick={() => {
+                        const img = document.querySelector(`[data-selfie-path="${punchOutSelfie.storage_path}"]`) as HTMLImageElement;
+                        if (img) img.click();
+                      }}>
+                        <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider">Punch Out Selfie</p>
+                        <div className="relative rounded-lg overflow-hidden border border-slate-200 bg-white shadow-inner">
+                          <SelfieImage storagePath={punchOutSelfie.storage_path} className="h-32 w-32 object-cover animate-fade-in" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                            <span className="text-[10px] text-white font-bold tracking-widest bg-black/60 px-2.5 py-1 rounded-md">ZOOM</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-slate-200 p-4 flex flex-col items-center justify-center text-center opacity-60 bg-slate-50/50">
+                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Punch Out Selfie</p>
+                        <div className="h-32 w-32 rounded-lg bg-slate-100 border border-slate-200 flex flex-col items-center justify-center text-[10px] text-slate-400 gap-1.5 font-medium">
+                          <Camera className="h-5 w-5 text-slate-300" />
+                          <span>No Selfie Captured</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Footer */}
+            <div className="flex justify-end pt-4 border-t border-slate-100">
+              <button
+                onClick={() => setSelectedVerificationRow(null)}
+                className="rounded-xl bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 text-sm font-semibold transition shadow-sm border border-slate-800 hover:shadow"
+              >
+                Close Details
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {quickExceptionModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={() => setQuickExceptionModalOpen(false)}>
+          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h3 className="text-lg font-semibold text-slate-900">Allow Remote Work (Quick Action)</h3>
+              <p className="mt-1 text-sm text-slate-500">Quickly create a remote work location exception for an employee.</p>
+            </div>
+            
+            <div className="space-y-4 px-5 py-5 text-sm">
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">Select Employee</span>
+                <select
+                  value={quickEmployeeId}
+                  onChange={(e) => setQuickEmployeeId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none bg-white"
+                >
+                  <option value="">Choose Employee...</option>
+                  {allEmployees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.full_name} ({emp.employee_code ?? "No Code"})</option>
+                  ))}
+                </select>
+              </label>
+              
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block space-y-1">
+                  <span className="font-medium text-slate-700">Start Date</span>
+                  <input
+                    type="date"
+                    value={quickStartDate}
+                    onChange={(e) => setQuickStartDate(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="font-medium text-slate-700">End Date</span>
+                  <input
+                    type="date"
+                    value={quickEndDate}
+                    onChange={(e) => setQuickEndDate(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none"
+                  />
+                </label>
+              </div>
+              
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">Exception Type</span>
+                <select
+                  value={quickType}
+                  onChange={(e) => setQuickType(e.target.value as any)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none bg-white"
+                >
+                  <option value="work_from_home">Work From Home (WFH)</option>
+                  <option value="client_visit">Client Visit</option>
+                  <option value="business_travel">Business Travel</option>
+                  <option value="field_work">Field Work</option>
+                  <option value="other">Other Exception</option>
+                </select>
+              </label>
+              
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">Reason</span>
+                <textarea
+                  value={quickReason}
+                  onChange={(e) => setQuickReason(e.target.value)}
+                  placeholder="Provide details about the exception location/need"
+                  rows={3}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none"
+                />
+              </label>
+            </div>
+            
+            <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setQuickExceptionModalOpen(false)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveQuickException()}
+                disabled={submittingException}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
+              >
+                {submittingException ? "Saving..." : "Allow Remote Work"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {previewSelfieUrl && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-md animate-fade-in"
+          onClick={() => setPreviewSelfieUrl(null)}
+        >
+          <div className="relative max-w-3xl max-h-[85vh] overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl flex flex-col items-center justify-center p-2" onClick={(e) => e.stopPropagation()}>
+            <button 
+              onClick={() => setPreviewSelfieUrl(null)}
+              className="absolute top-4 right-4 z-10 rounded-full bg-black/60 p-2 text-white/80 hover:bg-black/80 hover:text-white transition shadow-md"
+            >
+              <X className="h-6 w-6" />
+            </button>
+            <img 
+              src={previewSelfieUrl} 
+              alt="Selfie Preview" 
+              className="max-w-full max-h-[80vh] object-contain rounded-xl"
+            />
+          </div>
+        </div>
+      )}
     </section>
   );
 }

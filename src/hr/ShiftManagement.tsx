@@ -335,41 +335,23 @@ export default function ShiftManagement() {
 
     setSavingShift(true);
     try {
-      if (form.is_default) {
-        const { error: clearDefaultError } = await db
-          .from("shifts")
-          .update({ is_default: false, updated_at: new Date().toISOString() })
-          .eq("tenant_id", tenantId)
-          .eq("is_default", true);
-        if (clearDefaultError) throw clearDefaultError;
-      }
-
-      const payload = {
-        tenant_id: tenantId,
-        name: form.name.trim(),
-        start_time: form.start_time,
-        end_time: form.end_time,
-        working_days: form.working_days,
-        half_day_cutoff_override: form.half_day_cutoff_override || null,
-        punch_in_opens_minutes_before: Number(form.punch_in_opens_minutes_before || 60),
-        late_mark_grace_override: form.late_mark_grace_override ? Number(form.late_mark_grace_override) : null,
-        is_default: form.is_default,
-        is_active: true,
-        updated_at: new Date().toISOString(),
-      };
-
-      if (shiftId) {
-        const { error: updateError } = await db.from("shifts").update(payload).eq("tenant_id", tenantId).eq("id", shiftId);
-        if (updateError) throw updateError;
-        success("Shift updated.");
-      } else {
-        const { error: insertError } = await db.from("shifts").insert([{ ...payload, created_at: new Date().toISOString() }]);
-        if (insertError) throw insertError;
-        success("Shift created.");
-      }
+      const { data: savedShiftId, error: saveError } = await db.rpc("hr_save_shift", {
+        p_tenant_id: tenantId,
+        p_shift_id: shiftId ?? null,
+        p_name: form.name.trim(),
+        p_start_time: form.start_time,
+        p_end_time: form.end_time,
+        p_working_days: form.working_days,
+        p_half_day_cutoff_override: form.half_day_cutoff_override || null,
+        p_punch_in_opens_minutes_before: Number(form.punch_in_opens_minutes_before || 60),
+        p_late_mark_grace_override: form.late_mark_grace_override ? Number(form.late_mark_grace_override) : null,
+        p_is_default: form.is_default,
+      });
+      if (saveError) throw saveError;
+      success(shiftId ? "Shift updated." : "Shift created.");
 
       // ── Audit log: shift.override_modified ──────────────────────────────────
-      void logAction("shift.override_modified", "shifts", shiftId ?? "new", {
+      void logAction("shift.override_modified", "shifts", shiftId ?? String(savedShiftId ?? "new"), {
         shift_name: form.name.trim(),
         start_time: form.start_time,
         end_time: form.end_time,
@@ -414,11 +396,10 @@ export default function ShiftManagement() {
       // historical assignments and breaking payroll/attendance reproducibility.
       // Soft-delete hides the shift from all UI dropdowns (they filter is_active)
       // while keeping the DB row and all foreign key references intact.
-      const { error: softDeleteError } = await db
-        .from("shifts")
-        .update({ is_active: false, updated_at: new Date().toISOString() })
-        .eq("tenant_id", tenantId)
-        .eq("id", deleteTarget.id);
+      const { error: softDeleteError } = await db.rpc("hr_deactivate_shift", {
+        p_tenant_id: tenantId,
+        p_shift_id: deleteTarget.id,
+      });
       if (softDeleteError) throw softDeleteError;
 
       // Audit log — UTC timestamp intentional for audit records.
@@ -441,42 +422,15 @@ export default function ShiftManagement() {
 
   async function scheduleShiftChange(row: EmployeeAssignmentRow, newShiftId: string) {
     if (!tenantId || !newShiftId || row.currentShift?.id === newShiftId) return;
-    const today = todayString();
     const tomorrow = tomorrowString();
 
-    // ── Step 1: Close the currently active assignment ─────────────────────────
-    if (row.explicitAssignment?.id) {
-      const { error: closeError } = await db
-        .from("employee_shifts")
-        .update({ effective_to: today })
-        .eq("tenant_id", tenantId)
-        .eq("id", row.explicitAssignment.id);
-      if (closeError) throw closeError;
-    }
-
-    // ── Step 2: Remove any conflicting future assignment for this exact date ───
-    // The DB has a UNIQUE(tenant_id, employee_id, effective_from) constraint.
-    // If HR changes their mind on the same day, a second insert for tomorrow would
-    // violate the constraint. We delete the conflicting row first so this op is
-    // idempotent — retries and concurrent actions won't create duplicates.
-    // We only delete for `effective_from = tomorrow`, not all future rows, to
-    // preserve intentionally pre-scheduled assignments for other future dates.
-    const { error: cleanupError } = await db
-      .from("employee_shifts")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .eq("employee_id", row.employee.id)
-      .eq("effective_from", tomorrow);
-    if (cleanupError) throw cleanupError;
-
-    // ── Step 3: Insert the new assignment effective tomorrow ──────────────────
-    const { error: insertError } = await db.from("employee_shifts").insert([{
-      tenant_id: tenantId,
-      employee_id: row.employee.id,
-      shift_id: newShiftId,
-      effective_from: tomorrow,
-    }]);
-    if (insertError) throw insertError;
+    const { error: scheduleError } = await db.rpc("hr_schedule_shift_change", {
+      p_tenant_id: tenantId,
+      p_employee_id: row.employee.id,
+      p_shift_id: newShiftId,
+      p_effective_from: tomorrow,
+    });
+    if (scheduleError) throw scheduleError;
   }
 
   async function handleSingleAssignment(row: EmployeeAssignmentRow, newShiftId: string) {

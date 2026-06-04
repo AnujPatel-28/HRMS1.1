@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { Attendance, Employee, Leave, Task } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db, storage, insforge } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
+import { useEmployee } from "../hooks/useEmployee";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { useToast } from "../shared/ToastContext";
-import { File, Calendar, ClipboardList, MoreVertical, Upload, Loader2, Trash2 } from "lucide-react";
+import { File, Calendar, ClipboardList, MoreVertical, Upload, Loader2, Trash2, Camera, Lock, Eye, EyeOff, CheckCircle2, X } from "lucide-react";
 import { ConfirmModal } from "../shared/ConfirmModal";
 
 type TabKey = "personal" | "identity" | "documents" | "attendance" | "leaves" | "tasks";
@@ -43,6 +44,7 @@ export default function EmployeeDetail() {
   const { tenantId } = useTenant();
   const { logAction } = useAuditLog();
   const { success, error: toastError } = useToast();
+  const { employee: currentHrEmployee } = useEmployee();
 
   const [activeTab, setActiveTab] = useState<TabKey>("personal");
   const [employee, setEmployee] = useState<Employee | null>(null);
@@ -52,6 +54,15 @@ export default function EmployeeDetail() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [documents, setDocuments] = useState<StorageDoc[]>([]);
   const [uploadingDoc, setUploadingDoc] = useState(false);
+
+  // Remote Exceptions states
+  const [exceptions, setExceptions] = useState<any[]>([]);
+  const [exceptionModalOpen, setExceptionModalOpen] = useState(false);
+  const [exceptionStartDate, setExceptionStartDate] = useState(formatLocalDate(new Date()));
+  const [exceptionEndDate, setExceptionEndDate] = useState(formatLocalDate(new Date()));
+  const [exceptionType, setExceptionType] = useState<"work_from_home" | "client_visit" | "business_travel" | "field_work" | "other">("work_from_home");
+  const [exceptionReason, setExceptionReason] = useState("");
+  const [submittingException, setSubmittingException] = useState(false);
 
   const handleUploadDocument = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -164,8 +175,164 @@ export default function EmployeeDetail() {
   type ResetStep = null | "sending" | "sent" | "confirming" | "done";
   const [resetStep, setResetStep] = useState<ResetStep>(null);
   const [resetNewPassword, setResetNewPassword] = useState("");
+  const [showResetPassword, setShowResetPassword] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
+
+  // ── Profile Photo Upload states & handlers ──
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !employee || !tenantId) return;
+
+    if (!['image/jpeg', 'image/png'].includes(file.type)) {
+      toastError("Please upload a JPEG or PNG image.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toastError("Image size must be less than 5MB.");
+      return;
+    }
+
+    setUploadingAvatar(true);
+    try {
+      const getUuid = () => {
+        if (typeof window !== "undefined" && window.crypto && window.crypto.randomUUID) {
+          return window.crypto.randomUUID();
+        }
+        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+          const r = (Math.random() * 16) | 0;
+          const v = c === "x" ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
+        });
+      };
+      const fileExt = file.name.split('.').pop() || "jpg";
+      const path = `${tenantId}/${employee.id}/${getUuid()}.${fileExt}`;
+      
+      const { data: uploadData, error: uploadError } = await storage.from("employee-profile-photos").upload(path, file);
+      if (uploadError || !uploadData) throw uploadError || new Error("Upload failed");
+
+      const { error: updateError } = await db
+        .from("employees")
+        .update({ profile_photo_url: uploadData.url })
+        .eq("tenant_id", tenantId)
+        .eq("id", employee.id);
+
+      if (updateError) throw updateError;
+
+      void logAction("employee.avatar_updated", "employee", employee.id);
+
+      success("Profile picture updated successfully.");
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      toastError("Failed to update profile picture.");
+    } finally {
+      setUploadingAvatar(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+    }
+  };
+
+  const saveException = async () => {
+    if (!employee) return;
+    if (!exceptionReason.trim()) {
+      toastError("Please enter a reason.");
+      return;
+    }
+    if (exceptionEndDate < exceptionStartDate) {
+      toastError("End date cannot be before start date.");
+      return;
+    }
+
+    setSubmittingException(true);
+    try {
+      // Overlap check
+      const { data: overlaps, error: overlapErr } = await db
+        .from("attendance_location_exceptions")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("employee_id", employee.id)
+        .eq("status", "approved")
+        .lte("start_date", exceptionEndDate)
+        .gte("end_date", exceptionStartDate);
+
+      if (overlapErr) throw overlapErr;
+
+      if (overlaps && overlaps.length > 0) {
+        toastError("An approved remote exception already exists for this employee within the selected date range.");
+        setSubmittingException(false);
+        return;
+      }
+
+      const payload = {
+        tenant_id: tenantId,
+        employee_id: employee.id,
+        exception_type: exceptionType,
+        start_date: exceptionStartDate,
+        end_date: exceptionEndDate,
+        reason: exceptionReason.trim(),
+        status: "approved" as const,
+        requested_by: currentHrEmployee?.id ?? null,
+        approved_by: currentHrEmployee?.id ?? null,
+        approved_at: new Date().toISOString(),
+      };
+
+      const { error: insErr } = await db
+        .from("attendance_location_exceptions")
+        .insert([payload]);
+
+      if (insErr) throw insErr;
+
+      void logAction("attendance.remote_exception_created", "attendance_location_exceptions", null, {
+        employee_id: employee.id,
+        start_date: exceptionStartDate,
+        end_date: exceptionEndDate,
+        type: exceptionType,
+      });
+
+      success("Remote exception created successfully.");
+      setExceptionModalOpen(false);
+      setExceptionReason("");
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      toastError("Failed to create remote exception.");
+    } finally {
+      setSubmittingException(false);
+    }
+  };
+
+  const cancelException = async (id: string) => {
+    if (!employee) return;
+    if (!window.confirm("Are you sure you want to cancel this remote work exception?")) return;
+
+    try {
+      const { error: updErr } = await db
+        .from("attendance_location_exceptions")
+        .update({
+          status: "cancelled" as const,
+          cancelled_by: currentHrEmployee?.id ?? null,
+          cancelled_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("tenant_id", tenantId)
+        .eq("id", id);
+
+      if (updErr) throw updErr;
+
+      void logAction("attendance.remote_exception_cancelled", "attendance_location_exceptions", id, {
+        employee_id: employee.id,
+      });
+
+      success("Remote exception cancelled successfully.");
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      toastError("Failed to cancel remote exception.");
+    }
+  };
 
   const loadData = async () => {
     if (!employeeId) return;
@@ -192,7 +359,7 @@ export default function EmployeeDetail() {
     const fromDate = new Date();
     fromDate.setDate(fromDate.getDate() - 29);
 
-    const [attendanceRes, leavesRes, tasksRes, docsRes] = await Promise.all([
+    const [attendanceRes, leavesRes, tasksRes, docsRes, exceptionsRes] = await Promise.all([
       db
         .from("attendance")
         .select("*")
@@ -203,11 +370,17 @@ export default function EmployeeDetail() {
       db.from("leaves").select("*").eq("tenant_id", tenantId).eq("employee_id", currentEmployee.id).order("applied_at", { ascending: false }),
       db.from("tasks").select("*").eq("tenant_id", tenantId).eq("assigned_to", currentEmployee.id).order("created_at", { ascending: false }),
       db.from("employee_documents").select("*").eq("tenant_id", tenantId).eq("employee_id", currentEmployee.id).order("uploaded_at", { ascending: false }),
+      db.from("attendance_location_exceptions")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("employee_id", currentEmployee.id)
+        .order("start_date", { ascending: false }),
     ]);
 
     setAttendance((attendanceRes.data as Attendance[]) ?? []);
     setLeaves((leavesRes.data as Leave[]) ?? []);
     setTasks((tasksRes.data as Task[]) ?? []);
+    setExceptions((exceptionsRes.data ?? []) as any[]);
 
     if (docsRes.error) {
       console.error("Database query error for employee documents:", docsRes.error);
@@ -284,6 +457,7 @@ export default function EmployeeDetail() {
       emergency_contact_name: editForm.emergency_contact_name,
       emergency_contact_phone: editForm.emergency_contact_phone,
       emergency_contact_relation: editForm.emergency_contact_relation,
+      work_mode: editForm.work_mode || "office",
     };
 
     const { error: updateError } = await db.from("employees").update(payload).eq("tenant_id", tenantId).eq("id", employee.id);
@@ -325,6 +499,7 @@ export default function EmployeeDetail() {
     if (!employee?.email) return;
     setResetError(null);
     setResetNewPassword("");
+    setShowResetPassword(false);
     setResetStep("sent");
   };
 
@@ -344,6 +519,7 @@ export default function EmployeeDetail() {
       } else {
         setResetStep("done");
         setResetNewPassword("");
+        setShowResetPassword(false);
       }
     } catch (err) {
       setResetError(err instanceof Error ? err.message : "Failed to update password.");
@@ -356,6 +532,7 @@ export default function EmployeeDetail() {
   const cancelReset = () => {
     setResetStep(null);
     setResetNewPassword("");
+    setShowResetPassword(false);
     setResetError(null);
   };
 
@@ -387,13 +564,41 @@ export default function EmployeeDetail() {
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          {employee.profile_photo_url ? (
-            <img src={employee.profile_photo_url} alt={employee.full_name} className="h-14 w-14 shrink-0 rounded-full object-cover" />
-          ) : (
-            <div className="grid h-14 w-14 place-items-center rounded-full bg-slate-200 text-sm font-semibold text-slate-700 shrink-0">
-              {employee.full_name.slice(0, 2).toUpperCase()}
-            </div>
-          )}
+          <div 
+            onClick={isEditing ? () => avatarInputRef.current?.click() : undefined}
+            className={`relative group rounded-full overflow-hidden shrink-0 h-14 w-14 shadow-sm ${isEditing ? "cursor-pointer" : "cursor-default"}`}
+            title={isEditing ? "Change profile picture" : undefined}
+          >
+            {employee.profile_photo_url ? (
+              <img src={employee.profile_photo_url} alt={employee.full_name} className="h-full w-full object-cover" />
+            ) : (
+              <div className="grid h-full w-full place-items-center bg-slate-200 text-sm font-semibold text-slate-700">
+                {employee.full_name.slice(0, 2).toUpperCase()}
+              </div>
+            )}
+            
+            {/* Hover Camera Overlay (only visible in edit mode) */}
+            {isEditing && (
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                <Camera className="h-4 w-4 text-white" />
+              </div>
+            )}
+
+            {/* Uploading overlay */}
+            {uploadingAvatar && (
+              <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                <Loader2 className="h-4 w-4 text-white animate-spin" />
+              </div>
+            )}
+
+            <input
+              type="file"
+              ref={avatarInputRef}
+              onChange={handleAvatarChange}
+              accept="image/jpeg,image/png"
+              className="hidden"
+            />
+          </div>
           <div className="min-w-0">
             <h2 className="text-xl font-semibold text-slate-900 truncate">{employee.full_name}</h2>
             <div className="mt-1 flex items-center gap-2 text-sm text-slate-500 min-w-0">
@@ -518,51 +723,102 @@ export default function EmployeeDetail() {
 
       {/* ── Inline Reset Password panel ── */}
       {(resetStep === "sent" || resetStep === "confirming" || resetStep === "done") && (
-        <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50 p-4">
+        <div className="mt-4 rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-indigo-50/40 p-5 shadow-sm relative overflow-hidden animate-fade-in">
+          {/* Subtle background decoration */}
+          <div className="absolute top-0 right-0 -mt-6 -mr-6 h-24 w-24 rounded-full bg-violet-100/30 blur-xl pointer-events-none" />
+          
           {resetStep === "done" ? (
-            <div className="flex items-center gap-3">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-violet-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-              <div>
-                <p className="text-sm font-semibold text-violet-900">Password updated successfully!</p>
-                <p className="text-xs text-violet-700 mt-0.5">The employee can now log in with their new password.</p>
+            <div className="flex items-start gap-4">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-600 ring-4 ring-emerald-50">
+                <CheckCircle2 className="h-5 w-5" />
               </div>
-              <button type="button" onClick={cancelReset} className="ml-auto text-xs text-violet-600 underline hover:no-underline">Dismiss</button>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-slate-900">Password updated successfully!</p>
+                <p className="text-xs text-slate-500 mt-1">The employee can now log in with their new password.</p>
+              </div>
+              <button 
+                type="button" 
+                onClick={cancelReset} 
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition shadow-sm"
+              >
+                Dismiss
+              </button>
             </div>
           ) : (
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-violet-900">Reset Employee Password</p>
-                  <p className="text-xs text-violet-700 mt-0.5">
-                    Set a new login password for <strong>{employee.email}</strong>. The employee can use it immediately after saving.
-                  </p>
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-100 text-violet-600 ring-1 ring-violet-500/20">
+                    <Lock className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">Reset Employee Password</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Set a new login password for <strong className="text-violet-700 font-semibold">{employee.email}</strong>. 
+                      The employee will use it immediately.
+                    </p>
+                  </div>
                 </div>
-                <button type="button" onClick={cancelReset} className="shrink-0 text-xs text-violet-500 underline hover:no-underline">Cancel</button>
+                <button 
+                  type="button" 
+                  onClick={cancelReset} 
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition"
+                  title="Cancel"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
 
               {resetError && (
-                <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{resetError}</p>
+                <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700 flex items-start gap-2">
+                  <span className="mt-0.5 shrink-0 block h-1.5 w-1.5 rounded-full bg-rose-500" />
+                  <span>{resetError}</span>
+                </div>
               )}
 
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  placeholder="New password, minimum 8 characters"
-                  value={resetNewPassword}
-                  onChange={(e) => setResetNewPassword(e.target.value)}
-                  className="flex-1 rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm outline-none ring-violet-400 focus:ring"
-                />
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="relative flex-1">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                    <Lock className="h-4 w-4" />
+                  </div>
+                  <input
+                    type={showResetPassword ? "text" : "password"}
+                    placeholder="New password, minimum 8 characters"
+                    value={resetNewPassword}
+                    onChange={(e) => setResetNewPassword(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-10 py-2.5 text-sm placeholder-slate-400 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-400/20 shadow-sm"
+                  />
+                  {resetNewPassword.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword(!showResetPassword)}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition"
+                    >
+                      {showResetPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  )}
+                </div>
                 <button
                   type="button"
                   disabled={resetLoading || resetNewPassword.trim().length < 8}
                   onClick={() => { void confirmPasswordReset(); }}
-                  className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+                  className="rounded-xl bg-violet-600 hover:bg-violet-700 disabled:bg-violet-300 disabled:cursor-not-allowed px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors whitespace-nowrap flex items-center justify-center gap-2 animate-pulse-once"
                 >
-                  {resetStep === "confirming" ? "Saving…" : "Set Password"}
+                  {resetLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Saving…
+                    </>
+                  ) : (
+                    "Set Password"
+                  )}
                 </button>
               </div>
+              {resetNewPassword.length > 0 && resetNewPassword.length < 8 && (
+                <p className="text-[11px] font-medium text-amber-600 mt-1">
+                  ⚠️ Password must be at least 8 characters.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -667,6 +923,24 @@ export default function EmployeeDetail() {
               disabled={!isEditing}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
             />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Work Mode</span>
+            {isEditing ? (
+              <select
+                value={editForm.work_mode ?? "office"}
+                onChange={(event) => updateField("work_mode", event.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 bg-white"
+              >
+                <option value="office">Office</option>
+                <option value="remote">Remote</option>
+                <option value="hybrid">Hybrid</option>
+              </select>
+            ) : (
+              <span className="capitalize font-semibold text-slate-900 block mt-2">
+                {employee.work_mode ?? "office"}
+              </span>
+            )}
           </label>
         </div>
       ) : null}
@@ -835,35 +1109,118 @@ export default function EmployeeDetail() {
       ) : null}
 
       {activeTab === "attendance" ? (
-        <div className="mt-4">
-          <p className="mb-4 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Last 30 days mini calendar</p>
-          <div className="grid grid-cols-5 gap-2 sm:grid-cols-7 md:grid-cols-10">
-            {lastThirtyDays.map((day) => {
-              const dateKey = formatLocalDate(day);
-              const status = attendanceMap[dateKey];
-              const isFuture = day > new Date();
+        <div className="mt-4 space-y-6">
+          <div>
+            <p className="mb-4 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Last 30 days mini calendar</p>
+            <div className="grid grid-cols-5 gap-2 sm:grid-cols-7 md:grid-cols-10">
+              {lastThirtyDays.map((day) => {
+                const dateKey = formatLocalDate(day);
+                const status = attendanceMap[dateKey];
+                const isFuture = day > new Date();
 
-              const colorClass = isFuture
-                ? "bg-slate-50 text-slate-400 border border-slate-100 opacity-60"
-                : status === "present"
-                  ? "bg-emerald-50 text-emerald-700 border border-emerald-100 ring-1 ring-emerald-500/20 shadow-sm"
-                  : status === "half_day"
-                    ? "bg-amber-50 text-amber-700 border border-amber-100 ring-1 ring-amber-500/20 shadow-sm"
-                    : status === "on_leave"
-                      ? "bg-cyan-50 text-cyan-700 border border-cyan-100 ring-1 ring-cyan-500/20 shadow-sm"
-                      : status === "absent"
-                        ? "bg-rose-50 text-rose-700 border border-rose-100 ring-1 ring-rose-500/20 shadow-sm"
-                        : "bg-white text-slate-500 border border-slate-200 shadow-sm";
+                const colorClass = isFuture
+                  ? "bg-slate-50 text-slate-400 border border-slate-100 opacity-60"
+                  : status === "present"
+                    ? "bg-emerald-50 text-emerald-700 border border-emerald-100 ring-1 ring-emerald-500/20 shadow-sm"
+                    : status === "half_day"
+                      ? "bg-amber-50 text-amber-700 border border-amber-100 ring-1 ring-amber-500/20 shadow-sm"
+                      : status === "on_leave"
+                        ? "bg-cyan-50 text-cyan-700 border border-cyan-100 ring-1 ring-cyan-500/20 shadow-sm"
+                        : status === "absent"
+                          ? "bg-rose-50 text-rose-700 border border-rose-100 ring-1 ring-rose-500/20 shadow-sm"
+                          : "bg-white text-slate-500 border border-slate-200 shadow-sm";
 
-              return (
-                <div key={dateKey} className={`rounded-xl p-2 text-center transition-transform hover:scale-105 cursor-default ${colorClass}`} title={`${dateKey} - ${isFuture ? "Future" : status || "No Record"}`}>
-                  <div className="text-[10px] font-bold opacity-70">{day.getDate()}</div>
-                  <div className="mt-1 text-sm font-bold uppercase">
-                    {isFuture ? "—" : status === "on_leave" ? "L" : status === "present" ? "P" : status === "half_day" ? "H" : status === "absent" ? "A" : "—"}
+                return (
+                  <div key={dateKey} className={`rounded-xl p-2 text-center transition-transform hover:scale-105 cursor-default ${colorClass}`} title={`${dateKey} - ${isFuture ? "Future" : status || "No Record"}`}>
+                    <div className="text-[10px] font-bold opacity-70">{day.getDate()}</div>
+                    <div className="mt-1 text-sm font-bold uppercase">
+                      {isFuture ? "—" : status === "on_leave" ? "L" : status === "present" ? "P" : status === "half_day" ? "H" : status === "absent" ? "A" : "—"}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="border-t border-slate-100 pt-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h4 className="text-sm font-bold text-slate-900">Remote Work Exceptions</h4>
+                <p className="text-xs text-slate-500">Approved temporary location verification bypasses.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setExceptionStartDate(formatLocalDate(new Date()));
+                  setExceptionEndDate(formatLocalDate(new Date()));
+                  setExceptionType("work_from_home");
+                  setExceptionReason("");
+                  setExceptionModalOpen(true);
+                }}
+                className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition"
+              >
+                + Add Exception
+              </button>
+            </div>
+
+            {exceptions.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 border-dashed py-8 text-center text-xs text-slate-400">
+                No active or historical remote exceptions found for this employee.
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="min-w-full divide-y divide-slate-200 text-xs">
+                  <thead className="bg-slate-50 text-left font-semibold uppercase tracking-wider text-slate-500">
+                    <tr>
+                      <th className="px-4 py-2">Date Range</th>
+                      <th className="px-4 py-2">Type</th>
+                      <th className="px-4 py-2">Reason</th>
+                      <th className="px-4 py-2">Status</th>
+                      <th className="px-4 py-2 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white">
+                    {exceptions.map((exc) => (
+                      <tr key={exc.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-2.5 font-medium text-slate-900">
+                          {formatLocalDate(new Date(exc.start_date))} to {formatLocalDate(new Date(exc.end_date))}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium capitalize text-slate-700">
+                            {exc.exception_type.replace(/_/g, " ")}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-600 max-w-xs truncate" title={exc.reason}>
+                          {exc.reason}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${
+                            exc.status === "approved"
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              : exc.status === "cancelled"
+                                ? "bg-slate-50 text-slate-500 border border-slate-200"
+                                : "bg-amber-50 text-amber-700 border border-amber-200"
+                          }`}>
+                            {exc.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          {exc.status === "approved" && (
+                            <button
+                              type="button"
+                              onClick={() => void cancelException(exc.id)}
+                              className="text-xs font-semibold text-rose-600 hover:text-rose-700"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       ) : null}
@@ -918,6 +1275,84 @@ export default function EmployeeDetail() {
         confirmColor="red"
         isSubmitting={deletingDoc}
       />
+
+      {exceptionModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={() => setExceptionModalOpen(false)}>
+          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h3 className="text-lg font-semibold text-slate-900">Add Remote Exception</h3>
+              <p className="mt-1 text-sm text-slate-500">Allow employee to bypass office geofencing constraints for a date range.</p>
+            </div>
+            
+            <div className="space-y-4 px-5 py-5 text-sm">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block space-y-1">
+                  <span className="font-medium text-slate-700">Start Date</span>
+                  <input
+                    type="date"
+                    value={exceptionStartDate}
+                    onChange={(e) => setExceptionStartDate(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="font-medium text-slate-700">End Date</span>
+                  <input
+                    type="date"
+                    value={exceptionEndDate}
+                    onChange={(e) => setExceptionEndDate(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none"
+                  />
+                </label>
+              </div>
+              
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">Exception Type</span>
+                <select
+                  value={exceptionType}
+                  onChange={(e) => setExceptionType(e.target.value as any)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none bg-white"
+                >
+                  <option value="work_from_home">Work From Home (WFH)</option>
+                  <option value="client_visit">Client Visit</option>
+                  <option value="business_travel">Business Travel</option>
+                  <option value="field_work">Field Work</option>
+                  <option value="other">Other Exception</option>
+                </select>
+              </label>
+              
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">Reason</span>
+                <textarea
+                  value={exceptionReason}
+                  onChange={(e) => setExceptionReason(e.target.value)}
+                  placeholder="Provide details about the exception location/need"
+                  rows={3}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none"
+                />
+              </label>
+            </div>
+            
+            <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setExceptionModalOpen(false)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveException()}
+                disabled={submittingException}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
+              >
+                {submittingException ? "Saving..." : "Allow Remote Work"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

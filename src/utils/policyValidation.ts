@@ -44,6 +44,34 @@ export function validateAttendancePolicy(policy: AttendancePolicyForm): Validati
     }
   }
 
+  if (policy.break_tracking_enabled) {
+    const val = Number(policy.short_break_limit_minutes);
+    if (isNaN(val) || !Number.isInteger(val) || val <= 0) {
+      errors.short_break_limit_minutes = "Short break limit must be a valid positive integer.";
+    }
+  }
+
+  // Validate GPS confidence thresholds
+  const highConf = Number(policy.high_confidence_max || 50);
+  const medConf = Number(policy.medium_confidence_max || 150);
+  const lowConf = Number(policy.low_confidence_max || 300);
+
+  if (isNaN(highConf) || highConf <= 0) {
+    errors.high_confidence_max = "High confidence max must be a positive number.";
+  }
+  if (isNaN(medConf) || medConf <= 0) {
+    errors.medium_confidence_max = "Medium confidence max must be a positive number.";
+  }
+  if (isNaN(lowConf) || lowConf <= 0) {
+    errors.low_confidence_max = "Low confidence max must be a positive number.";
+  }
+  if (!errors.high_confidence_max && !errors.medium_confidence_max && medConf <= highConf) {
+    errors.medium_confidence_max = "Medium confidence max must be greater than High confidence max.";
+  }
+  if (!errors.medium_confidence_max && !errors.low_confidence_max && lowConf <= medConf) {
+    errors.low_confidence_max = "Low confidence max must be greater than Medium confidence max.";
+  }
+
   return {
     valid: Object.keys(errors).length === 0,
     errors,

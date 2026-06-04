@@ -38,6 +38,7 @@ interface RowCalc extends PayslipCalc {
   lateMarkDeductionAmount?: number;
   overtimeHours?: number;
   overtimeBreakdown?: { id: string; amount: number }[];
+  hasMidMonthRevision?: boolean;
 }
 
 const now = new Date();
@@ -113,6 +114,8 @@ export default function RunPayroll() {
   const [rows, setRows] = useState<RowCalc[]>([]);
   const [skipped, setSkipped] = useState<Employee[]>([]);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
+  const [midMonthEmployees, setMidMonthEmployees] = useState<string[]>([]);
+  const [overrideChecked, setOverrideChecked] = useState(false);
 
   const [saving, setSaving] = useState(false);
 
@@ -307,6 +310,7 @@ export default function RunPayroll() {
 
       const newRows: RowCalc[] = [];
       const newSkipped: Employee[] = [];
+      const midMonthRevisions: string[] = [];
 
       for (const emp of employees) {
         const struct = structMap.get(emp.id);
@@ -320,11 +324,29 @@ export default function RunPayroll() {
         const calc = calcPayslip(struct, att, overtimeAmount, year, month, holidayDates, policy);
         
         const lateSummary = lateSummaryMap.get(emp.id) ?? {};
-        const hourlyRate = calc.grossSalary / (Number(tenant?.work_hours_per_day ?? 8) * workingDays);
+        const workHoursPerDay = Number(tenant?.work_hours_per_day ?? 8);
+        if (workHoursPerDay <= 0) {
+          throw new Error("Invalid tenant payroll configuration: work hours per day must be greater than zero");
+        }
+        const hourlyRate = calc.grossSalary / (workHoursPerDay * workingDays);
         const lateDeductionAmount = roundCurrency((lateSummary.deduction_hours ?? 0) * hourlyRate);
         const otherDeductions = roundCurrency(calc.otherDeductions + lateDeductionAmount);
         const totalDeductions = roundCurrency(calc.totalDeductions + lateDeductionAmount);
         const netPayable = Math.max(roundCurrency(calc.grossSalary - totalDeductions), 0);
+
+        // Check for mid-month revisions
+        const empStructures = allStructures.filter((s) => s.employee_id === emp.id);
+        const hasRevision = empStructures.some((s) => {
+          const startsMidMonth = s.effective_from > startDate && s.effective_from <= endDate;
+          if (!startsMidMonth) return false;
+          // Check if there is another structure that was effective prior to this mid-month one
+          return empStructures.some((other) => other.effective_from < s.effective_from);
+        });
+
+        if (hasRevision) {
+          midMonthRevisions.push(emp.full_name);
+        }
+
         newRows.push({
           ...calc,
           employee: emp,
@@ -339,11 +361,14 @@ export default function RunPayroll() {
           overtimeHours: overtimeSummary?.totalHours ?? 0,
           overtimeAmount,
           overtimeBreakdown: overtimeSummary?.breakdown ?? [],
+          hasMidMonthRevision: hasRevision,
         });
       }
 
       setRows(newRows);
       setSkipped(newSkipped);
+      setMidMonthEmployees(midMonthRevisions);
+      setOverrideChecked(false);
 
       // Hydrate overrides if resuming a draft run without erasing current in-session changes
       setOverrides((currentOverrides) => {
@@ -471,10 +496,32 @@ export default function RunPayroll() {
       }
 
       success(approve ? "Payroll approved and payslips saved!" : "Payroll saved as draft.");
-      if (approve) {
-        const policyHash = rowsWithFinal.length > 0 ? JSON.stringify(rowsWithFinal[0].policySnapshot) : "";
-        const actionType = runId && existingRun ? "payroll.regenerated" : "payroll.generated";
-        void logAction(actionType, "payroll_run", runId, { month, year, total_net: totalNet, employee_count: rowsWithFinal.length, policy_hash: policyHash });
+      
+      const policyHash = rowsWithFinal.length > 0 ? JSON.stringify(rowsWithFinal[0].policySnapshot) : "";
+      const actionType = approve
+        ? (runId && existingRun ? "payroll.regenerated" : "payroll.generated")
+        : "payroll.draft_saved";
+        
+      void logAction(actionType, "payroll_run", runId, { 
+        month, 
+        year, 
+        total_net: totalNet, 
+        employee_count: rowsWithFinal.length, 
+        policy_hash: policyHash,
+        mid_month_overridden: overrideChecked
+      });
+
+      // Log mid-month salary overrides for audit traceability
+      for (const r of rowsWithFinal) {
+        if (r.hasMidMonthRevision) {
+          void logAction("payroll.mid_month_salary_override", "employee", r.employeeId, {
+            employee_name: r.employee.full_name,
+            month,
+            year,
+            effective_from: r.structure.effective_from,
+            ctc_annual: r.structure.ctc_annual,
+          });
+        }
       }
       setStep(1);
       setExistingRun(null);
@@ -621,6 +668,30 @@ export default function RunPayroll() {
                 </div>
               </div>
 
+              {midMonthEmployees.length > 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                    <p className="text-sm font-semibold text-amber-800">Warning — Mid-Month Salary Revision Detected</p>
+                  </div>
+                  <p className="text-xs text-amber-700 mb-2">
+                    The following employees have a salary structure revision mid-month. Since split-period calculations are not supported, the newest structure will apply to the entire month:
+                  </p>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {midMonthEmployees.map(name => <span key={name} className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800">{name}</span>)}
+                  </div>
+                  <label className="flex items-center gap-2 text-xs font-semibold text-amber-800 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={overrideChecked} 
+                      onChange={(e) => setOverrideChecked(e.target.checked)} 
+                      className="rounded border-amber-300 text-amber-600 focus:ring-amber-500" 
+                    />
+                    I understand and want to proceed anyway. (This will be logged for auditing).
+                  </label>
+                </div>
+              )}
+
               {skipped.length > 0 && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                   <div className="flex items-center gap-2 mb-2">
@@ -636,7 +707,11 @@ export default function RunPayroll() {
 
               <div className="flex justify-between">
                 <button onClick={() => setStep(1)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition">← Back</button>
-                <button onClick={() => setStep(3)} disabled={rows.length === 0} className="rounded-lg bg-purple-600 px-5 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-50 transition">
+                <button 
+                  onClick={() => setStep(3)} 
+                  disabled={rows.length === 0 || (midMonthEmployees.length > 0 && !overrideChecked)} 
+                  className="rounded-lg bg-purple-600 px-5 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-50 transition"
+                >
                   Review & Confirm →
                 </button>
               </div>

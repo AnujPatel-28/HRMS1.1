@@ -98,6 +98,10 @@ export function calcPayslip(
   const daysInMonth = Math.max(new Date(year, month, 0).getDate(), 1);
   const workingDays = Math.max(getWorkingDays(year, month, holidayDates), 1);
 
+  if (workingDays <= 0) {
+    throw new Error("Invalid payroll period: working days cannot be zero");
+  }
+
   const monthlyCtc = struct.ctc_annual / 12;
   const basicMonthly = roundCurrency(monthlyCtc * (struct.basic_percent / 100));
   const hraMonthly = roundCurrency(basicMonthly * (struct.hra_percent / 100));
@@ -151,7 +155,7 @@ export function calcPayslip(
     } else if (policy.lopCalculationMethod === "calendar") {
       daysRatio = (daysInMonth - totalDeductibleDays) / daysInMonth;
     } else {
-      daysRatio = (26 - totalDeductibleDays) / 26;
+      daysRatio = normalizedPaidDays / 26;
     }
   }
 

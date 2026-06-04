@@ -31,6 +31,7 @@ export interface Employee {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  work_mode?: "office" | "remote" | "hybrid";
 }
 
 export interface Attendance {
@@ -47,6 +48,43 @@ export interface Attendance {
   status: "present" | "absent" | "half_day" | "on_leave";
   session_status: "open" | "closed";
   notes: string | null;
+  created_at: string;
+  total_break_minutes: number;
+  current_break_id: string | null;
+  current_break_start: string | null;
+  location_accuracy?: number | null;
+  location_confidence?: "high" | "medium" | "low" | "very_low" | null;
+  location_status?: "office_verified" | "remote_approved" | "outside_geofence" | "gps_low_confidence" | "gps_denied" | "gps_unavailable" | "manual_override" | "selfie_missing" | null;
+  remote_exception_id?: string | null;
+  verification_snapshot?: Record<string, any> | null;
+}
+
+export interface AttendanceLocationException {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  exception_type: "work_from_home" | "client_visit" | "business_travel" | "field_work" | "other";
+  start_date: string;
+  end_date: string;
+  reason: string;
+  status: "pending" | "approved" | "rejected" | "cancelled" | "expired";
+  requested_by: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  cancelled_by: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AttendanceSelfie {
+  id: string;
+  attendance_id: string;
+  tenant_id: string;
+  employee_id: string;
+  type: "punch_in" | "punch_out";
+  storage_path: string;
+  captured_at: string;
   created_at: string;
 }
 

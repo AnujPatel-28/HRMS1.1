@@ -34,21 +34,6 @@ interface LeaveType {
   requires_document: boolean;
 }
 
-// Maps leave type codes to the legacy leave_type enum values in the `leaves` table.
-// Custom leave types that don't match a known code fall back to 'other'.
-const CODE_TO_LEAVE_TYPE_ENUM: Record<string, string> = {
-  CL: "casual",
-  SL: "sick",
-  EL: "earned",
-  UL: "unpaid",
-  ML: "maternity",
-  PL: "paternity",
-};
-
-function resolveLeaveTypeEnum(code: string): string {
-  return CODE_TO_LEAVE_TYPE_ENUM[code.toUpperCase()] ?? "other";
-}
-
 interface LeaveBalance {
   id: string;
   leave_type_id: string;
@@ -221,35 +206,14 @@ export default function MyLeaves() {
 
     setSubmitting(true);
     try {
-      
-      const { error: insErr } = await db.from("leaves").insert([{
-        employee_id: employee.id,
-        tenant_id: tenantId,
-        leave_type_id: form.leave_type_id,
-        leave_type: selectedType ? resolveLeaveTypeEnum(selectedType.code) : "other",
-        start_date: form.start_date,
-        end_date: form.end_date,
-        total_days: totalDays,
-        reason: form.reason,
-        status: "pending",
-      }]);
-      
+      const { error: insErr } = await db.rpc("employee_apply_leave_request", {
+        p_tenant_id: tenantId,
+        p_leave_type_id: form.leave_type_id,
+        p_start_date: form.start_date,
+        p_end_date: form.end_date,
+        p_reason: form.reason,
+      });
       if (insErr) throw insErr;
-
-      // Notify HR
-      const { data: hrEmps } = await db.from("employees").select("id").eq("tenant_id", tenantId).eq("department", "operations");
-      if (hrEmps && hrEmps.length > 0) {
-        await db.from("notifications").insert(
-          hrEmps.map((h: { id: string }) => ({
-            employee_id: h.id,
-            tenant_id: tenantId,
-            title: "New Leave Request",
-            body: `${employee.full_name} has requested ${selectedType?.name} from ${form.start_date} to ${form.end_date}.`,
-            type: "general",
-            reference_id: null,
-          }))
-        );
-      }
       
       success("Leave application submitted!");
       setForm({ leave_type_id: leaveTypes[0]?.id || "", start_date: "", end_date: "", reason: "" });
@@ -266,7 +230,10 @@ export default function MyLeaves() {
   async function handleCancelLeave() {
     if (!cancelModal.leaveId) return;
     try {
-      const { error: delErr } = await db.from("leaves").delete().eq("tenant_id", tenantId).eq("id", cancelModal.leaveId).eq("status", "pending");
+      const { error: delErr } = await db.rpc("employee_cancel_pending_leave", {
+        p_tenant_id: tenantId,
+        p_leave_id: cancelModal.leaveId,
+      });
       if (delErr) throw delErr;
       success("Leave request cancelled.");
       setCancelModal({ isOpen: false, leaveId: null, dates: "", type: "" });

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:hrms-workflows": "node scratch/test-exceptions.js && node scratch/test-leave-approval.js"
   },
   "dependencies": {
     "@insforge/sdk": "^1.2.5",
