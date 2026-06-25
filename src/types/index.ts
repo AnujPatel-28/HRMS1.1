@@ -32,6 +32,14 @@ export interface Employee {
   created_at: string;
   updated_at: string;
   work_mode?: "office" | "remote" | "hybrid";
+  manager_id?: string | null;
+  grade?: string | null;
+  blood_group?: string | null;
+  work_location?: string | null;
+  linkedin_url?: string | null;
+  employee_bio?: string | null;
+  manager_name?: string | null;
+  role?: EmployeeRole | null;
 }
 
 export interface Attendance {
@@ -171,6 +179,7 @@ export interface Task {
   status: "assigned" | "in_progress" | "submitted" | "approved" | "rejected" | "overdue";
   created_at: string;
   updated_at: string;
+  project_id?: string | null;
 }
 
 export interface TaskSubmission {
@@ -246,3 +255,44 @@ export interface Notification {
   is_read: boolean;
   created_at: string;
 }
+
+export interface Project {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description: string | null;
+  status: "planning" | "active" | "on_hold" | "completed" | "cancelled";
+  manager_id: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  visibility_config: {
+    type: "all" | "departments" | "people";
+    departments?: string[];
+    employee_ids?: string[];
+  };
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Expense {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  title: string;
+  amount: number;
+  currency: string;
+  category: "travel" | "food" | "accommodation" | "equipment" | "medical" | "other";
+  expense_date: string;
+  description: string | null;
+  receipt_url: string | null;
+  receipt_name: string | null;
+  status: "pending" | "approved" | "rejected" | "reimbursed";
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  rejection_reason: string | null;
+  payroll_run_id: string | null;
+  reimbursed_at: string | null;
+  created_at: string;
+}
+

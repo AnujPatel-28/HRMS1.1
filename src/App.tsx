@@ -1,6 +1,8 @@
+// Force reload for IDE diagnostics
 import { Navigate, Route, Routes } from "react-router-dom";
 import type { ReactElement } from "react";
 import EmployeeLayout from "./employee/EmployeeLayout";
+import IDCardPage from "./employee/IDCardPage";
 import EmployeeChat from "./employee/Chat";
 import EmployeeDashboard from "./employee/Dashboard";
 import MyLeaves from "./employee/MyLeaves";
@@ -8,6 +10,8 @@ import MyProfile from "./employee/MyProfile";
 import MyTasks from "./employee/MyTasks";
 import Policies from "./employee/Policies";
 import PunchInOut from "./employee/PunchInOut";
+import MyTeam from "./employee/MyTeam";
+import EmployeeExpenses from "./employee/Expenses";
 import HRAttendance from "./hr/Attendance";
 import HRCalendar from "./hr/Calendar";
 import HRChat from "./hr/Chat";
@@ -15,6 +19,8 @@ import HRDashboard from "./hr/Dashboard";
 import EmployeeCreate from "./hr/EmployeeCreate";
 import EmployeeDetail from "./hr/EmployeeDetail";
 import EmployeeList from "./hr/EmployeeList";
+import Directory from "./hr/Directory";
+import HRExpenses from "./hr/Expenses";
 import HolidayList from "./hr/HolidayList";
 import HRLayout from "./hr/HRLayout";
 import LeaveManagement from "./hr/LeaveManagement";
@@ -23,7 +29,13 @@ import PolicyUpload from "./hr/PolicyUpload";
 import ShiftManagement from "./hr/ShiftManagement";
 import OfficeLocations from "./hr/OfficeLocations";
 import TaskManagement from "./hr/TaskManagement";
+import ProjectList from "./hr/pms/ProjectList";
+import ProjectDetail from "./hr/pms/ProjectDetail";
+import EmployeeProjectView from "./employee/pms/EmployeeProjectView";
+import HRInsurance from "./hr/Insurance";
+import EmployeeInsurance from "./employee/Insurance";
 import PayrollLayout from "./payroll/PayrollLayout";
+import TaxDeclarationHR from "./payroll/hr/TaxDeclarationHR";
 import SalaryStructures from "./payroll/hr/SalaryStructures";
 import RunPayroll from "./payroll/hr/RunPayroll";
 import Payslips from "./payroll/hr/Payslips";
@@ -32,7 +44,10 @@ import MyPayslips from "./payroll/employee/MyPayslips";
 import { AuthProvider } from "./contexts/AuthContext";
 import { TenantProvider } from "./contexts/TenantContext";
 import { useAuth } from "./hooks/useAuth";
+import { ManagerViewProvider } from "./hooks/useManagerView";
 import Login from "./shared/Login";
+import Connect from "./shared/pages/Connect";
+import OrgChart from "./shared/pages/OrgChart";
 import ProductSelector from "./shared/ProductSelector";
 import { ToastProvider } from "./shared/ToastContext";
 import AdminLayout from "./admin/AdminLayout";
@@ -143,6 +158,14 @@ function TenantRoutes() {
           <Route path="chat" element={<HRChat />} />
           <Route path="policy-center" element={<PolicyCenter />} />
           <Route path="office-locations" element={<OfficeLocations />} />
+          <Route path="directory" element={<Directory />} />
+          <Route path="org-chart" element={<OrgChart />} />
+          <Route path="connect" element={<Connect />} />
+          <Route path="pms" element={<ProjectList />} />
+          <Route path="pms/:projectId" element={<ProjectDetail />} />
+          <Route path="expenses" element={<HRExpenses />} />
+          <Route path="insurance" element={<HRInsurance />} />
+          <Route path="declarations" element={<TaxDeclarationHR />} />
           <Route path="settings" element={<Navigate to="/hr/policy-center" replace />} />
         </Route>
 
@@ -176,7 +199,9 @@ function TenantRoutes() {
           path="/employee"
           element={
             <RequireRole role="employee">
-              <EmployeeLayout />
+              <ManagerViewProvider>
+                <EmployeeLayout />
+              </ManagerViewProvider>
             </RequireRole>
           }
         >
@@ -188,6 +213,14 @@ function TenantRoutes() {
           <Route path="tasks" element={<MyTasks />} />
           <Route path="policies" element={<Policies />} />
           <Route path="chat" element={<EmployeeChat />} />
+          <Route path="connect" element={<Connect />} />
+          <Route path="directory" element={<Directory />} />
+          <Route path="org-chart" element={<OrgChart />} />
+          <Route path="id-card" element={<IDCardPage />} />
+          <Route path="my-team" element={<MyTeam />} />
+          <Route path="pms/:projectId" element={<EmployeeProjectView />} />
+          <Route path="expenses" element={<EmployeeExpenses />} />
+          <Route path="insurance" element={<EmployeeInsurance />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -217,3 +250,4 @@ export default function App() {
     </Routes>
   );
 }
+// Trigger refresh

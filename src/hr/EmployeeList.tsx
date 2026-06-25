@@ -17,24 +17,31 @@ export default function EmployeeList() {
   const [search, setSearch] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [gradeFilter, setGradeFilter] = useState("all");
+  const [workLocationFilter, setWorkLocationFilter] = useState("all");
 
   const { error: toastError } = useToast();
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
 
     const fetchEmployees = async () => {
       try {
         const { data, error } = await db
           .from("employees")
-          .select("*")
+          .select("*, manager:employees!manager_id(full_name)")
           .eq("tenant_id", tenantId)
           .order("created_at", { ascending: false });
 
         if (error) throw error;
 
         if (active) {
-          setEmployees((data as Employee[]) ?? []);
+          const mapped = (data as any[] ?? []).map((emp) => ({
+            ...emp,
+            manager_name: emp.manager?.full_name || null,
+          }));
+          setEmployees(mapped);
         }
       } catch (err) {
         toastError("Failed to fetch employees.");
@@ -49,20 +56,44 @@ export default function EmployeeList() {
     };
   }, [tenantId, toastError]);
 
+  const gradeOptions = useMemo(() => {
+    const grades = new Set<string>();
+    employees.forEach((emp) => {
+      if (emp.grade && emp.grade.trim()) {
+        grades.add(emp.grade.trim());
+      }
+    });
+    return [
+      { value: "all", label: "All Grades" },
+      ...Array.from(grades).sort().map((g) => ({ value: g, label: g })),
+    ];
+  }, [employees]);
+
+  const workLocationOptions = [
+    { value: "all", label: "All Locations" },
+    { value: "Head Office", label: "Head Office" },
+    { value: "Branch Office", label: "Branch Office" },
+    { value: "Remote", label: "Remote" },
+    { value: "Work From Home", label: "Work From Home" },
+    { value: "Other", label: "Other" },
+  ];
+
   const filteredEmployees = useMemo(() => {
     const normalizedQuery = search.trim().toLowerCase();
 
     return employees.filter((employee) => {
       const matchesDepartment = departmentFilter === "all" || employee.department === departmentFilter;
       const matchesStatus = statusFilter === "all" || employee.status === statusFilter;
+      const matchesGrade = gradeFilter === "all" || employee.grade === gradeFilter;
+      const matchesLocation = workLocationFilter === "all" || employee.work_location === workLocationFilter;
       const matchesSearch =
         normalizedQuery.length === 0 ||
         employee.full_name.toLowerCase().includes(normalizedQuery) ||
         (employee.employee_code ?? "").toLowerCase().includes(normalizedQuery);
 
-      return matchesDepartment && matchesStatus && matchesSearch;
+      return matchesDepartment && matchesStatus && matchesGrade && matchesLocation && matchesSearch;
     });
-  }, [employees, search, departmentFilter, statusFilter]);
+  }, [employees, search, departmentFilter, statusFilter, gradeFilter, workLocationFilter]);
 
   const statusBadgeClass = (status: Employee["status"]) => {
     if (status === "active") return "bg-emerald-100 text-emerald-700";
@@ -87,8 +118,8 @@ export default function EmployeeList() {
         </button>
       </div>
 
-      <div className="mt-4 flex flex-col gap-3 md:grid md:grid-cols-3">
-        <div className="relative">
+      <div className="mt-4 flex flex-col gap-3 lg:grid lg:grid-cols-5">
+        <div className="relative lg:col-span-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             value={search}
@@ -98,7 +129,7 @@ export default function EmployeeList() {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-3 md:col-span-2 md:grid-cols-2">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:col-span-4">
           <SelectDropdown
             value={departmentFilter}
             onChange={setDepartmentFilter}
@@ -125,6 +156,20 @@ export default function EmployeeList() {
             ]}
             triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
           />
+
+          <SelectDropdown
+            value={gradeFilter}
+            onChange={setGradeFilter}
+            options={gradeOptions}
+            triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+          />
+
+          <SelectDropdown
+            value={workLocationFilter}
+            onChange={setWorkLocationFilter}
+            options={workLocationOptions}
+            triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+          />
         </div>
       </div>
 
@@ -138,6 +183,7 @@ export default function EmployeeList() {
               <th className="px-4 py-3">Employee Code</th>
               <th className="px-4 py-3">Department</th>
               <th className="px-4 py-3">Designation</th>
+              <th className="px-4 py-3">Manager</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3"></th>
             </tr>
@@ -151,17 +197,18 @@ export default function EmployeeList() {
                   <td className="px-4 py-3"><Skeleton className="h-4 w-20" /></td>
                   <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
                   <td className="px-4 py-3"><Skeleton className="h-4 w-28" /></td>
+                  <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
                   <td className="px-4 py-3"><Skeleton className="h-6 w-16 rounded-full" /></td>
                   <td className="px-4 py-3"></td>
                 </tr>
               ))
             ) : filteredEmployees.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-10">
+                <td colSpan={8} className="p-10">
                   <EmptyState 
                     icon={Users} 
                     title="No employees found" 
-                    description={search || departmentFilter !== "all" || statusFilter !== "all" ? "No employees match your filters." : "No employees yet. Click 'Add Employee' to create the first profile."}
+                    description={search || departmentFilter !== "all" || statusFilter !== "all" || gradeFilter !== "all" || workLocationFilter !== "all" ? "No employees match your filters." : "No employees yet. Click 'Add Employee' to create the first profile."}
                   />
                 </td>
               </tr>
@@ -189,6 +236,7 @@ export default function EmployeeList() {
                   <td className="px-4 py-3 text-slate-700">{employee.employee_code ?? "—"}</td>
                   <td className="px-4 py-3 capitalize text-slate-700">{employee.department ?? "—"}</td>
                   <td className="px-4 py-3 text-slate-700 capitalize">{employee.designation?.toLowerCase() ?? "—"}</td>
+                  <td className="px-4 py-3 text-slate-700">{employee.manager_name ?? "—"}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusBadgeClass(employee.status)}`}>
                       <span className={`h-1.5 w-1.5 rounded-full ${employee.status === 'active' ? 'bg-emerald-500' : employee.status === 'inactive' ? 'bg-amber-500' : 'bg-rose-500'}`}></span>
@@ -222,7 +270,7 @@ export default function EmployeeList() {
             <EmptyState 
               icon={Users} 
               title="No employees found" 
-              description={search || departmentFilter !== "all" || statusFilter !== "all" ? "No matches for your filters." : "No employees yet."}
+              description={search || departmentFilter !== "all" || statusFilter !== "all" || gradeFilter !== "all" || workLocationFilter !== "all" ? "No matches for your filters." : "No employees yet."}
             />
           </div>
         ) : (

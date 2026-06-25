@@ -1,0 +1,12 @@
+Schema retrieved completed successfully:
+{
+  "post_reactions": {
+    "schema": [],
+    "indexes": [],
+    "foreignKeys": [],
+    "rlsEnabled": false,
+    "policies": [],
+    "triggers": [],
+    "rows": []
+  }
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { Calendar, FileText } from "lucide-react";
-import type { Leave } from "../types";
+import type { Leave, Employee } from "../types";
 import { db } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
 import { useTenant } from "../contexts/TenantContext";
@@ -11,8 +11,9 @@ import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { formatLocalDate } from "../utils/date";
 import { calculateBusinessDays } from "../utils/leave";
+import { useManagerView } from "../hooks/useManagerView";
 
-type Tab = "apply" | "history";
+type Tab = "apply" | "history" | "team_requests";
 
 const TODAY = formatLocalDate(new Date());
 
@@ -44,6 +45,7 @@ export default function MyLeaves() {
   const { employee } = useEmployee();
   const { tenantId } = useTenant();
   const { shift } = useEmployeeShift();
+  const { isManagerMode, directReportIds } = useManagerView();
   
   const [tab, setTab] = useState<Tab>("history");
   const [leaves, setLeaves] = useState<Leave[]>([]);
@@ -60,13 +62,31 @@ export default function MyLeaves() {
   const { success, error } = useToast();
   const [cancelModal, setCancelModal] = useState<{ isOpen: boolean; leaveId: string | null; dates: string; type: string }>({ isOpen: false, leaveId: null, dates: "", type: "" });
 
+  // Manager-specific states
+  const [teamEmployees, setTeamEmployees] = useState<Employee[]>([]);
+  const [rejectId, setRejectId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
+
+  useEffect(() => {
+    if (isManagerMode) {
+      setTab("team_requests");
+    } else {
+      setTab("history");
+    }
+  }, [isManagerMode]);
+
   const fetchData = async () => {
     if (!employee?.id || !tenantId) return;
     try {
       const currentYear = new Date().getFullYear();
       
+      const leavesQuery = isManagerMode
+        ? db.from("leaves").select("*").eq("tenant_id", tenantId).in("employee_id", directReportIds.length > 0 ? directReportIds : ["none"]).order("applied_at", { ascending: false })
+        : db.from("leaves").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).order("applied_at", { ascending: false });
+
       const [leavesRes, typesRes, balancesRes, holidaysRes, settingsRes] = await Promise.all([
-        db.from("leaves").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).order("applied_at", { ascending: false }),
+        leavesQuery,
         // Gap #6a: fetch all policy-relevant leave_type columns.
         db.from("leave_types").select("id, name, code, is_active, min_notice_days, max_consecutive_days, applicable_from_day, requires_document").eq("tenant_id", tenantId).eq("is_active", true).order("name"),
         db.from("leave_balances").select("id, leave_type_id, balance").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("year", currentYear),
@@ -97,6 +117,20 @@ export default function MyLeaves() {
       if (types.length > 0 && !form.leave_type_id) {
         setForm(prev => ({ ...prev, leave_type_id: types[0].id }));
       }
+
+      // Fetch team employees if in manager view
+      if (isManagerMode && directReportIds.length > 0) {
+        const { data: teamData, error: teamErr } = await db
+          .from("employees")
+          .select("*")
+          .eq("tenant_id", tenantId)
+          .in("id", directReportIds);
+        if (!teamErr && teamData) {
+          setTeamEmployees(teamData as Employee[]);
+        }
+      } else {
+        setTeamEmployees([]);
+      }
     } catch (err) {
       error("Failed to load leave data.");
     } finally {
@@ -104,7 +138,7 @@ export default function MyLeaves() {
     }
   };
 
-  useEffect(() => { void fetchData(); }, [employee?.id, tenantId]);
+  useEffect(() => { void fetchData(); }, [employee?.id, tenantId, isManagerMode, directReportIds]);
 
   // Calculate dynamic business days
   const { total_days: totalDays } = useMemo(() => {
@@ -117,6 +151,52 @@ export default function MyLeaves() {
     const balanceObj = leaveBalances.find(b => b.leave_type_id === form.leave_type_id);
     return balanceObj?.balance ?? 0;
   }, [form.leave_type_id, leaveBalances]);
+
+  async function handleApprove(leave: Leave) {
+    setActionLoading(true);
+    try {
+      const { error: rpcErr } = await db.rpc("approve_leave_request", {
+        p_leave_id: leave.id,
+        p_working_dates: null,
+        p_approved_business_days: null,
+      });
+
+      if (rpcErr) throw rpcErr;
+      success("Leave approved successfully.");
+      void fetchData();
+    } catch (err: any) {
+      console.error(err);
+      error(err.message || "Failed to approve leave.");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleReject(leave: Leave) {
+    if (!rejectReason.trim()) {
+      error("Please enter a rejection reason.");
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const { error: rpcErr } = await db.rpc("cancel_leave_request", {
+        p_leave_id: leave.id,
+        p_rejection_reason: rejectReason,
+        p_new_status: "rejected",
+      });
+      
+      if (rpcErr) throw rpcErr;
+      success("Leave request rejected.");
+      setRejectId(null);
+      setRejectReason("");
+      void fetchData();
+    } catch (err: any) {
+      console.error(err);
+      error(err.message || "Failed to reject leave.");
+    } finally {
+      setActionLoading(false);
+    }
+  }
 
   async function applyLeave(e: React.FormEvent) {
     e.preventDefault();
@@ -245,35 +325,58 @@ export default function MyLeaves() {
 
   const pendingCount = leaves.filter(l => l.status === "pending").length;
 
+  const tabOptions = isManagerMode
+    ? ([["team_requests", "Team Requests"], ["history", "Team History"]] as const)
+    : ([["history", "My History"], ["apply", "+ Apply Leave"]] as const);
+
   return (
     <section className="space-y-5">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900">My Leaves</h2>
-        <p className="text-sm text-slate-500">Apply for leave and track your requests.</p>
+        <h2 className="text-xl font-semibold text-slate-900">{isManagerMode ? "Team Leaves" : "My Leaves"}</h2>
+        <p className="text-sm text-slate-500">
+          {isManagerMode ? "Manage leave requests from your direct reports." : "Apply for leave and track your requests."}
+        </p>
       </div>
 
-      {/* Leave balance */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {leaveTypes.slice(0, 3).map(type => {
-          const bal = leaveBalances.find(b => b.leave_type_id === type.id)?.balance ?? 0;
-          return (
-            <div key={type.id} className="rounded-2xl border border-slate-200 bg-white p-4 text-center shadow-sm">
-              <p className="text-xs font-medium text-slate-500">{type.name} Balance</p>
-              <p className="text-2xl font-bold text-brand-600 mt-1">{bal}</p>
-              <p className="text-xs text-slate-400">days left</p>
-            </div>
-          );
-        })}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 text-center shadow-sm">
-          <p className="text-xs font-medium text-slate-500">Total Pending</p>
-          <p className="text-2xl font-bold text-rose-600 mt-1">{pendingCount}</p>
-          <p className="text-xs text-slate-400">requests</p>
+      {/* Leave balance / Team stats */}
+      {!isManagerMode ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {leaveTypes.slice(0, 3).map(type => {
+            const bal = leaveBalances.find(b => b.leave_type_id === type.id)?.balance ?? 0;
+            return (
+              <div key={type.id} className="rounded-2xl border border-slate-200 bg-white p-4 text-center shadow-sm">
+                <p className="text-xs font-medium text-slate-500">{type.name} Balance</p>
+                <p className="text-2xl font-bold text-brand-600 mt-1">{bal}</p>
+                <p className="text-xs text-slate-400">days left</p>
+              </div>
+            );
+          })}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 text-center shadow-sm">
+            <p className="text-xs font-medium text-slate-500">Total Pending</p>
+            <p className="text-2xl font-bold text-rose-600 mt-1">{pendingCount}</p>
+            <p className="text-xs text-slate-400">requests</p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 text-center shadow-sm col-span-2 sm:col-span-1">
+            <p className="text-xs font-medium text-slate-500">Pending Team Requests</p>
+            <p className="text-2xl font-bold text-amber-600 mt-1">
+              {leaves.filter(l => l.status === "pending").length}
+            </p>
+            <p className="text-xs text-slate-400">awaiting review</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 text-center shadow-sm col-span-2 sm:col-span-1">
+            <p className="text-xs font-medium text-slate-500">Total Direct Reports</p>
+            <p className="text-2xl font-bold text-brand-600 mt-1">{teamEmployees.length}</p>
+            <p className="text-xs text-slate-400">team members</p>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-xl bg-slate-100 p-1 w-fit">
-        {([["history","My History"],["apply","+ Apply Leave"]] as const).map(([k,l]) => (
+        {tabOptions.map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`rounded-lg px-4 py-2 text-sm font-medium transition ${tab===k ? "bg-white shadow text-slate-900" : "text-slate-500 hover:text-slate-700"}`}>
             {l}
@@ -281,8 +384,89 @@ export default function MyLeaves() {
         ))}
       </div>
 
+      {/* Team Leave Requests Tab */}
+      {tab === "team_requests" && isManagerMode && (
+        <div className="space-y-4">
+          {loading ? (
+            [...Array(2)].map((_, i) => <Skeleton key={i} className="h-40 w-full rounded-2xl" />)
+          ) : leaves.filter(l => l.status === "pending").length === 0 ? (
+            <div className="py-10">
+              <EmptyState
+                icon={Calendar}
+                title="No pending team requests"
+                description="Your direct reports have not submitted any pending leave requests."
+              />
+            </div>
+          ) : (
+            leaves.filter(l => l.status === "pending").map((leave) => {
+              const emp = teamEmployees.find((e) => e.id === leave.employee_id);
+              const typeName = leave.leave_type_id ? leaveTypes.find(t => t.id === leave.leave_type_id)?.name : leave.leave_type;
+              return (
+                <div key={leave.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      {emp?.profile_photo_url ? (
+                        <img src={emp.profile_photo_url} alt="" className="h-11 w-11 rounded-full object-cover" />
+                      ) : (
+                        <div className="grid h-11 w-11 place-items-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
+                          {emp?.full_name?.slice(0, 2).toUpperCase() ?? "??"}
+                        </div>
+                      )}
+                      <div>
+                        <p className="font-semibold text-slate-900">{emp?.full_name ?? "Unknown"}</p>
+                        <p className="text-xs capitalize text-slate-500">{emp?.department ?? "—"} · {emp?.designation ?? "—"}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-3 text-sm text-slate-600">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium capitalize">{typeName || leave.leave_type || "Leave"}</span>
+                      <span>{leave.start_date} → {leave.end_date}</span>
+                      <span className="font-semibold text-slate-800">{leave.total_days ?? "?"} days</span>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-sm text-slate-700"><span className="font-medium">Reason:</span> {leave.reason}</p>
+                  
+                  {rejectId === leave.id ? (
+                    <div className="mt-3 flex flex-col gap-2">
+                      <textarea
+                        value={rejectReason}
+                        onChange={(e) => setRejectReason(e.target.value)}
+                        placeholder="Rejection reason (required)…"
+                        rows={2}
+                        required
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-rose-500 focus:ring"
+                      />
+                      <div className="flex gap-2">
+                        <button onClick={() => handleReject(leave)} disabled={actionLoading}
+                          className="rounded-lg bg-rose-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-50">
+                          Confirm Reject
+                        </button>
+                        <button onClick={() => { setRejectId(null); setRejectReason(""); }}
+                          className="rounded-lg border border-slate-200 px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-50">
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 flex gap-2">
+                      <button onClick={() => handleApprove(leave)} disabled={actionLoading}
+                        className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                        Approve
+                      </button>
+                      <button onClick={() => setRejectId(leave.id)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-rose-300 bg-rose-50 px-4 py-1.5 text-sm font-semibold text-rose-700 hover:bg-rose-100">
+                        Reject
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
       {/* Apply Form */}
-      {tab === "apply" && (
+      {tab === "apply" && !isManagerMode && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm max-w-lg">
           <h3 className="font-semibold text-slate-800 mb-4">Apply for Leave</h3>
           {leaveTypes.length === 0 ? (
@@ -351,6 +535,9 @@ export default function MyLeaves() {
           <table className="w-full text-sm min-w-[600px]">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
+                {isManagerMode && (
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Employee</th>
+                )}
                 {["Type","Dates","Days","Reason","Status","Action"].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">{h}</th>
                 ))}
@@ -360,6 +547,7 @@ export default function MyLeaves() {
               {loading ? (
                 [...Array(3)].map((_, i) => (
                   <tr key={i}>
+                    {isManagerMode && <td className="px-4 py-3"><Skeleton className="h-4 w-full max-w-[100px]" /></td>}
                     {[...Array(6)].map((_, j) => (
                       <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-full max-w-[100px]" /></td>
                     ))}
@@ -367,19 +555,23 @@ export default function MyLeaves() {
                 ))
               ) : leaves.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-8">
+                  <td colSpan={isManagerMode ? 7 : 6} className="p-8">
                     <EmptyState 
                       icon={Calendar} 
-                      title="You haven't applied for any leaves yet" 
-                      description="When you apply for a leave, its history will show up here."
-                      action={<button onClick={() => setTab("apply")} className="text-brand-600 font-medium text-sm hover:underline">Apply for Leave</button>}
+                      title={isManagerMode ? "No team leaves recorded" : "You haven't applied for any leaves yet"} 
+                      description={isManagerMode ? "Team members' approved/rejected/cancelled leaves will appear here." : "When you apply for a leave, its history will show up here."}
+                      action={!isManagerMode && <button onClick={() => setTab("apply")} className="text-brand-600 font-medium text-sm hover:underline">Apply for Leave</button>}
                     />
                   </td>
                 </tr>
               ) : leaves.map(l => {
                 const typeName = l.leave_type_id ? leaveTypes.find(t => t.id === l.leave_type_id)?.name : l.leave_type;
+                const emp = teamEmployees.find((e) => e.id === l.employee_id);
                 return (
                   <tr key={l.id} className="hover:bg-slate-50 transition">
+                    {isManagerMode && (
+                      <td className="px-4 py-3 font-semibold text-slate-900">{emp?.full_name ?? "—"}</td>
+                    )}
                     <td className="px-4 py-3 capitalize font-medium text-slate-800">{typeName || l.leave_type || "—"}</td>
                     <td className="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">{l.start_date} → {l.end_date}</td>
                     <td className="px-4 py-3 text-slate-600">{l.total_days ?? "—"}</td>
@@ -393,11 +585,26 @@ export default function MyLeaves() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      {l.status === "pending" && (
-                        <button onClick={() => setCancelModal({ isOpen: true, leaveId: l.id, dates: `${l.start_date} to ${l.end_date}`, type: typeName || l.leave_type || "Leave" })}
-                          className="rounded-lg border border-rose-200 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50">
-                          Cancel
-                        </button>
+                      {isManagerMode ? (
+                        l.status === "pending" && (
+                          <div className="flex gap-1">
+                            <button onClick={() => handleApprove(l)} disabled={actionLoading}
+                              className="rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">
+                              Approve
+                            </button>
+                            <button onClick={() => setRejectId(l.id)}
+                              className="rounded-lg bg-rose-50 border border-rose-200 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100">
+                              Reject
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        l.status === "pending" && (
+                          <button onClick={() => setCancelModal({ isOpen: true, leaveId: l.id, dates: `${l.start_date} to ${l.end_date}`, type: typeName || l.leave_type || "Leave" })}
+                            className="rounded-lg border border-rose-200 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50">
+                            Cancel
+                          </button>
+                        )
                       )}
                     </td>
                   </tr>

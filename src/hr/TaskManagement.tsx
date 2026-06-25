@@ -32,7 +32,13 @@ const STATUS_BADGE: Record<Task["status"], string> = {
   overdue: "bg-red-100 text-red-700",
 };
 
-interface TaskWithEmployee extends Task { assignee?: Employee; submission?: TaskSubmission; }
+import { Link } from "react-router-dom";
+
+interface TaskWithEmployee extends Task {
+  assignee?: Employee;
+  submission?: TaskSubmission;
+  projects?: { name: string } | null;
+}
 
 const EMPTY_FORM = {
   title: "", description: "", assigned_to: "", assign_mode: "employee" as "employee"|"department",
@@ -70,7 +76,7 @@ export default function TaskManagement() {
   const fetchTasks = useCallback(async () => {
     setLoading(true);
     try {
-      let q = db.from("tasks").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false });
+      let q = db.from("tasks").select("*, projects(name)").eq("tenant_id", tenantId).order("created_at", { ascending: false });
       if (tab === "active") q = q.in("status", ["in_progress", ...BLOCKING_TASK_STATUSES]);
       if (tab === "inbox") q = q.eq("status","submitted");
       if (statusFilter !== "all" && tab === "all") q = q.eq("status", statusFilter);
@@ -492,7 +498,7 @@ export default function TaskManagement() {
             <table className="w-full text-sm">
               <thead className="border-b border-slate-200 bg-slate-50">
                 <tr>
-                  {["Task","Assigned To","Dept","Priority","Due Date","Status","Actions"].map(h => (
+                  {["Task","Project","Assigned To","Dept","Priority","Due Date","Status","Actions"].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">{h}</th>
                   ))}
                 </tr>
@@ -501,14 +507,14 @@ export default function TaskManagement() {
                 {loading ? (
                   [...Array(5)].map((_, i) => (
                     <tr key={i}>
-                      {[...Array(7)].map((_, j) => (
+                      {[...Array(8)].map((_, j) => (
                         <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-full max-w-[100px]" /></td>
                       ))}
                     </tr>
                   ))
                 ) : tasks.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-10">
+                    <td colSpan={8} className="p-10">
                       <EmptyState icon={ClipboardList} title="No tasks found" description="No tasks match the current filters." minimal />
                     </td>
                   </tr>
@@ -518,6 +524,15 @@ export default function TaskManagement() {
                     <tr key={task.id} className={`hover:bg-slate-50 transition cursor-pointer ${expanded?"bg-slate-50":""}`}
                       onClick={() => setExpandedId(expanded ? null : task.id)}>
                       <td className="px-4 py-3 font-medium text-slate-900">{task.title}</td>
+                      <td className="px-4 py-3">
+                        {task.project_id ? (
+                          <Link to={`/hr/pms/${task.project_id}`} className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 transition" onClick={e => e.stopPropagation()}>
+                            {task.projects?.name || "Project"}
+                          </Link>
+                        ) : (
+                          <span className="text-xs text-slate-400 font-medium">Standalone</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-slate-600">{task.assignee?.full_name ?? "—"}</td>
                       <td className="px-4 py-3 capitalize text-slate-500 text-xs">{task.assignee?.department ?? "—"}</td>
                       <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${PRIORITY_BADGE[task.priority]}`}>{task.priority}</span></td>
@@ -540,7 +555,7 @@ export default function TaskManagement() {
                     </tr>,
                     expanded && task.description ? (
                       <tr key={`${task.id}-detail`} className="bg-slate-50">
-                        <td colSpan={7} className="px-4 pb-4 pt-0">
+                        <td colSpan={8} className="px-4 pb-4 pt-0">
                           <p className="rounded-xl bg-white border border-slate-200 px-4 py-3 text-sm text-slate-600">{task.description}</p>
                         </td>
                       </tr>

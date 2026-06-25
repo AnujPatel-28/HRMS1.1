@@ -9,6 +9,15 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* Org Chart Variable Tokens */
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #f8fafc;
+  --color-background-info: #e0f2fe;
+  --color-border-secondary: #e2e8f0;
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #64748b;
+  --color-text-info: #0369a1;
 }
 
 body {
@@ -58,3 +67,35 @@ h6 {
     padding-right: max(env(safe-area-inset-right), 1rem) !important;
   }
 }
+
+/* Print Styles for Org Chart printing */
+@media print {
+  header,
+  aside,
+  nav,
+  .print-hide {
+    display: none !important;
+  }
+  
+  body {
+    background: white !important;
+    background-image: none !important;
+  }
+
+  main,
+  .print-container {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .org-chart-wrapper {
+    overflow: visible !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+}
+

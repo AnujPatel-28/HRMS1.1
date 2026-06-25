@@ -28,6 +28,8 @@ export type PayslipPdfData = {
   finalNet?: number;
   overtimeAmount?: number;
   lateMarkDeductionAmount?: number;
+  expensesReimbursement?: number;
+  expenseItems?: any[];
 };
 
 type StorageClient = {
@@ -182,6 +184,36 @@ export function buildPayslipTemplateHtml(
         </tr>
       </table>
     </div>
+
+    ${slip.expenseItems && slip.expenseItems.length > 0 ? `
+    <div style="border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;margin-bottom:22px;padding:18px 22px;box-sizing:border-box">
+      <p style="margin:0 0 10px;font-size:12px;font-weight:800;color:#0f172a;text-transform:uppercase;letter-spacing:.08em">Reimbursements</p>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr style="border-bottom:1px solid #e2e8f0;color:#64748b">
+            <th style="text-align:left;padding:6px 0">Date</th>
+            <th style="text-align:left;padding:6px 0">Category</th>
+            <th style="text-align:left;padding:6px 0">Title</th>
+            <th style="text-align:right;padding:6px 0">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${slip.expenseItems.map((exp: any) => `
+            <tr style="border-bottom:1px dashed #f1f5f9">
+              <td style="padding:8px 0;color:#334155">${esc(exp.expense_date)}</td>
+              <td style="padding:8px 0;color:#334155;text-transform:capitalize">${esc(exp.category)}</td>
+              <td style="padding:8px 0;color:#334155">${esc(exp.title)}</td>
+              <td style="padding:8px 0;text-align:right;color:#0f172a;font-weight:600">${formatCurrency(exp.amount)}</td>
+            </tr>
+          `).join('')}
+          <tr>
+            <td colspan="3" style="padding:10px 0 0;font-weight:700;color:#0f172a">Total Reimbursements</td>
+            <td style="padding:10px 0 0;text-align:right;font-weight:700;color:#0f172a">${formatCurrency(slip.expensesReimbursement || 0)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    ` : ""}
 
     <table style="width:100%;border-collapse:collapse;background:#ecfdf5;border:1px solid #bbf7d0;border-radius:12px;overflow:hidden">
       <tr>

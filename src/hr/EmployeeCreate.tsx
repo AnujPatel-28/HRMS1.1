@@ -1,5 +1,7 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { ChevronDown } from "lucide-react";
+import type { Employee } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { insforge, db } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
@@ -30,6 +32,9 @@ interface FormState {
   emergency_contact_phone: string;
   emergency_contact_relation: string;
   work_mode: "office" | "remote" | "hybrid";
+  grade: string;
+  work_location: string;
+  manager_id: string;
 }
 
 const initialState: FormState = {
@@ -56,6 +61,9 @@ const initialState: FormState = {
   emergency_contact_phone: "",
   emergency_contact_relation: "",
   work_mode: "office",
+  grade: "",
+  work_location: "",
+  manager_id: "",
 };
 
 const stepTitles = [
@@ -111,6 +119,54 @@ export default function EmployeeCreate() {
 
   const [insertedEmployeeId, setInsertedEmployeeId] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState({ profile: false, aadhaar: false, pan: false });
+
+  const [activeEmployees, setActiveEmployees] = useState<Employee[]>([]);
+  const [managerSearch, setManagerSearch] = useState("");
+  const [isManagerDropdownOpen, setIsManagerDropdownOpen] = useState(false);
+  const managerDropdownRef = useRef<HTMLDivElement>(null);
+
+  const selectedManager = useMemo(() => {
+    return activeEmployees.find((emp) => emp.id === form.manager_id);
+  }, [activeEmployees, form.manager_id]);
+
+  // Synchronize managerSearch input with selectedManager name
+  useEffect(() => {
+    if (selectedManager && !isManagerDropdownOpen) {
+      setManagerSearch(selectedManager.full_name);
+    } else if (!form.manager_id && !isManagerDropdownOpen) {
+      setManagerSearch("");
+    }
+  }, [selectedManager, form.manager_id, isManagerDropdownOpen]);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (managerDropdownRef.current && !managerDropdownRef.current.contains(event.target as Node)) {
+        setIsManagerDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredManagers = useMemo(() => {
+    const q = managerSearch.toLowerCase().trim();
+    if (!q) return activeEmployees;
+    return activeEmployees.filter(emp => emp.full_name.toLowerCase().includes(q));
+  }, [activeEmployees, managerSearch]);
+
+  useEffect(() => {
+    if (tenantId) {
+      db.from("employees")
+        .select("id, full_name, designation, profile_photo_url")
+        .eq("tenant_id", tenantId)
+        .eq("status", "active")
+        .order("full_name")
+        .then(({ data }) => {
+          if (data) setActiveEmployees(data as Employee[]);
+        });
+    }
+  }, [tenantId]);
 
   const validateFile = (file: File | null, type: string, allowedTypes: string[]) => {
     if (!file) return null;
@@ -366,6 +422,9 @@ export default function EmployeeCreate() {
                 emergency_contact_phone: empData.emergency_contact_phone || "",
                 emergency_contact_relation: empData.emergency_contact_relation || "",
                 work_mode: empData.work_mode || "office",
+                grade: empData.grade || "",
+                work_location: empData.work_location || "",
+                manager_id: empData.manager_id || "",
               });
             }
           }
@@ -508,6 +567,9 @@ export default function EmployeeCreate() {
               emergency_contact_relation: form.emergency_contact_relation.trim() || null,
               status: "active",
               work_mode: form.work_mode,
+              grade: form.grade.trim() || null,
+              work_location: form.work_location || null,
+              manager_id: form.manager_id || null,
             },
           ])
           .select()
@@ -594,6 +656,9 @@ export default function EmployeeCreate() {
             emergency_contact_phone: form.emergency_contact_phone.trim(),
             emergency_contact_relation: form.emergency_contact_relation.trim() || null,
             work_mode: form.work_mode,
+            grade: form.grade.trim() || null,
+            work_location: form.work_location || null,
+            manager_id: form.manager_id || null,
           })
           .eq("tenant_id", tenantId)
           .eq("id", currentEmployeeId);
@@ -1104,7 +1169,7 @@ export default function EmployeeCreate() {
                   <option value="intern">Intern</option>
                 </select>
               </label>
-              <label className="text-sm md:col-span-2">
+              <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Work Mode</span>
                 <select
                   value={form.work_mode}
@@ -1116,6 +1181,119 @@ export default function EmployeeCreate() {
                   <option value="hybrid">Hybrid</option>
                 </select>
               </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-600">Grade</span>
+                <input
+                  type="text"
+                  placeholder="e.g. M3, Senior"
+                  maxLength={50}
+                  value={form.grade}
+                  onChange={(event) => handleChange("grade", event.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
+                />
+              </label>
+              <label className="text-sm md:col-span-2">
+                <span className="mb-1 block text-slate-600">Work Location</span>
+                <select
+                  value={form.work_location}
+                  onChange={(event) => handleChange("work_location", event.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
+                >
+                  <option value="">Select Work Location</option>
+                  <option value="Head Office">Head Office</option>
+                  <option value="Branch Office">Branch Office</option>
+                  <option value="Remote">Remote</option>
+                  <option value="Work From Home">Work From Home</option>
+                  <option value="Other">Other</option>
+                </select>
+              </label>
+              <div className="relative text-sm md:col-span-2 font-medium text-slate-700" ref={managerDropdownRef}>
+                <span className="mb-1 block text-slate-600 font-normal">Reporting Manager</span>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search reporting manager..."
+                    value={managerSearch}
+                    onFocus={() => {
+                      setIsManagerDropdownOpen(true);
+                      if (selectedManager) {
+                        setManagerSearch("");
+                      }
+                    }}
+                    onChange={(e) => {
+                      setManagerSearch(e.target.value);
+                      setIsManagerDropdownOpen(true);
+                    }}
+                    className="w-full rounded-lg border border-slate-300 pl-3 pr-10 py-2 outline-none ring-brand-600 focus:ring font-normal text-slate-900"
+                  />
+                  {form.manager_id ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleChange("manager_id", "");
+                        setManagerSearch("");
+                      }}
+                      className="absolute right-8 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-semibold"
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <ChevronDown className="h-4 w-4" />
+                  </div>
+                </div>
+
+                {selectedManager && !isManagerDropdownOpen && (
+                  <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-200 px-3 py-1.5 text-xs text-slate-700 font-normal">
+                    {selectedManager.profile_photo_url ? (
+                      <img src={selectedManager.profile_photo_url} alt="" className="h-5 w-5 rounded-full object-cover" />
+                    ) : (
+                      <div className="grid h-5 w-5 place-items-center rounded-full bg-slate-200 font-bold text-slate-600">
+                        {selectedManager.full_name.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <div>
+                      <span className="font-semibold text-slate-900">{selectedManager.full_name}</span>
+                      <span className="text-slate-500"> — {selectedManager.designation || "No designation"}</span>
+                    </div>
+                  </div>
+                )}
+
+                {isManagerDropdownOpen && (
+                  <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5">
+                    {filteredManagers.length === 0 ? (
+                      <div className="px-4 py-2 text-slate-500 text-xs font-normal">No active employees found</div>
+                    ) : (
+                      filteredManagers.map((emp) => (
+                        <button
+                          key={emp.id}
+                          type="button"
+                          onClick={() => {
+                            handleChange("manager_id", emp.id);
+                            setManagerSearch(emp.full_name);
+                            setIsManagerDropdownOpen(false);
+                          }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 transition-colors font-normal ${
+                            form.manager_id === emp.id ? "bg-slate-50 font-semibold" : ""
+                          }`}
+                        >
+                          {emp.profile_photo_url ? (
+                            <img src={emp.profile_photo_url} alt="" className="h-6 w-6 rounded-full object-cover" />
+                          ) : (
+                            <div className="grid h-6 w-6 place-items-center rounded-full bg-slate-100 font-bold text-slate-600 text-[10px]">
+                              {emp.full_name.slice(0, 2).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-xs text-slate-900 truncate font-semibold">{emp.full_name}</p>
+                            <p className="text-[10px] text-slate-500 truncate">{emp.designation || "—"}</p>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           ) : null}
 

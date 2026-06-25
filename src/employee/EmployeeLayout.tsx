@@ -1,19 +1,27 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { LogOut, LayoutDashboard, User, Clock, Calendar, ClipboardList, FileText, MessageSquare, X, Wallet, Home, MoreHorizontal, Menu } from "lucide-react";
+import { LogOut, LayoutDashboard, User, Clock, Calendar, ClipboardList, FileText, MessageSquare, X, Wallet, Home, MoreHorizontal, Menu, Contact, CreditCard, Users, Rss, GitBranch, FolderKanban, Receipt, Shield } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
+import { useManagerView } from "../hooks/useManagerView";
 import { NotificationBell } from "../shared/NotificationBell";
+import { db, realtime } from "../insforge/client";
 
 const links = [
   { label: "Dashboard", href: "/employee/dashboard", icon: LayoutDashboard },
   { label: "My Profile", href: "/employee/profile", icon: User },
+  { label: "My ID Card", href: "/employee/id-card", icon: CreditCard },
+  { label: "Directory", href: "/employee/directory", icon: Contact },
+  { label: "Org Chart", href: "/employee/org-chart", icon: GitBranch },
   { label: "Punch In/Out", href: "/employee/punch", icon: Clock },
   { label: "My Leaves", href: "/employee/leaves", icon: Calendar },
   { label: "My Tasks", href: "/employee/tasks", icon: ClipboardList },
   { label: "Policies", href: "/employee/policies", icon: FileText },
   { label: "Chat", href: "/employee/chat", icon: MessageSquare },
+  { label: "Connect", href: "/employee/connect", icon: Rss },
   { label: "Payslips", href: "/payroll/employee/payslips", icon: Wallet },
+  { label: "Expenses", href: "/employee/expenses", icon: Receipt },
+  { label: "Insurance", href: "/employee/insurance", icon: Shield },
 ] as const;
 
 const DEPT_COLORS: Record<string, string> = {
@@ -28,13 +36,89 @@ const DEPT_COLORS: Record<string, string> = {
 export default function EmployeeLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, tenantId } = useAuth();
   const { employee } = useEmployee();
+  const { isManager, isManagerMode, toggleManagerMode, directReportIds } = useManagerView();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [showBanner, setShowBanner] = useState(true);
+  const [unreadConnectCount, setUnreadConnectCount] = useState(0);
+
+  // Sync last visit and subscribe to realtime connect events
+  useEffect(() => {
+    if (location.pathname === "/employee/connect") {
+      setUnreadConnectCount(0);
+      localStorage.setItem("last_connect_visit", new Date().toISOString());
+    }
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!tenantId) return;
+
+    const fetchUnreadCount = async () => {
+      const lastVisit = localStorage.getItem("last_connect_visit");
+      const lastVisitTime = lastVisit ? new Date(lastVisit).toISOString() : new Date(0).toISOString();
+      
+      const { data, error } = await db
+        .from("posts")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .gt("created_at", lastVisitTime);
+
+      if (!error && data) {
+        setUnreadConnectCount(data.length);
+      }
+    };
+
+    void fetchUnreadCount();
+
+    const handleInsert = (payload: any) => {
+      if (payload.tenant_id === tenantId) {
+        if (location.pathname !== "/employee/connect") {
+          setUnreadConnectCount((prev) => prev + 1);
+        }
+      }
+    };
+
+    const setupRealtime = async () => {
+      await realtime.connect();
+      await realtime.subscribe("posts");
+    };
+
+    void setupRealtime();
+    realtime.on("INSERT", handleInsert);
+
+    return () => {
+      realtime.off("INSERT", handleInsert);
+      realtime.unsubscribe("posts");
+    };
+  }, [tenantId, location.pathname]);
 
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (isManagerMode) {
+      setShowBanner(true);
+    }
+  }, [isManagerMode]);
+
+  const [hasProjects, setHasProjects] = useState(false);
+
+  useEffect(() => {
+    if (!employee?.id || !tenantId) return;
+    db.from("tasks")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("assigned_to", employee.id)
+      .not("project_id", "is", null)
+      .limit(1)
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          setHasProjects(true);
+        }
+      });
+  }, [employee?.id, tenantId]);
 
   const handleLogout = async () => {
     await logout();
@@ -47,6 +131,24 @@ export default function EmployeeLayout() {
   };
 
   const deptColor = DEPT_COLORS[employee?.department ?? ""] ?? "bg-slate-100 text-slate-600";
+
+  const menuLinks = useMemo(() => {
+    const list = [...links];
+    if (hasProjects) {
+      const idx = list.findIndex((l) => l.href === "/employee/tasks");
+      if (idx !== -1) {
+        list.splice(idx + 1, 0, {
+          label: "My Projects",
+          href: "/employee/tasks?tab=projects",
+          icon: FolderKanban,
+        } as any);
+      }
+    }
+    if (isManager) {
+      list.push({ label: "My Team", href: "/employee/my-team", icon: Users } as any);
+    }
+    return list;
+  }, [isManager, hasProjects]);
 
   return (
     <div className="min-h-screen bg-[url('/bg3.1.svg')] bg-cover bg-center bg-fixed bg-no-repeat">
@@ -67,6 +169,18 @@ export default function EmployeeLayout() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {isManager && (
+              <div
+                onClick={toggleManagerMode}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full cursor-pointer text-xs font-semibold select-none transition-all duration-200 ${
+                  isManagerMode
+                    ? "bg-[#E24B4A] text-white hover:bg-[#c93e3d]"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                <span>{isManagerMode ? "Manager View" : "My View"}</span>
+              </div>
+            )}
             <NotificationBell />
             <div className="hidden items-center gap-3 sm:flex">
               {employee?.profile_photo_url ? (
@@ -93,6 +207,18 @@ export default function EmployeeLayout() {
         </div>
       </header>
 
+      {isManagerMode && showBanner && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-800 px-4 py-2 text-xs flex justify-between items-center shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0"></span>
+            <span>Viewing as manager — showing your team of {directReportIds.length} members.</span>
+          </div>
+          <button onClick={() => setShowBanner(false)} className="text-amber-500 hover:text-amber-700 font-bold ml-2">
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
       <div className="mx-auto flex max-w-7xl px-safe py-6 pb-24 md:gap-6 md:px-4 md:py-6">
         {/* Mobile Overlay */}
         {mobileOpen && (
@@ -111,17 +237,25 @@ export default function EmployeeLayout() {
             </button>
           </div>
           <div className="h-full space-y-1 md:h-fit md:rounded-xl md:border md:border-slate-200 md:bg-white md:p-3 md:shadow-xl md:-translate-y-1">
-            {links.map(({ label, href, icon: Icon }) => {
+            {menuLinks.map(({ label, href, icon: Icon }) => {
               const isActive = location.pathname === href;
+              const showBadge = label === "Connect" && unreadConnectCount > 0;
               return (
                 <button
                   key={href}
                   type="button"
                   onClick={() => handleMobileNavigate(href)}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium font-display transition ${isActive ? "bg-brand-50 text-brand-700 font-semibold" : "text-slate-600 hover:bg-slate-100"}`}
+                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm font-medium font-display transition ${isActive ? "bg-brand-50 text-brand-700 font-semibold" : "text-slate-600 hover:bg-slate-100"}`}
                 >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {label}
+                  <div className="flex items-center gap-3">
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span>{label}</span>
+                  </div>
+                  {showBadge && (
+                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-bold text-white shadow-sm ring-2 ring-white animate-pulse">
+                      {unreadConnectCount}
+                    </span>
+                  )}
                 </button>
               );
             })}

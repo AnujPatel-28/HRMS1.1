@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, LayoutDashboard, Clock, Plane, CheckSquare, ShieldCheck, Palmtree, Calendar, MessageSquare, BookOpen } from "lucide-react";
+import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, Clock, Palmtree, Calendar, MessageSquare, Contact, GitBranch, ClipboardList, Gift, FileText, Wallet, Settings, Rss, FolderKanban, Receipt, Shield } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
+import { db, realtime } from "../insforge/client";
 
 import { NotificationBell } from "../shared/NotificationBell";
 
@@ -10,29 +11,133 @@ type NavLinkItem = {
   label: string;
   href: string;
   icon: React.ElementType;
-  indent?: boolean;
 };
 
-const links: readonly NavLinkItem[] = [
-  { label: "Dashboard", href: "/hr/dashboard", icon: LayoutDashboard },
-  { label: "Employees", href: "/hr/employees", icon: Users },
-  { label: "Attendance", href: "/hr/attendance", icon: CalendarCheck },
-  { label: "Shifts", href: "/hr/shifts", icon: Clock },
-  { label: "Leaves", href: "/hr/leaves", icon: Plane },
-  { label: "Tasks", href: "/hr/tasks", icon: CheckSquare },
-  { label: "Policies", href: "/hr/policies", icon: ShieldCheck },
-  { label: "Holidays", href: "/hr/holidays", icon: Palmtree },
-  { label: "Calendar", href: "/hr/calendar", icon: Calendar },
-  { label: "Chat", href: "/hr/chat", icon: MessageSquare },
-  { label: "Policy Center", href: "/hr/policy-center", icon: BookOpen },
+type NavSection = {
+  title: string;
+  items: readonly NavLinkItem[];
+};
+
+const sections: readonly NavSection[] = [
+  {
+    title: "People",
+    items: [
+      { label: "Dashboard", href: "/hr/dashboard", icon: Home },
+      { label: "Employees", href: "/hr/employees", icon: Users },
+      { label: "Directory", href: "/hr/directory", icon: Contact },
+      { label: "Org Chart", href: "/hr/org-chart", icon: GitBranch },
+      { label: "Insurance", href: "/hr/insurance", icon: Shield },
+    ],
+  },
+  {
+    title: "Attendance",
+    items: [
+      { label: "Attendance", href: "/hr/attendance", icon: CalendarCheck },
+      { label: "Shifts", href: "/hr/shifts", icon: Clock },
+    ],
+  },
+  {
+    title: "HR Management",
+    items: [
+      { label: "Leaves", href: "/hr/leaves", icon: Palmtree },
+      { label: "Tasks", href: "/hr/tasks", icon: ClipboardList },
+      { label: "Projects", href: "/hr/pms", icon: FolderKanban },
+      { label: "Expenses", href: "/hr/expenses", icon: Receipt },
+      { label: "Holidays", href: "/hr/holidays", icon: Gift },
+      { label: "Calendar", href: "/hr/calendar", icon: Calendar },
+    ],
+  },
+  {
+    title: "Communication",
+    items: [
+      { label: "Chat", href: "/hr/chat", icon: MessageSquare },
+      { label: "Connect", href: "/hr/connect", icon: Rss },
+    ],
+  },
+  {
+    title: "Admin",
+    items: [
+      { label: "Policies", href: "/hr/policies", icon: FileText },
+      { label: "Payroll", href: "/payroll/hr/salaries", icon: Wallet },
+      { label: "IT Declarations", href: "/hr/declarations", icon: ClipboardList },
+      { label: "Policy Center", href: "/hr/policy-center", icon: Settings },
+    ],
+  },
 ];
 
 export default function HRLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, tenantId } = useAuth();
   const { employee } = useEmployee();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [unreadConnectCount, setUnreadConnectCount] = useState(0);
+  const [pendingExpensesCount, setPendingExpensesCount] = useState(0);
+
+  // Sync last visit and subscribe to realtime connect events
+  useEffect(() => {
+    if (location.pathname === "/hr/connect") {
+      setUnreadConnectCount(0);
+      localStorage.setItem("last_connect_visit", new Date().toISOString());
+    }
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!tenantId) return;
+    const fetchPendingCount = async () => {
+      const { count, error } = await db
+        .from("expenses")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("status", "pending");
+      if (!error && count !== null) {
+        setPendingExpensesCount(count);
+      }
+    };
+    void fetchPendingCount();
+  }, [tenantId, location.pathname]);
+
+  useEffect(() => {
+    if (!tenantId) return;
+
+    const fetchUnreadCount = async () => {
+      const lastVisit = localStorage.getItem("last_connect_visit");
+      const lastVisitTime = lastVisit ? new Date(lastVisit).toISOString() : new Date(0).toISOString();
+      
+      const { data, error } = await db
+        .from("posts")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .gt("created_at", lastVisitTime);
+
+      if (!error && data) {
+        setUnreadConnectCount(data.length);
+      }
+    };
+
+    void fetchUnreadCount();
+
+    const handleInsert = (payload: any) => {
+      if (payload.tenant_id === tenantId) {
+        if (location.pathname !== "/hr/connect") {
+          setUnreadConnectCount((prev) => prev + 1);
+        }
+      }
+    };
+
+    const setupRealtime = async () => {
+      await realtime.connect();
+      await realtime.subscribe("posts");
+    };
+
+    void setupRealtime();
+    realtime.on("INSERT", handleInsert);
+
+    return () => {
+      realtime.off("INSERT", handleInsert);
+      realtime.unsubscribe("posts");
+    };
+  }, [tenantId, location.pathname]);
 
   useEffect(() => {
     setMobileOpen(false);
@@ -105,7 +210,7 @@ export default function HRLayout() {
               <X className="h-5 w-5" />
             </button>
           </div>
-          <div className="h-full space-y-1 md:h-fit md:rounded-xl md:border md:border-slate-200 md:bg-white md:p-3 md:shadow-xl md:-translate-y-1">
+          <div className="h-full space-y-4 md:h-fit md:rounded-xl md:border md:border-slate-200 md:bg-white md:p-3 md:shadow-xl md:-translate-y-1">
             <Link
               to="/select"
               className="mb-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 md:hidden"
@@ -113,20 +218,43 @@ export default function HRLayout() {
               <ArrowLeft className="h-4 w-4" />
               Switch product
             </Link>
-            {links.map(({ label, href, icon: Icon, indent }) => {
-              const isActive = location.pathname === href;
-              return (
-                <button
-                  key={href}
-                  type="button"
-                  onClick={() => handleMobileNavigate(href)}
-                  className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-display transition-all duration-200 ease-in-out hover:translate-x-1 ${indent ? "ml-3" : ""} ${isActive ? "bg-brand-50 font-semibold text-brand-700 shadow-sm ring-1 ring-brand-100" : "text-slate-600 hover:bg-slate-50"}`}
-                >
-                  <Icon className={`h-4 w-4 shrink-0 transition-colors ${isActive ? "text-brand-600" : "text-slate-400 group-hover:text-slate-600"}`} />
-                  {label}
-                </button>
-              );
-            })}
+            {sections.map((section) => (
+              <div key={section.title} className="space-y-1">
+                <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 select-none">
+                  {section.title}
+                </p>
+                {section.items.map(({ label, href, icon: Icon }) => {
+                  const isActive = location.pathname === href;
+                  const showBadge = label === "Connect" && unreadConnectCount > 0;
+                  const isExpensesBadge = label === "Expenses" && pendingExpensesCount > 0;
+                  const renderLink = () => (
+                    <button
+                      key={href}
+                      type="button"
+                      onClick={() => handleMobileNavigate(href)}
+                      className={`group flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-display transition-all duration-200 ease-in-out hover:translate-x-1 ${isActive ? "bg-brand-50 font-semibold text-brand-700 shadow-sm ring-1 ring-brand-100" : "text-slate-600 hover:bg-slate-50"}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Icon className={`h-4 w-4 shrink-0 transition-colors ${isActive ? "text-brand-600" : "text-slate-400 group-hover:text-slate-600"}`} />
+                        <span>{label}</span>
+                      </div>
+                      {showBadge && (
+                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-bold text-white shadow-sm ring-2 ring-white animate-pulse">
+                          {unreadConnectCount}
+                        </span>
+                      )}
+                      {isExpensesBadge && (
+                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-2 ring-white">
+                          {pendingExpensesCount}
+                        </span>
+                      )}
+                    </button>
+                  );
+
+                  return renderLink();
+                })}
+              </div>
+            ))}
             {/* Mobile Logout Button in Drawer */}
             <div className="mt-4 border-t border-slate-100 pt-4 md:hidden">
               <button

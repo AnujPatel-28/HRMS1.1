@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, Link } from "react-router-dom";
 import type { Attendance, Employee, Leave, Task } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db, storage, insforge } from "../insforge/client";
@@ -8,10 +8,10 @@ import { useEmployee } from "../hooks/useEmployee";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { useToast } from "../shared/ToastContext";
-import { File, Calendar, ClipboardList, MoreVertical, Upload, Loader2, Trash2, Camera, Lock, Eye, EyeOff, CheckCircle2, X } from "lucide-react";
+import { File, Calendar, ClipboardList, MoreVertical, Upload, Loader2, Trash2, Camera, Lock, Eye, EyeOff, CheckCircle2, X, ChevronDown, Printer, Network } from "lucide-react";
 import { ConfirmModal } from "../shared/ConfirmModal";
 
-type TabKey = "personal" | "identity" | "documents" | "attendance" | "leaves" | "tasks";
+type TabKey = "personal" | "identity" | "documents" | "attendance" | "leaves" | "tasks" | "id_card";
 
 type StorageDoc = {
   key: string;
@@ -27,9 +27,11 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: "attendance", label: "Attendance History" },
   { key: "leaves", label: "Leave History" },
   { key: "tasks", label: "Tasks" },
+  { key: "id_card", label: "ID Card" },
 ];
 
 import { formatLocalDate } from "../utils/date";
+import { IDCard } from "../shared/components/IDCard";
 
 const maskValue = (value: string | null, visible: boolean, minVisible = 4) => {
   if (!value) return "—";
@@ -41,19 +43,120 @@ const maskValue = (value: string | null, visible: boolean, minVisible = 4) => {
 export default function EmployeeDetail() {
   const { employeeId } = useParams<{ employeeId: string }>();
   const navigate = useNavigate();
-  const { tenantId } = useTenant();
+  const { tenantId, tenant } = useTenant();
   const { logAction } = useAuditLog();
   const { success, error: toastError } = useToast();
   const { employee: currentHrEmployee } = useEmployee();
 
   const [activeTab, setActiveTab] = useState<TabKey>("personal");
   const [employee, setEmployee] = useState<Employee | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Employee>>({});
+  const [activeEmployees, setActiveEmployees] = useState<Employee[]>([]);
+  const [managerSearch, setManagerSearch] = useState("");
+  const [isManagerDropdownOpen, setIsManagerDropdownOpen] = useState(false);
+  const [directReportsCount, setDirectReportsCount] = useState(0);
+  const managerDropdownRef = useRef<HTMLDivElement>(null);
+
+  const selectedManager = useMemo(() => {
+    return activeEmployees.find((emp) => emp.id === editForm.manager_id);
+  }, [activeEmployees, editForm.manager_id]);
+
+  useEffect(() => {
+    if (isEditing) {
+      if (selectedManager && !isManagerDropdownOpen) {
+        setManagerSearch(selectedManager.full_name);
+      } else if (!editForm.manager_id && !isManagerDropdownOpen) {
+        setManagerSearch("");
+      }
+    } else {
+      setManagerSearch(employee?.manager_name || "");
+    }
+  }, [selectedManager, editForm.manager_id, isManagerDropdownOpen, isEditing, employee]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (managerDropdownRef.current && !managerDropdownRef.current.contains(event.target as Node)) {
+        setIsManagerDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredManagers = useMemo(() => {
+    const q = managerSearch.toLowerCase().trim();
+    if (!q) return activeEmployees;
+    return activeEmployees.filter(emp => emp.full_name.toLowerCase().includes(q));
+  }, [activeEmployees, managerSearch]);
+
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [leaves, setLeaves] = useState<Leave[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [documents, setDocuments] = useState<StorageDoc[]>([]);
   const [uploadingDoc, setUploadingDoc] = useState(false);
+
+  // ID Card and Visiting Card states
+  const [idSide, setIdSide] = useState<"front" | "back">("front");
+  const [visitingSide, setVisitingSide] = useState<"front" | "back">("front");
+  const idCardRef = useRef<HTMLDivElement>(null);
+  const visitingCardRef = useRef<HTMLDivElement>(null);
+
+  const printCard = (cardRef: React.RefObject<HTMLDivElement | null>, filename: string) => {
+    const card = cardRef.current;
+    if (!card) return;
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("Please allow popups to print/download your card.");
+      return;
+    }
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${filename}</title>
+          <style>
+            @page {
+              size: 85.6mm 53.98mm;
+              margin: 0;
+            }
+            body {
+              margin: 0;
+              padding: 0;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              background: white;
+            }
+            .card-wrapper {
+              width: 85.6mm;
+              height: 53.98mm;
+              overflow: hidden;
+              border-radius: 3mm;
+            }
+            * {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+          </style>
+          <link rel="stylesheet" href="${window.location.origin}/index.css">
+        </head>
+        <body>
+          <div class="card-wrapper">
+            ${card.outerHTML}
+          </div>
+          <script>
+            window.onload = function() {
+              window.print();
+              window.onafterprint = function() { window.close(); };
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
 
   // Remote Exceptions states
   const [exceptions, setExceptions] = useState<any[]>([]);
@@ -166,7 +269,6 @@ export default function EmployeeDetail() {
   };
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
   const [showSensitive, setShowSensitive] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -342,7 +444,7 @@ export default function EmployeeDetail() {
 
     const employeeRes = await db
       .from("employees")
-      .select("*")
+      .select("*, manager:employees!manager_id(full_name)")
       .eq("tenant_id", tenantId)
       .eq("id", employeeId)
       .maybeSingle();
@@ -352,14 +454,29 @@ export default function EmployeeDetail() {
       return;
     }
 
-    const currentEmployee = employeeRes.data as Employee;
+    const currentEmployee = {
+      ...(employeeRes.data as any),
+      manager_name: (employeeRes.data as any).manager?.full_name || null,
+    } as Employee;
     setEmployee(currentEmployee);
     setEditForm(currentEmployee);
+
+    if (tenantId) {
+      db.from("employees")
+        .select("id, full_name, designation, profile_photo_url")
+        .eq("tenant_id", tenantId)
+        .eq("status", "active")
+        .neq("id", employeeId)
+        .order("full_name")
+        .then(({ data }) => {
+          if (data) setActiveEmployees(data as Employee[]);
+        });
+    }
 
     const fromDate = new Date();
     fromDate.setDate(fromDate.getDate() - 29);
 
-    const [attendanceRes, leavesRes, tasksRes, docsRes, exceptionsRes] = await Promise.all([
+    const [attendanceRes, leavesRes, tasksRes, docsRes, exceptionsRes, reportsRes] = await Promise.all([
       db
         .from("attendance")
         .select("*")
@@ -375,12 +492,17 @@ export default function EmployeeDetail() {
         .eq("tenant_id", tenantId)
         .eq("employee_id", currentEmployee.id)
         .order("start_date", { ascending: false }),
+      db.from("employees")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("manager_id", currentEmployee.id),
     ]);
 
     setAttendance((attendanceRes.data as Attendance[]) ?? []);
     setLeaves((leavesRes.data as Leave[]) ?? []);
     setTasks((tasksRes.data as Task[]) ?? []);
     setExceptions((exceptionsRes.data ?? []) as any[]);
+    setDirectReportsCount(reportsRes.count ?? 0);
 
     if (docsRes.error) {
       console.error("Database query error for employee documents:", docsRes.error);
@@ -458,6 +580,9 @@ export default function EmployeeDetail() {
       emergency_contact_phone: editForm.emergency_contact_phone,
       emergency_contact_relation: editForm.emergency_contact_relation,
       work_mode: editForm.work_mode || "office",
+      grade: editForm.grade?.trim() || null,
+      work_location: editForm.work_location || null,
+      manager_id: editForm.manager_id || null,
     };
 
     const { error: updateError } = await db.from("employees").update(payload).eq("tenant_id", tenantId).eq("id", employee.id);
@@ -942,6 +1067,180 @@ export default function EmployeeDetail() {
               </span>
             )}
           </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Grade</span>
+            {isEditing ? (
+              <input
+                value={editForm.grade ?? ""}
+                onChange={(event) => updateField("grade", event.target.value)}
+                placeholder="e.g. M3, Senior"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              />
+            ) : (
+              <span className="font-semibold text-slate-900 block mt-2">
+                {employee.grade || "—"}
+              </span>
+            )}
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Work Location</span>
+            {isEditing ? (
+              <select
+                value={editForm.work_location ?? ""}
+                onChange={(event) => updateField("work_location", event.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 bg-white"
+              >
+                <option value="">Select Work Location</option>
+                <option value="Head Office">Head Office</option>
+                <option value="Branch Office">Branch Office</option>
+                <option value="Remote">Remote</option>
+                <option value="Work From Home">Work From Home</option>
+                <option value="Other">Other</option>
+              </select>
+            ) : (
+              <span className="font-semibold text-slate-900 block mt-2">
+                {employee.work_location || "—"}
+              </span>
+            )}
+          </label>
+          <div className="text-sm md:col-span-2 relative" ref={managerDropdownRef}>
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Reporting Manager</span>
+            {isEditing ? (
+              <>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search reporting manager..."
+                    value={managerSearch}
+                    onFocus={() => {
+                      setIsManagerDropdownOpen(true);
+                      if (selectedManager) {
+                        setManagerSearch("");
+                      }
+                    }}
+                    onChange={(e) => {
+                      setManagerSearch(e.target.value);
+                      setIsManagerDropdownOpen(true);
+                    }}
+                    className="w-full rounded-lg border border-slate-300 pl-3 pr-10 py-2 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 text-slate-900 font-normal"
+                  />
+                  {editForm.manager_id ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateField("manager_id", "");
+                        setManagerSearch("");
+                      }}
+                      className="absolute right-8 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-semibold"
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <ChevronDown className="h-4 w-4" />
+                  </div>
+                </div>
+
+                {selectedManager && !isManagerDropdownOpen && (
+                  <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-200 px-3 py-1.5 text-xs text-slate-700 font-normal">
+                    {selectedManager.profile_photo_url ? (
+                      <img src={selectedManager.profile_photo_url} alt="" className="h-5 w-5 rounded-full object-cover" />
+                    ) : (
+                      <div className="grid h-5 w-5 place-items-center rounded-full bg-slate-200 font-bold text-slate-600">
+                        {selectedManager.full_name.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <div>
+                      <span className="font-semibold text-slate-900">{selectedManager.full_name}</span>
+                      <span className="text-slate-500"> — {selectedManager.designation || "No designation"}</span>
+                    </div>
+                  </div>
+                )}
+
+                {isManagerDropdownOpen && (
+                  <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5">
+                    {filteredManagers.length === 0 ? (
+                      <div className="px-4 py-2 text-slate-500 text-xs font-normal">No active employees found</div>
+                    ) : (
+                      filteredManagers.map((emp) => (
+                        <button
+                          key={emp.id}
+                          type="button"
+                          onClick={() => {
+                            updateField("manager_id", emp.id);
+                            setManagerSearch(emp.full_name);
+                            setIsManagerDropdownOpen(false);
+                          }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 transition-colors font-normal ${
+                            editForm.manager_id === emp.id ? "bg-slate-50 font-semibold" : ""
+                          }`}
+                        >
+                          {emp.profile_photo_url ? (
+                            <img src={emp.profile_photo_url} alt="" className="h-6 w-6 rounded-full object-cover" />
+                          ) : (
+                            <div className="grid h-6 w-6 place-items-center rounded-full bg-slate-100 font-bold text-slate-600 text-[10px]">
+                              {emp.full_name.slice(0, 2).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-xs text-slate-900 truncate font-semibold">{emp.full_name}</p>
+                            <p className="text-[10px] text-slate-500 truncate">{emp.designation || "—"}</p>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <span className="font-semibold text-slate-900 block mt-2">
+                {employee.manager_name || "—"}
+              </span>
+            )}
+          </div>
+
+          {/* Organisational Position Section */}
+          <div className="md:col-span-2 mt-6 border-t border-slate-100 pt-6">
+            <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <Network className="h-5 w-5 text-brand-600" />
+              Organisational Position
+            </h3>
+            <div className="grid gap-4 sm:grid-cols-2 bg-slate-50/50 rounded-2xl border border-slate-200 p-5">
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Reports To</span>
+                <p className="text-sm font-semibold mt-1">
+                  {employee.manager_id ? (
+                    <Link
+                      to={`/hr/org-chart?focus=${employee.manager_id}`}
+                      className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-700 hover:underline font-semibold"
+                    >
+                      {employee.manager_name}
+                    </Link>
+                  ) : (
+                    <span className="text-slate-500 italic">None (Top Level)</span>
+                  )}
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Direct Reports</span>
+                <p className="text-sm text-slate-900 font-semibold mt-1">
+                  {directReportsCount} {directReportsCount === 1 ? "person reports" : "people report"} to this employee
+                </p>
+              </div>
+
+              <div className="sm:col-span-2 space-y-1 border-t border-slate-200/60 pt-4">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Department Hierarchy</span>
+                <div className="flex flex-wrap items-center gap-1.5 mt-2 text-sm text-slate-700 font-medium">
+                  <span className="font-semibold text-slate-900">{tenant?.company_name || "Company"}</span>
+                  <span className="text-slate-400">→</span>
+                  <span className="capitalize font-semibold text-slate-900">{employee.department || "No Department"}</span>
+                  <span className="text-slate-400">→</span>
+                  <span className="font-semibold text-brand-600">{employee.full_name}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -1261,6 +1560,100 @@ export default function EmployeeDetail() {
                 {task.description ? <p className="mt-1 text-sm text-slate-600">{task.description}</p> : null}
               </div>
             ))
+          )}
+        </div>
+      ) : null}
+
+      {activeTab === "id_card" ? (
+        <div className="mt-4 space-y-6">
+          {!tenant ? (
+            <div className="text-sm text-slate-500">Loading tenant details...</div>
+          ) : (
+            <div className="grid gap-8 md:grid-cols-2">
+              {/* ID Card */}
+              <div className="flex flex-col items-center p-5 rounded-2xl border border-slate-100 bg-slate-50/50 shadow-sm">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Identity Card</h3>
+                <div className="h-[215px] flex items-center justify-center">
+                  <IDCard
+                    ref={idCardRef}
+                    employee={employee}
+                    tenant={tenant}
+                    side={idSide}
+                    type="id"
+                  />
+                </div>
+                <div className="mt-5 flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setIdSide("front")}
+                    className={`rounded-md px-3.5 py-1 text-xs font-semibold transition ${
+                      idSide === "front" ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Front Side
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIdSide("back")}
+                    className={`rounded-md px-3.5 py-1 text-xs font-semibold transition ${
+                      idSide === "back" ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Back Side
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => printCard(idCardRef, `${employee.full_name}_ID_Card_${idSide}`)}
+                  className="mt-5 w-full max-w-[200px] flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-xs font-bold text-white shadow hover:bg-brand-700 active:scale-[0.98] transition"
+                >
+                  <Printer className="h-4 w-4" />
+                  Print / PDF ({idSide === "front" ? "Front" : "Back"})
+                </button>
+              </div>
+
+              {/* Visiting Card */}
+              <div className="flex flex-col items-center p-5 rounded-2xl border border-slate-100 bg-slate-50/50 shadow-sm">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Visiting Card</h3>
+                <div className="h-[215px] flex items-center justify-center">
+                  <IDCard
+                    ref={visitingCardRef}
+                    employee={employee}
+                    tenant={tenant}
+                    side={visitingSide}
+                    type="visiting"
+                  />
+                </div>
+                <div className="mt-5 flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setVisitingSide("front")}
+                    className={`rounded-md px-3.5 py-1 text-xs font-semibold transition ${
+                      visitingSide === "front" ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Front Side
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVisitingSide("back")}
+                    className={`rounded-md px-3.5 py-1 text-xs font-semibold transition ${
+                      visitingSide === "back" ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Back Side
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => printCard(visitingCardRef, `${employee.full_name}_Visiting_Card_${visitingSide}`)}
+                  className="mt-5 w-full max-w-[200px] flex items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-xs font-bold text-white shadow hover:bg-slate-900 active:scale-[0.98] transition"
+                >
+                  <Printer className="h-4 w-4" />
+                  Print / PDF ({visitingSide === "front" ? "Front" : "Back"})
+                </button>
+              </div>
+            </div>
           )}
         </div>
       ) : null}

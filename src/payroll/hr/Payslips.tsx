@@ -89,6 +89,7 @@ interface Payslip {
   employee_code?: string | null;
   employee_department?: Employee["department"];
   employee_designation?: string | null;
+  expenses_reimbursement?: number;
 }
 
 const STATUS_STYLES: Record<RunStatus, string> = {
@@ -250,6 +251,8 @@ function pdfDataFromPayslip(slip: Payslip): PayslipPdfData {
     otherDeductions: slip.other_deductions,
     totalDeductions: slip.total_deductions,
     netPayable: slip.net_payable,
+    expensesReimbursement: slip.expenses_reimbursement ?? 0,
+    expenseItems: (slip.policy_snapshot as any)?.expense_items || [],
   };
 }
 

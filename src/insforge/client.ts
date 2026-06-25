@@ -89,3 +89,6 @@ export const db = database;
 export const auth = insforge.auth;
 export const storage = insforge.storage;
 export const realtime = insforge.realtime;
+
+
+

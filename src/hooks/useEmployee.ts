@@ -20,13 +20,21 @@ export function useEmployee() {
     setLoading(true);
     const { data, error } = await db
       .from("employees")
-      .select("*")
+      .select("*, manager:employees!manager_id(full_name)")
       .eq("tenant_id", tenantId)
       .eq("user_id", user.id)
       .maybeSingle();
 
     if (!error) {
-      setEmployee((data as Employee | null) ?? null);
+      if (data) {
+        const empData = data as any;
+        setEmployee({
+          ...empData,
+          manager_name: empData.manager?.full_name || null
+        } as Employee);
+      } else {
+        setEmployee(null);
+      }
     }
     setLoading(false);
   }, [tenantId, user]);

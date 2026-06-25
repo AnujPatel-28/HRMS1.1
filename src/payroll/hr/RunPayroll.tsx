@@ -39,6 +39,8 @@ interface RowCalc extends PayslipCalc {
   overtimeHours?: number;
   overtimeBreakdown?: { id: string; amount: number }[];
   hasMidMonthRevision?: boolean;
+  expensesReimbursement?: number;
+  expenseItems?: any[];
 }
 
 const now = new Date();
@@ -143,7 +145,7 @@ export default function RunPayroll() {
       const startDate = `${monthStr}-01`;
       const endDate = `${monthStr}-${new Date(year, month, 0).getDate().toString().padStart(2, "0")}`;
 
-      const [empRes, structRes, attRes, holRes, overtimeRes, settingsRes, leavesRes, existingPayslipsRes] = await Promise.all([
+      const [empRes, structRes, attRes, holRes, overtimeRes, settingsRes, leavesRes, existingPayslipsRes, approvedExpensesRes] = await Promise.all([
         db.from("employees").select("*").eq("tenant_id", tenantId).eq("status", "active").order("full_name"),
         db.from("salary_structures").select("*").eq("tenant_id", tenantId).order("effective_from", { ascending: false }),
         db.from("attendance").select("employee_id,status,date").eq("tenant_id", tenantId).gte("date", startDate).lte("date", endDate),
@@ -160,6 +162,7 @@ export default function RunPayroll() {
         existingRun
           ? db.from("payslips").select("employee_id,net_payable,policy_snapshot").eq("tenant_id", tenantId).eq("payroll_run_id", existingRun.id)
           : Promise.resolve({ data: [], error: null }),
+        db.from("expenses").select("*").eq("tenant_id", tenantId).eq("status", "approved").is("payroll_run_id", null),
       ]);
 
       if (empRes.error) throw empRes.error;
@@ -170,6 +173,7 @@ export default function RunPayroll() {
       if (settingsRes.error) throw settingsRes.error;
       if (leavesRes.error) throw leavesRes.error;
       if (existingPayslipsRes.error) throw existingPayslipsRes.error;
+      if (approvedExpensesRes.error) throw approvedExpensesRes.error;
       const employees = (empRes.data ?? []) as Employee[];
       const allStructures = (structRes.data ?? []) as SalaryStructure[];
       const attendances = (attRes.data ?? []) as { employee_id: string; status: string; date: string }[];
@@ -183,7 +187,14 @@ export default function RunPayroll() {
         approved: boolean;
         date: string;
       }[];
-      
+      const approvedExpenses = (approvedExpensesRes.data ?? []) as any[];
+      const expensesMap = new Map<string, { total: number; items: any[] }>();
+      approvedExpenses.forEach((exp) => {
+        const cur = expensesMap.get(exp.employee_id) ?? { total: 0, items: [] };
+        cur.total += exp.amount;
+        cur.items.push(exp);
+        expensesMap.set(exp.employee_id, cur);
+      });
       const settingsRows = (settingsRes.data ?? []) as { key: string; value: string }[];
       const settings = settingsRows.reduce<Record<string, string>>((acc, row) => {
         acc[row.key] = row.value;
@@ -332,7 +343,9 @@ export default function RunPayroll() {
         const lateDeductionAmount = roundCurrency((lateSummary.deduction_hours ?? 0) * hourlyRate);
         const otherDeductions = roundCurrency(calc.otherDeductions + lateDeductionAmount);
         const totalDeductions = roundCurrency(calc.totalDeductions + lateDeductionAmount);
-        const netPayable = Math.max(roundCurrency(calc.grossSalary - totalDeductions), 0);
+        const expData = expensesMap.get(emp.id) ?? { total: 0, items: [] };
+        const totalExpenses = expData.total;
+        const netPayable = Math.max(roundCurrency(calc.grossSalary - totalDeductions), 0) + totalExpenses;
 
         // Check for mid-month revisions
         const empStructures = allStructures.filter((s) => s.employee_id === emp.id);
@@ -362,6 +375,8 @@ export default function RunPayroll() {
           overtimeAmount,
           overtimeBreakdown: overtimeSummary?.breakdown ?? [],
           hasMidMonthRevision: hasRevision,
+          expensesReimbursement: totalExpenses,
+          expenseItems: expData.items,
         });
       }
 
@@ -475,6 +490,7 @@ export default function RunPayroll() {
           total_deductions: r.totalDeductions,
           net_payable: r.finalNet,
           pdf_url: pdfUrl,
+          expenses_reimbursement: r.expensesReimbursement || 0,
           policy_snapshot: {
             ...r.policySnapshot,
             paid_leave_days: r.paidLeaveDays,
@@ -489,10 +505,35 @@ export default function RunPayroll() {
             pf_base: r.pfBase,
             calculated_net: r.calculatedNet,
             override_net: overrides[r.employeeId] !== undefined ? r.finalNet : null,
+            expense_items: r.expenseItems || [],
           },
         };
         const { error: slipErr } = await db.from("payslips").upsert([payload], { onConflict: "tenant_id,payroll_run_id,employee_id" });
         if (slipErr) throw slipErr;
+      }
+
+      if (approve) {
+        // Collect all expense IDs included in this payroll run
+        const allExpenseIds: string[] = [];
+        rowsWithFinal.forEach((r) => {
+          if (r.expenseItems) {
+            r.expenseItems.forEach((exp: any) => {
+              allExpenseIds.push(exp.id);
+            });
+          }
+        });
+
+        if (allExpenseIds.length > 0) {
+          const { error: expUpdateErr } = await db
+            .from("expenses")
+            .update({
+              status: "reimbursed",
+              payroll_run_id: runId,
+              reimbursed_at: new Date().toISOString(),
+            })
+            .in("id", allExpenseIds);
+          if (expUpdateErr) throw expUpdateErr;
+        }
       }
 
       success(approve ? "Payroll approved and payslips saved!" : "Payroll saved as draft.");
