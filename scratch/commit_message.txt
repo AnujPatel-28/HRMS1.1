@@ -1,0 +1,24 @@
+Feat: Implement hr, employee features, migrations, docs, and scratch scripts
+
+- Migrations: Added migrations for expenses, insurance, IT declarations, db tuning, and RLS hardening. Renamed onboarding/attendance migrations.
+- Employee Features:
+  - Added Expenses tracking, Insurance management, and Tax Declaration views.
+  - Added ID Card generator page.
+  - Added project view (PMS) for employees.
+  - Modified attendance, tasks, leaves, and profile layouts.
+- HR & Admin Features:
+  - Added HR views for Expenses, Insurance, and Tax Declaration.
+  - Added Project Management System (PMS) list and detail pages.
+  - Added Directory, employee creation/details flow, and task management.
+- Payroll:
+  - Improved Payslips calculation, layout, and PDF generator.
+- Shared Components & Pages:
+  - Added Connect (realtime chat/feed) page.
+  - Added interactive Organization Chart page and node component.
+  - Added IDCard, PlanGate, and SelectDropdown components.
+- Edge Functions:
+  - Added auto birthday posts and insurance expiry check functions.
+- Documentation:
+  - Added detailed developer guides, architecture plans, and security/RLS verification docs.
+- Scratch & Test files:
+  - Added numerous inspect and test scripts in the scratch directory.

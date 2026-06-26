@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import * as framerMotion from "framer-motion";
+const { motion, AnimatePresence } = framerMotion;
 import { Calendar, ChevronLeft, ChevronRight, Download, Users, BarChart3, Clock, Pencil, Check, X, ClipboardList, MapPin, FileEdit, Camera } from "lucide-react";
 import type { Attendance, Employee, Shift, EmployeeShift, AttendanceSelfie } from "../types";
 import { useTenant } from "../contexts/TenantContext";
@@ -170,10 +172,90 @@ function pickCurrentStructures(structures: SalaryStructure[], effectiveCutoff: s
   return byEmployee;
 }
 
+// ── Reusable Mobile Bottom Sheet / Tray ──
+function MobileTray({
+  isOpen,
+  onClose,
+  title,
+  children,
+  onBack,
+  showBack = false,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+  onBack?: () => void;
+  showBack?: boolean;
+}) {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          {/* Backdrop Overlay */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 0.5 }}
+            exit={{ opacity: 0 }}
+            className="fixed -inset-10 z-[110] bg-slate-900/60 backdrop-blur-xs md:hidden"
+            onClick={onClose}
+          />
 
+          {/* Bottom Sheet container */}
+          <motion.div
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 30, stiffness: 280 }}
+            className="fixed bottom-0 left-0 right-0 z-[120] max-h-[90vh] overflow-y-auto rounded-t-[28px] border-t border-slate-200 bg-white p-6 shadow-2xl md:hidden pb-safe flex flex-col"
+          >
+            {/* Visual drag indicator handle */}
+            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-200 shrink-0" />
+
+            {/* Header */}
+            <div className="mb-5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                {showBack && onBack && (
+                  <button
+                    onClick={onBack}
+                    className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 transition-colors"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
+                )}
+                <h3 className="text-lg font-bold text-slate-900 font-display">{title}</h3>
+              </div>
+              <button
+                onClick={onClose}
+                className="rounded-full bg-slate-100 p-1.5 text-slate-500 hover:bg-slate-200 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto pb-10">
+              {children}
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
 
 export default function HRAttendance() {
   const [view, setView] = useState<ViewMode>("daily");
+  const [tabDirection, setTabDirection] = useState(0); // 1 = right, -1 = left
+  const [activeEditRow, setActiveEditRow] = useState<AttendanceWithEmployee | null>(null);
+
+  const handleViewChange = (newView: ViewMode) => {
+    const viewModes: ViewMode[] = ["daily", "employee", "summary", "overtime", "corrections"];
+    const newIdx = viewModes.indexOf(newView);
+    const oldIdx = viewModes.indexOf(view);
+    setTabDirection(newIdx > oldIdx ? 1 : -1);
+    setView(newView);
+  };
   const { success, error: toastError } = useToast();
   const { tenantId, tenant } = useTenant();
   const { employee: hrEmployee } = useEmployee();
@@ -737,6 +819,7 @@ export default function HRAttendance() {
 
       success("Attendance updated.");
       setEditId(null);
+      setActiveEditRow(null);
     } catch (err) {
       toastError(err instanceof Error ? err.message : "Failed to update attendance.");
     } finally {
@@ -747,6 +830,7 @@ export default function HRAttendance() {
 
   function startEdit(row: AttendanceWithEmployee) {
     setEditId(row.employee_id);
+    setActiveEditRow(row);
     setEditPunchIn(row.punch_in ? new Date(row.punch_in).toTimeString().slice(0, 5) : "");
     setEditPunchOut(row.punch_out ? new Date(row.punch_out).toTimeString().slice(0, 5) : "");
     setEditStatus(row.status as AttendanceStatus);
@@ -997,29 +1081,65 @@ export default function HRAttendance() {
           <h2 className="text-2xl md:text-xl font-bold md:font-semibold text-slate-900">Attendance Management</h2>
           <p className="text-base md:text-sm text-slate-500 mt-2 md:mt-0">Track, edit and export employee attendance records.</p>
         </div>
-        <div className="flex flex-wrap gap-2 w-full md:w-auto pb-2 md:pb-0">
+        <div className="flex gap-1 bg-slate-100/80 p-1 rounded-2xl border border-slate-200/30 overflow-x-auto hide-scrollbar w-full md:w-auto select-none snap-x">
           {[
             { key: "daily", icon: Calendar, label: "Daily" },
             { key: "employee", icon: Users, label: "Employee" },
             { key: "summary", icon: BarChart3, label: "Summary" },
             { key: "overtime", icon: Clock, label: "Overtime" },
             { key: "corrections", icon: FileEdit, label: "Corrections" },
-          ].map(({ key, icon: Icon, label }) => (
-            <button
-              key={key}
-              onClick={() => setView(key as ViewMode)}
-              className={`flex-1 md:flex-none justify-center whitespace-nowrap inline-flex items-center gap-1.5 md:gap-2 rounded-xl px-3 py-2 md:px-3 md:py-2 text-[13px] md:text-sm font-medium transition-all active:scale-[0.98] ${view === key ? "bg-brand-600 text-white shadow-sm ring-1 ring-brand-600" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300"
+          ].map(({ key, icon: Icon, label }) => {
+            const isActive = view === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => handleViewChange(key as ViewMode)}
+                className={`relative flex-1 md:flex-none justify-center whitespace-nowrap inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs md:text-sm font-semibold transition-all duration-200 snap-start active:scale-95 z-10 ${
+                  isActive ? "text-brand-700 font-bold" : "text-slate-500 hover:text-slate-800"
                 }`}
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-            </button>
-          ))}
+              >
+                {isActive && (
+                  <motion.div
+                    layoutId="hr-attendance-active-view"
+                    className="absolute inset-0 bg-brand-50 shadow-xs border border-brand-100 rounded-xl -z-10"
+                    transition={{ type: "spring", stiffness: 350, damping: 28 }}
+                  />
+                )}
+                <Icon className="h-4 w-4" />
+                {label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {view === "daily" ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-3 md:p-5 shadow-sm">
+      <div className="relative mt-2 overflow-hidden">
+        <AnimatePresence initial={false} custom={tabDirection} mode="wait">
+          <motion.div
+            key={view}
+            custom={tabDirection}
+            variants={{
+              enter: (dir: number) => ({
+                x: dir > 0 ? 25 : -25,
+                opacity: 0,
+              }),
+              center: {
+                x: 0,
+                opacity: 1,
+              },
+              exit: (dir: number) => ({
+                x: dir > 0 ? -25 : 25,
+                opacity: 0,
+              }),
+            }}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ type: "spring", stiffness: 380, damping: 30 }}
+          >
+            {view === "daily" && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-3 md:p-5 shadow-sm">
           <div className="mb-5 md:mb-4 flex flex-col sm:flex-row sm:items-end justify-between gap-4 md:gap-3">
             <div className="flex flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
               <div className="flex flex-col gap-1.5 w-full sm:w-auto">
@@ -1156,40 +1276,23 @@ export default function HRAttendance() {
                                 </span>
                               )}
                             </div>
-                            {isEditing ? (
-                              <select value={editStatus} onChange={(event) => setEditStatus(event.target.value as AttendanceStatus)} className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold uppercase outline-none focus:ring-2 focus:ring-brand-500 bg-white">
-                                <option value="present">Present</option>
-                                <option value="absent">Absent</option>
-                                <option value="half_day">Half Day</option>
-                                <option value="on_leave">On Leave</option>
-                              </select>
-                            ) : (
-                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${cls}`}>
-                                <span className={`h-1.5 w-1.5 rounded-full ${row.status === 'present' ? 'bg-emerald-500' : row.status === 'absent' ? 'bg-rose-500' : row.status === 'half_day' ? 'bg-amber-500' : 'bg-blue-500'}`}></span>
-                                {label}
-                              </span>
-                            )}
+                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${cls}`}>
+                              <span className={`h-1.5 w-1.5 rounded-full ${row.status === 'present' ? 'bg-emerald-500' : row.status === 'absent' ? 'bg-rose-500' : row.status === 'half_day' ? 'bg-amber-500' : 'bg-blue-500'}`}></span>
+                              {label}
+                            </span>
                           </div>
                           
                           <div className="grid grid-cols-4 gap-1 bg-slate-50 p-2.5 rounded-lg text-center mb-3 border border-slate-100">
                             <div className="flex flex-col justify-center">
                               <span className="text-[10px] font-bold uppercase text-slate-400 mb-1 tracking-wider">In</span>
-                              {isEditing ? (
-                                <input type="time" value={editPunchIn} onChange={(event) => setEditPunchIn(event.target.value)} className="w-full rounded-md border border-slate-300 px-1 py-1 text-xs text-center outline-none focus:ring-2 focus:ring-brand-500 bg-white" />
-                              ) : (
-                                <div className="flex flex-col items-center">
-                                  <span className="font-semibold text-slate-800 text-xs">{fmtTime(row.punch_in)}</span>
-                                  {row.is_late ? <span className="mt-0.5 rounded px-1 py-0.5 bg-rose-100 text-[8px] font-bold text-rose-700 uppercase">Late</span> : null}
-                                </div>
-                              )}
+                              <div className="flex flex-col items-center">
+                                <span className="font-semibold text-slate-800 text-xs">{fmtTime(row.punch_in)}</span>
+                                {row.is_late ? <span className="mt-0.5 rounded px-1 py-0.5 bg-rose-100 text-[8px] font-bold text-rose-700 uppercase">Late</span> : null}
+                              </div>
                             </div>
                             <div className="flex flex-col justify-center border-l border-slate-200">
                               <span className="text-[10px] font-bold uppercase text-slate-400 mb-1 tracking-wider">Out</span>
-                              {isEditing ? (
-                                <input type="time" value={editPunchOut} onChange={(event) => setEditPunchOut(event.target.value)} className="w-full rounded-md border border-slate-300 px-1 py-1 text-xs text-center outline-none focus:ring-2 focus:ring-brand-500 bg-white" />
-                              ) : (
-                                <span className="font-semibold text-slate-800 text-xs">{fmtTime(row.punch_out)}</span>
-                              )}
+                              <span className="font-semibold text-slate-800 text-xs">{fmtTime(row.punch_out)}</span>
                             </div>
                             <div className="flex flex-col justify-center border-l border-slate-200">
                               <span className="text-[10px] font-bold uppercase text-slate-400 mb-1 tracking-wider">Hours</span>
@@ -1229,20 +1332,9 @@ export default function HRAttendance() {
                               )}
                             </div>
                             <div>
-                              {isEditing ? (
-                                <div className="flex gap-2">
-                                  <button onClick={() => setEditId(null)} className="h-8 w-8 inline-flex items-center justify-center rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-all border border-slate-200">
-                                    <X className="h-4 w-4" />
-                                  </button>
-                                  <button onClick={() => saveEdit(row)} disabled={saving} className="h-8 w-8 inline-flex items-center justify-center rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-all shadow-sm">
-                                    <Check className="h-4 w-4" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <button onClick={() => startEdit(row)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-50 transition-colors shadow-sm">
-                                  <Pencil className="h-3 w-3" /> Edit
-                                </button>
-                              )}
+                              <button onClick={() => startEdit(row)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-50 transition-colors shadow-sm">
+                                <Pencil className="h-3 w-3" /> Edit
+                              </button>
                             </div>
                           </div>
                         </td>
@@ -1349,10 +1441,10 @@ export default function HRAttendance() {
         </div>
       )}
     </div>
-  ) : null}
+  )}
 
-      {view === "employee" ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-5 shadow-sm">
+            {view === "employee" && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-5 shadow-sm">
           <div className="mb-6 md:mb-5 flex flex-col sm:flex-row sm:items-center gap-6 md:gap-3">
             <SelectDropdown
               value={empViewEmployee}
@@ -1425,10 +1517,10 @@ export default function HRAttendance() {
             </div>
           )}
         </div>
-      ) : null}
+      )}
 
-      {view === "summary" ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            {view === "summary" && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <button onClick={() => { const date = new Date(summaryYear, summaryMonth - 1); setSummaryYear(date.getFullYear()); setSummaryMonth(date.getMonth()); }} className="rounded-lg border border-slate-200 p-1.5 hover:bg-slate-100"><ChevronLeft className="h-4 w-4" /></button>
@@ -1553,10 +1645,10 @@ export default function HRAttendance() {
             </div>
           )}
         </div>
-      ) : null}
+      )}
 
-      {view === "overtime" ? (
-        <div className="space-y-4">
+            {view === "overtime" && (
+              <div className="space-y-4">
           <div className="rounded-2xl border border-purple-200 bg-purple-50 p-5 shadow-sm">
             <p className="text-sm font-semibold text-purple-800">Total overtime this month</p>
             <div className="mt-2 flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-2">
@@ -1699,22 +1791,28 @@ export default function HRAttendance() {
                               </div>
                             </div>
                             
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => void approveOvertime(row.id)}
-                                className="flex-1 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-100 text-emerald-700 transition font-semibold hover:bg-emerald-200"
-                              >
-                                <Check className="h-4 w-4" /> Approve
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void rejectOvertime(row.id)}
-                                className="flex-1 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-100 text-rose-700 transition font-semibold hover:bg-rose-200"
-                              >
-                                <X className="h-4 w-4" /> Reject
-                              </button>
-                            </div>
+                            {!row.approved ? (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void approveOvertime(row.id)}
+                                  className="flex-1 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-100 text-emerald-700 transition font-semibold hover:bg-emerald-200"
+                                >
+                                  <Check className="h-4 w-4" /> Approve
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void rejectOvertime(row.id)}
+                                  className="flex-1 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-100 text-rose-700 transition font-semibold hover:bg-rose-200"
+                                >
+                                  <X className="h-4 w-4" /> Reject
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center h-10 rounded-xl bg-slate-50 border border-slate-100 text-sm font-medium text-slate-500 w-full">
+                                Reviewed
+                              </div>
+                            )}
                           </td>
 
                           {/* DESKTOP VIEW */}
@@ -1768,10 +1866,10 @@ export default function HRAttendance() {
             )}
           </div>
         </div>
-      ) : null}
+      )}
 
-      {view === "corrections" ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            {view === "corrections" && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="font-semibold text-slate-900">Attendance Corrections</h3>
@@ -1972,13 +2070,16 @@ export default function HRAttendance() {
                 )}
               </tbody>
             </table>
-          </div>
+            </div>
           )}
         </div>
-      ) : null}
+      )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
 
       {selectedLocationRow ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={() => setSelectedLocationRow(null)}>
+        <div className="fixed inset-0 z-50 hidden md:flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={() => setSelectedLocationRow(null)}>
           <div className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
               <div>
@@ -2063,7 +2164,7 @@ export default function HRAttendance() {
       ) : null}
 
       {rejectCorrection ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={() => { if (!correctionActionLoading) setRejectCorrection(null); }}>
+        <div className="fixed inset-0 z-50 hidden md:flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={() => { if (!correctionActionLoading) setRejectCorrection(null); }}>
           <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="border-b border-slate-200 px-5 py-4">
               <h3 className="text-lg font-semibold text-slate-900">Reject Attendance Correction</h3>
@@ -2102,7 +2203,7 @@ export default function HRAttendance() {
       ) : null}
 
       {selectedVerificationRow && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm animate-fade-in" onClick={() => setSelectedVerificationRow(null)}>
+        <div className="fixed inset-0 z-50 hidden md:flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm animate-fade-in" onClick={() => setSelectedVerificationRow(null)}>
           <div className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
@@ -2369,7 +2470,7 @@ export default function HRAttendance() {
       )}
 
       {quickExceptionModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={() => setQuickExceptionModalOpen(false)}>
+        <div className="fixed inset-0 z-50 hidden md:flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={() => setQuickExceptionModalOpen(false)}>
           <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="border-b border-slate-200 px-5 py-4">
               <h3 className="text-lg font-semibold text-slate-900">Allow Remote Work (Quick Action)</h3>
@@ -2459,6 +2560,509 @@ export default function HRAttendance() {
           </div>
         </div>
       )}
+
+
+      {/* ── MOBILE TRAYS FOR ATTENDANCE OVERLAYS ── */}
+
+      {/* 1. Mobile Edit Attendance Record Tray */}
+      <MobileTray
+        isOpen={activeEditRow !== null}
+        onClose={() => { setEditId(null); setActiveEditRow(null); }}
+        title="Edit Attendance"
+      >
+        {activeEditRow && (
+          <div className="space-y-5 text-sm">
+            <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+              <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Employee</span>
+              <p className="font-semibold text-slate-900">{activeEditRow.employee?.full_name ?? "-"}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{activeEditRow.employee?.employee_code || "N/A"} • {activeEditRow.employee?.department || "—"}</p>
+            </div>
+
+            <label className="block space-y-1">
+              <span className="font-medium text-slate-700">Status</span>
+              <select
+                value={editStatus}
+                onChange={(event) => setEditStatus(event.target.value as AttendanceStatus)}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-700 outline-none transition-all hover:bg-slate-100 focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20"
+              >
+                <option value="present">Present</option>
+                <option value="absent">Absent</option>
+                <option value="half_day">Half Day</option>
+                <option value="on_leave">On Leave</option>
+              </select>
+            </label>
+
+            <div className="grid grid-cols-2 gap-4">
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">Punch In Time</span>
+                <input
+                  type="time"
+                  value={editPunchIn}
+                  onChange={(event) => setEditPunchIn(event.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none transition-all focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">Punch Out Time</span>
+                <input
+                  type="time"
+                  value={editPunchOut}
+                  onChange={(event) => setEditPunchOut(event.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none transition-all focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20"
+                />
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-5 mt-4">
+              <button
+                type="button"
+                onClick={() => { setEditId(null); setActiveEditRow(null); }}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-all flex-1 text-center"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveEdit(activeEditRow)}
+                disabled={saving}
+                className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50 transition-all flex-1 text-center shadow-sm"
+              >
+                {saving ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        )}
+      </MobileTray>
+
+      {/* 2. Mobile Allow Remote Work Tray */}
+      <MobileTray
+        isOpen={quickExceptionModalOpen}
+        onClose={() => setQuickExceptionModalOpen(false)}
+        title="Allow Remote Work"
+      >
+        <div className="space-y-4 text-sm">
+          <label className="block space-y-1">
+            <span className="font-medium text-slate-700">Select Employee</span>
+            <select
+              value={quickEmployeeId}
+              onChange={(e) => setQuickEmployeeId(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-700 outline-none transition-all hover:bg-slate-100 focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20"
+            >
+              <option value="">Choose Employee...</option>
+              {allEmployees.map(emp => (
+                <option key={emp.id} value={emp.id}>{emp.full_name} ({emp.employee_code ?? "No Code"})</option>
+              ))}
+            </select>
+          </label>
+          
+          <div className="grid gap-4 grid-cols-2">
+            <label className="block space-y-1">
+              <span className="font-medium text-slate-700">Start Date</span>
+              <input
+                type="date"
+                value={quickStartDate}
+                onChange={(e) => setQuickStartDate(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none transition-all focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20"
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="font-medium text-slate-700">End Date</span>
+              <input
+                type="date"
+                value={quickEndDate}
+                onChange={(e) => setQuickEndDate(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none transition-all focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20"
+              />
+            </label>
+          </div>
+          
+          <label className="block space-y-1">
+            <span className="font-medium text-slate-700">Exception Type</span>
+            <select
+              value={quickType}
+              onChange={(e) => setQuickType(e.target.value as any)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-700 outline-none transition-all hover:bg-slate-100 focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20"
+            >
+              <option value="work_from_home">Work From Home (WFH)</option>
+              <option value="client_visit">Client Visit</option>
+              <option value="business_travel">Business Travel</option>
+              <option value="field_work">Field Work</option>
+              <option value="other">Other Exception</option>
+            </select>
+          </label>
+          
+          <label className="block space-y-1">
+            <span className="font-medium text-slate-700">Reason</span>
+            <textarea
+              value={quickReason}
+              onChange={(e) => setQuickReason(e.target.value)}
+              placeholder="Provide details about the exception location/need"
+              rows={3}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none transition-all focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20"
+            />
+          </label>
+
+          <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-5 mt-4">
+            <button
+              type="button"
+              onClick={() => setQuickExceptionModalOpen(false)}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-all flex-1 text-center"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveQuickException()}
+              disabled={submittingException}
+              className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50 transition-all flex-1 text-center shadow-sm"
+            >
+              {submittingException ? "Saving..." : "Allow Remote"}
+            </button>
+          </div>
+        </div>
+      </MobileTray>
+
+      {/* 3. Mobile Reject Correction Tray */}
+      <MobileTray
+        isOpen={rejectCorrection !== null}
+        onClose={() => { if (!correctionActionLoading) setRejectCorrection(null); }}
+        title="Reject Correction Request"
+      >
+        {rejectCorrection && (
+          <div className="space-y-5 text-sm">
+            <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+              <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Employee</span>
+              <p className="font-semibold text-slate-900">{rejectCorrection.employee?.full_name ?? "-"}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{fmt(new Date(rejectCorrection.attendance_date))}</p>
+            </div>
+
+            <label className="block space-y-1">
+              <span className="font-medium text-slate-700">Reason for rejection</span>
+              <textarea
+                value={rejectCorrectionReason}
+                onChange={(event) => setRejectCorrectionReason(event.target.value)}
+                rows={4}
+                placeholder="Please state why you are rejecting this request"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none transition-all focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20"
+              />
+            </label>
+
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-5 mt-4">
+              <button
+                type="button"
+                onClick={() => setRejectCorrection(null)}
+                disabled={correctionActionLoading}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-all flex-1 text-center"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void rejectCorrectionRequest()}
+                disabled={correctionActionLoading}
+                className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-50 transition-all flex-1 text-center shadow-sm"
+              >
+                {correctionActionLoading ? "Rejecting..." : "Reject Request"}
+              </button>
+            </div>
+          </div>
+        )}
+      </MobileTray>
+
+      {/* 4. Mobile Geolocation Details Tray */}
+      <MobileTray
+        isOpen={selectedLocationRow !== null}
+        onClose={() => setSelectedLocationRow(null)}
+        title="Attendance Location Details"
+      >
+        {selectedLocationRow && (() => {
+          const punchInLat = toNumber(selectedLocationRow.punch_in_lat);
+          const punchInLng = toNumber(selectedLocationRow.punch_in_lng);
+          const punchOutLat = toNumber(selectedLocationRow.punch_out_lat);
+          const punchOutLng = toNumber(selectedLocationRow.punch_out_lng);
+          const punchInAccuracy = toNumber(selectedLocationRow.punch_in_location_accuracy);
+          const punchOutAccuracy = toNumber(selectedLocationRow.punch_out_location_accuracy);
+          const punchInDistance = punchInLat != null && punchInLng != null && officeLat != null && officeLng != null
+            ? Math.round(calculateDistance(punchInLat, punchInLng, officeLat, officeLng))
+            : null;
+          const punchOutDistance = punchOutLat != null && punchOutLng != null && officeLat != null && officeLng != null
+            ? Math.round(calculateDistance(punchOutLat, punchOutLng, officeLat, officeLng))
+            : null;
+          const punchInBadge = locationBadge(selectedLocationRow.punch_in_location_status);
+          const punchOutBadge = locationBadge(selectedLocationRow.punch_out_location_status);
+          return (
+            <div className="space-y-5 text-sm">
+              <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Employee</span>
+                <p className="font-semibold text-slate-900">{selectedLocationRow.employee?.full_name ?? "-"}</p>
+              </div>
+              <div className="grid gap-3 grid-cols-1">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Punch In</p>
+                  <p className="mt-1 text-base font-semibold text-slate-900">{fmtTime(selectedLocationRow.punch_in)}</p>
+                  <span className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${punchInBadge.cls}`}>{punchInBadge.label}</span>
+                  {punchInDistance != null ? <p className="mt-2 text-xs text-slate-600 font-medium">Distance from office: {punchInDistance}m</p> : null}
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Punch Out</p>
+                  <p className="mt-1 text-base font-semibold text-slate-900">{fmtTime(selectedLocationRow.punch_out)}</p>
+                  <span className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${punchOutBadge.cls}`}>{punchOutBadge.label}</span>
+                  {punchOutDistance != null ? <p className="mt-2 text-xs text-slate-600 font-medium">Distance from office: {punchOutDistance}m</p> : null}
+                </div>
+              </div>
+
+              {punchInLat != null && punchInLng != null ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-slate-900 font-display">Punch-in map</h4>
+                    {punchInAccuracy != null ? <p className="text-xs text-slate-500">Accuracy: {Math.round(punchInAccuracy)}m</p> : null}
+                  </div>
+                  <div className="h-48 rounded-lg overflow-hidden border border-slate-200 relative bg-slate-100 shadow-inner">
+                    <LocationMap
+                      lat={punchInLat}
+                      lng={punchInLng}
+                      label={`${selectedLocationRow.employee?.full_name ?? "Employee"} punch-in`}
+                      accuracy={punchInAccuracy}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              {punchOutLat != null && punchOutLng != null ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-slate-900 font-display">Punch-out map</h4>
+                    {punchOutAccuracy != null ? <p className="text-xs text-slate-500">Accuracy: {Math.round(punchOutAccuracy)}m</p> : null}
+                  </div>
+                  <div className="h-48 rounded-lg overflow-hidden border border-slate-200 relative bg-slate-100 shadow-inner">
+                    <LocationMap
+                      lat={punchOutLat}
+                      lng={punchOutLng}
+                      label={`${selectedLocationRow.employee?.full_name ?? "Employee"} punch-out`}
+                      accuracy={punchOutAccuracy}
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })()}
+      </MobileTray>
+
+      {/* 5. Mobile Verification Details Tray */}
+      <MobileTray
+        isOpen={selectedVerificationRow !== null}
+        onClose={() => setSelectedVerificationRow(null)}
+        title="Verification Details"
+      >
+        {selectedVerificationRow && (
+          <div className="space-y-6 text-sm">
+            {/* Status Badge header */}
+            <div className="flex items-center justify-between bg-slate-50 p-4 rounded-xl border border-slate-100">
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Status</span>
+                <span className={`mt-1 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold w-fit ${verificationBadge(selectedVerificationRow.location_status)?.cls}`}>
+                  {verificationBadge(selectedVerificationRow.location_status)?.label || "No Status"}
+                </span>
+              </div>
+              <div className="flex flex-col items-end">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date</span>
+                <span className="text-sm font-semibold text-slate-700">{selectedVerificationRow.date}</span>
+              </div>
+            </div>
+
+            {/* Employee Information */}
+            <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 space-y-3">
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Employee Information</h4>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs font-medium text-slate-500">Name</p>
+                  <p className="font-semibold text-slate-900 mt-0.5">{selectedVerificationRow.employee?.full_name}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-slate-500">Code</p>
+                  <p className="font-semibold text-slate-900 mt-0.5">{selectedVerificationRow.employee?.employee_code || "N/A"}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Verification Snapshot */}
+            {selectedVerificationRow.verification_snapshot ? (
+              <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 space-y-3">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Verification Snapshot</h4>
+                <div className="grid grid-cols-2 gap-y-3 gap-x-2">
+                  <div>
+                    <p className="text-xs font-medium text-slate-500">Work Mode</p>
+                    <p className="font-semibold text-slate-900 capitalize mt-0.5">
+                      {selectedVerificationRow.verification_snapshot.work_mode || "Office"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-slate-500">GPS Mode</p>
+                    <p className="font-semibold text-slate-900 capitalize mt-0.5">
+                      {selectedVerificationRow.verification_snapshot.gps_mode || "Warn"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-slate-500">Accuracy & Confidence</p>
+                    <p className="font-semibold text-slate-900 mt-0.5 flex items-center gap-1.5">
+                      <span>{selectedVerificationRow.verification_snapshot.accuracy != null ? `${selectedVerificationRow.verification_snapshot.accuracy}m` : "N/A"}</span>
+                      {selectedVerificationRow.verification_snapshot.confidence && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                          selectedVerificationRow.verification_snapshot.confidence === "high" ? "bg-emerald-100 text-emerald-800" :
+                          selectedVerificationRow.verification_snapshot.confidence === "medium" ? "bg-blue-100 text-blue-800" :
+                          "bg-amber-100 text-amber-800"
+                        }`}>
+                          {selectedVerificationRow.verification_snapshot.confidence}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-slate-500">Exception</p>
+                    <p className="font-semibold text-slate-900 capitalize mt-0.5 truncate">
+                      {selectedVerificationRow.verification_snapshot.exception_id ? `${selectedVerificationRow.verification_snapshot.exception_type?.replace(/_/g, " ")}` : "No Exception"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+                No verification snapshot available.
+              </div>
+            )}
+
+            {/* Geolocation Map */}
+            {selectedVerificationRow.punch_in_lat != null || selectedVerificationRow.punch_out_lat != null ? (
+              <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 space-y-3 flex flex-col">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Location mapping</h4>
+                {selectedVerificationRow.punch_in_lat != null && selectedVerificationRow.punch_out_lat != null && (
+                  <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveMapTab("punch_in")}
+                      className={`flex-1 text-center py-1 text-xs font-semibold rounded-md transition ${activeMapTab === "punch_in" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                    >
+                      Punch In
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveMapTab("punch_out")}
+                      className={`flex-1 text-center py-1 text-xs font-semibold rounded-md transition ${activeMapTab === "punch_out" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                    >
+                      Punch Out
+                    </button>
+                  </div>
+                )}
+
+                <div className="bg-white rounded-lg p-2.5 border border-slate-100 text-[11px] space-y-1 mb-2">
+                  {((activeMapTab === "punch_in" && selectedVerificationRow.punch_in_lat != null) || (selectedVerificationRow.punch_out_lat == null && selectedVerificationRow.punch_in_lat != null)) ? (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="font-semibold text-slate-600">Coordinates:</span>
+                        <span className="font-mono text-slate-900">{selectedVerificationRow.punch_in_lat}, {selectedVerificationRow.punch_in_lng}</span>
+                      </div>
+                      <div className="flex justify-between border-t border-slate-50 pt-1">
+                        <span className="font-semibold text-slate-600">Distance from Office:</span>
+                        <span className="font-bold text-slate-900">
+                          {(officeLat !== null && officeLng !== null) ? `${Math.round(calculateDistance(Number(selectedVerificationRow.punch_in_lat), Number(selectedVerificationRow.punch_in_lng), officeLat, officeLng))}m` : "N/A"}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="font-semibold text-slate-600">Coordinates:</span>
+                        <span className="font-mono text-slate-900">{selectedVerificationRow.punch_out_lat}, {selectedVerificationRow.punch_out_lng}</span>
+                      </div>
+                      <div className="flex justify-between border-t border-slate-50 pt-1">
+                        <span className="font-semibold text-slate-600">Distance from Office:</span>
+                        <span className="font-bold text-slate-900">
+                          {(officeLat !== null && officeLng !== null) ? `${Math.round(calculateDistance(Number(selectedVerificationRow.punch_out_lat), Number(selectedVerificationRow.punch_out_lng), officeLat, officeLng))}m` : "N/A"}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="h-48 relative border border-slate-200 rounded-lg overflow-hidden bg-slate-100 shadow-inner">
+                  {((activeMapTab === "punch_in" && selectedVerificationRow.punch_in_lat != null) || (selectedVerificationRow.punch_out_lat == null && selectedVerificationRow.punch_in_lat != null)) ? (
+                    <LocationMap
+                      key="punch_in_map_mobile"
+                      lat={Number(selectedVerificationRow.punch_in_lat)}
+                      lng={Number(selectedVerificationRow.punch_in_lng)}
+                      label={`${selectedVerificationRow.employee?.full_name ?? "Employee"} punch-in`}
+                      accuracy={selectedVerificationRow.punch_in_location_accuracy != null ? Number(selectedVerificationRow.punch_in_location_accuracy) : null}
+                    />
+                  ) : selectedVerificationRow.punch_out_lat != null ? (
+                    <LocationMap
+                      key="punch_out_map_mobile"
+                      lat={Number(selectedVerificationRow.punch_out_lat)}
+                      lng={Number(selectedVerificationRow.punch_out_lng)}
+                      label={`${selectedVerificationRow.employee?.full_name ?? "Employee"} punch-out`}
+                      accuracy={selectedVerificationRow.punch_out_location_accuracy != null ? Number(selectedVerificationRow.punch_out_location_accuracy) : null}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400 flex flex-col items-center justify-center bg-slate-50/20">
+                <MapPin className="h-8 w-8 text-slate-300 mb-2 animate-bounce" />
+                <p className="font-medium text-slate-500">No GPS coordinates captured</p>
+                {selectedVerificationRow.verification_snapshot?.gps_error_reason && (
+                  <p className="text-rose-600 mt-2 font-medium bg-rose-50 border border-rose-100 px-3 py-1.5 rounded-lg text-[11px]">
+                    Reason: {selectedVerificationRow.verification_snapshot.gps_error_reason}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Selfie Verification */}
+            {(() => {
+              const punchInSelfie = dailySelfies.find(s => s.attendance_id === selectedVerificationRow.id && s.type === "punch_in");
+              const punchOutSelfie = dailySelfies.find(s => s.attendance_id === selectedVerificationRow.id && s.type === "punch_out");
+              if (!punchInSelfie && !punchOutSelfie) return null;
+              return (
+                <div className="border-t border-slate-100 pt-5">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Selfie Verification</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    {punchInSelfie ? (
+                      <div className="rounded-xl border border-slate-100 bg-slate-50/30 p-3 flex flex-col items-center justify-center space-y-2">
+                        <p className="text-[10px] font-bold text-slate-500 uppercase">Punch In</p>
+                        <SelfieImage storagePath={punchInSelfie.storage_path} className="h-24 w-24 object-cover rounded-lg border border-slate-200" />
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-slate-200 p-4 flex flex-col items-center justify-center opacity-60 font-medium">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Punch In</p>
+                        <div className="h-20 w-20 rounded-lg bg-slate-100 flex flex-col items-center justify-center text-[8px] text-slate-400 gap-1">
+                          <Camera className="h-4 w-4 text-slate-300" />
+                          <span>No Selfie</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {punchOutSelfie ? (
+                      <div className="rounded-xl border border-slate-100 bg-slate-50/30 p-3 flex flex-col items-center justify-center space-y-2">
+                        <p className="text-[10px] font-bold text-slate-500 uppercase">Punch Out</p>
+                        <SelfieImage storagePath={punchOutSelfie.storage_path} className="h-24 w-24 object-cover rounded-lg border border-slate-200" />
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-slate-200 p-4 flex flex-col items-center justify-center opacity-60 font-medium">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Punch Out</p>
+                        <div className="h-20 w-20 rounded-lg bg-slate-100 flex flex-col items-center justify-center text-[8px] text-slate-400 gap-1">
+                          <Camera className="h-4 w-4 text-slate-300" />
+                          <span>No Selfie</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </MobileTray>
 
       {previewSelfieUrl && (
         <div 

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from "react";
+import * as framerMotion from "framer-motion";
+const { motion, AnimatePresence } = framerMotion;
 import { useNavigate, useParams, Link } from "react-router-dom";
 import type { Attendance, Employee, Leave, Task } from "../types";
 import { useTenant } from "../contexts/TenantContext";
@@ -8,7 +10,7 @@ import { useEmployee } from "../hooks/useEmployee";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { useToast } from "../shared/ToastContext";
-import { File, Calendar, ClipboardList, MoreVertical, Upload, Loader2, Trash2, Camera, Lock, Eye, EyeOff, CheckCircle2, X, ChevronDown, Printer, Network } from "lucide-react";
+import { File, Calendar, ClipboardList, MoreVertical, Upload, Loader2, Trash2, Camera, Lock, Eye, EyeOff, CheckCircle2, X, ChevronDown, Printer, Network, ChevronLeft, Check, AlertCircle } from "lucide-react";
 import { ConfirmModal } from "../shared/ConfirmModal";
 
 type TabKey = "personal" | "identity" | "documents" | "attendance" | "leaves" | "tasks" | "id_card";
@@ -33,6 +35,78 @@ const tabs: { key: TabKey; label: string }[] = [
 import { formatLocalDate } from "../utils/date";
 import { IDCard } from "../shared/components/IDCard";
 
+// ── Reusable Mobile Bottom Sheet / Tray ──
+function MobileTray({
+  isOpen,
+  onClose,
+  title,
+  children,
+  onBack,
+  showBack = false,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+  onBack?: () => void;
+  showBack?: boolean;
+}) {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          {/* Backdrop Overlay */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 0.5 }}
+            exit={{ opacity: 0 }}
+            className="fixed -inset-10 z-[110] bg-slate-900/60 backdrop-blur-xs md:hidden"
+            onClick={onClose}
+          />
+
+          {/* Bottom Sheet container */}
+          <motion.div
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 30, stiffness: 280 }}
+            className="fixed bottom-0 left-0 right-0 z-[120] max-h-[90vh] overflow-y-auto rounded-t-[28px] border-t border-slate-200 bg-white p-6 shadow-2xl md:hidden pb-safe flex flex-col"
+          >
+            {/* Visual drag indicator handle */}
+            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-200 shrink-0" />
+
+            {/* Header */}
+            <div className="mb-5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                {showBack && onBack && (
+                  <button
+                    onClick={onBack}
+                    className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 transition-colors"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
+                )}
+                <h3 className="text-lg font-bold text-slate-900 font-display">{title}</h3>
+              </div>
+              <button
+                onClick={onClose}
+                className="rounded-full bg-slate-100 p-1.5 text-slate-500 hover:bg-slate-200 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto pb-10">
+              {children}
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
+
 const maskValue = (value: string | null, visible: boolean, minVisible = 4) => {
   if (!value) return "—";
   if (visible) return value;
@@ -49,6 +123,24 @@ export default function EmployeeDetail() {
   const { employee: currentHrEmployee } = useEmployee();
 
   const [activeTab, setActiveTab] = useState<TabKey>("personal");
+  const [tabDirection, setTabDirection] = useState(0); // 1 = right, -1 = left
+  
+  const [isActionsTrayOpen, setIsActionsTrayOpen] = useState(false);
+  const [actionsTrayStep, setActionsTrayStep] = useState<"menu" | "reset_password" | "reset_done">("menu");
+  const [actionsTrayHeight, setActionsTrayHeight] = useState(260);
+
+  const handleTabChange = (key: TabKey) => {
+    const newIdx = tabs.findIndex((t) => t.key === key);
+    const oldIdx = tabs.findIndex((t) => t.key === activeTab);
+    setTabDirection(newIdx > oldIdx ? 1 : -1);
+    setActiveTab(key);
+  };
+
+  useEffect(() => {
+    if (actionsTrayStep === "menu") setActionsTrayHeight(260);
+    else if (actionsTrayStep === "reset_password") setActionsTrayHeight(340);
+    else if (actionsTrayStep === "reset_done") setActionsTrayHeight(220);
+  }, [actionsTrayStep]);
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Employee>>({});
@@ -686,7 +778,7 @@ export default function EmployeeDetail() {
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <div 
@@ -725,7 +817,7 @@ export default function EmployeeDetail() {
             />
           </div>
           <div className="min-w-0">
-            <h2 className="text-xl font-semibold text-slate-900 truncate">{employee.full_name}</h2>
+            <h2 className="text-lg sm:text-xl font-semibold text-slate-900 leading-tight line-clamp-2">{employee.full_name}</h2>
             <div className="mt-1 flex items-center gap-2 text-sm text-slate-500 min-w-0">
               <span className="truncate">{employee.employee_code ?? "No employee code"}</span>
               <span className="text-slate-300 shrink-0">&bull;</span>
@@ -772,14 +864,23 @@ export default function EmployeeDetail() {
           ) : null}
           
           {/* Action Menu Toggle */}
-          <button
-            type="button"
-            onClick={() => setShowActionsMenu(!showActionsMenu)}
-            className="rounded-lg border border-slate-300 p-2 text-slate-700 hover:bg-slate-100 transition shadow-sm"
-            title="More Actions"
-          >
-            <MoreVertical className="h-5 w-5" />
-          </button>
+          {!isEditing && (
+            <button
+              type="button"
+              onClick={() => {
+                if (window.innerWidth < 768) {
+                  setActionsTrayStep("menu");
+                  setIsActionsTrayOpen(true);
+                } else {
+                  setShowActionsMenu(!showActionsMenu);
+                }
+              }}
+              className="rounded-lg border border-slate-300 p-2 text-slate-700 hover:bg-slate-100 transition shadow-sm active:scale-95 duration-100"
+              title="More Actions"
+            >
+              <MoreVertical className="h-5 w-5" />
+            </button>
+          )}
 
           {/* Action Menu Dropdown */}
           {showActionsMenu && (
@@ -848,7 +949,7 @@ export default function EmployeeDetail() {
 
       {/* ── Inline Reset Password panel ── */}
       {(resetStep === "sent" || resetStep === "confirming" || resetStep === "done") && (
-        <div className="mt-4 rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-indigo-50/40 p-5 shadow-sm relative overflow-hidden animate-fade-in">
+        <div className="mt-4 rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-indigo-50/40 p-5 shadow-sm relative overflow-hidden animate-fade-in hidden md:block">
           {/* Subtle background decoration */}
           <div className="absolute top-0 right-0 -mt-6 -mr-6 h-24 w-24 rounded-full bg-violet-100/30 blur-xl pointer-events-none" />
           
@@ -949,22 +1050,57 @@ export default function EmployeeDetail() {
         </div>
       )}
 
-      <div className="mt-4 flex gap-2 border-b border-slate-200 pb-3 overflow-x-auto hide-scrollbar snap-x">
-        {tabs.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setActiveTab(tab.key)}
-            className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors snap-start ${
-              activeTab === tab.key ? "bg-brand-50 text-brand-700 shadow-sm" : "text-slate-600 hover:bg-slate-100"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="mt-4 flex gap-2 border-b border-slate-200 pb-3 overflow-x-auto hide-scrollbar snap-x relative select-none">
+        {tabs.map((tab) => {
+          const isActive = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => handleTabChange(tab.key)}
+              className={`relative whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-200 snap-start active:scale-95 z-10 ${
+                isActive ? "text-brand-700 font-bold" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              {isActive && (
+                <motion.div
+                  layoutId="hr-profile-active-tab"
+                  className="absolute inset-0 bg-brand-50 shadow-xs border border-brand-100 rounded-xl -z-10"
+                  transition={{ type: "spring", stiffness: 350, damping: 28 }}
+                />
+              )}
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
-      {activeTab === "personal" ? (
+      {/* Sliding Tab Content Container */}
+      <div className="relative mt-4">
+        <AnimatePresence initial={false} custom={tabDirection} mode="wait">
+          <motion.div
+            key={activeTab}
+            custom={tabDirection}
+            variants={{
+              enter: (dir: number) => ({
+                x: dir > 0 ? 30 : -30,
+                opacity: 0,
+              }),
+              center: {
+                x: 0,
+                opacity: 1,
+              },
+              exit: (dir: number) => ({
+                x: dir > 0 ? -30 : 30,
+                opacity: 0,
+              }),
+            }}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ type: "tween", ease: "easeInOut", duration: 0.18 }}
+          >
+            {activeTab === "personal" ? (
         <div className="mt-4 grid gap-5 md:grid-cols-2">
           <label className="text-sm">
             <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Full Name</span>
@@ -1571,34 +1707,59 @@ export default function EmployeeDetail() {
           ) : (
             <div className="grid gap-8 md:grid-cols-2">
               {/* ID Card */}
-              <div className="flex flex-col items-center p-5 rounded-2xl border border-slate-100 bg-slate-50/50 shadow-sm">
+              <div className="flex flex-col items-center p-5 rounded-2xl border border-slate-100 bg-slate-50/50 shadow-sm w-full overflow-hidden">
                 <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Identity Card</h3>
-                <div className="h-[215px] flex items-center justify-center">
-                  <IDCard
-                    ref={idCardRef}
-                    employee={employee}
-                    tenant={tenant}
-                    side={idSide}
-                    type="id"
-                  />
+                <div className="w-full overflow-x-auto h-[215px] flex items-center justify-center hide-scrollbar" style={{ perspective: 1000 }}>
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.div
+                      key={idSide}
+                      initial={{ opacity: 0, rotateY: -90 }}
+                      animate={{ opacity: 1, rotateY: 0 }}
+                      exit={{ opacity: 0, rotateY: 90 }}
+                      transition={{ duration: 0.25, ease: "easeInOut" }}
+                      className="shrink-0"
+                    >
+                      <IDCard
+                        ref={idCardRef}
+                        employee={employee}
+                        tenant={tenant}
+                        side={idSide}
+                        type="id"
+                      />
+                    </motion.div>
+                  </AnimatePresence>
                 </div>
-                <div className="mt-5 flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+                <div className="mt-5 flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm relative select-none">
                   <button
                     type="button"
                     onClick={() => setIdSide("front")}
-                    className={`rounded-md px-3.5 py-1 text-xs font-semibold transition ${
-                      idSide === "front" ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    className={`relative rounded-md px-3.5 py-1 text-xs font-semibold transition z-10 duration-150 ${
+                      idSide === "front" ? "text-white" : "text-slate-600 hover:text-slate-900"
                     }`}
                   >
+                    {idSide === "front" && (
+                      <motion.div
+                        layoutId="hr-id-card-pill"
+                        className="absolute inset-0 bg-brand-600 rounded-md -z-10 shadow-sm"
+                        transition={{ type: "spring", stiffness: 350, damping: 28 }}
+                      />
+                    )}
                     Front Side
                   </button>
                   <button
                     type="button"
                     onClick={() => setIdSide("back")}
-                    className={`rounded-md px-3.5 py-1 text-xs font-semibold transition ${
-                      idSide === "back" ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    className={`relative rounded-md px-3.5 py-1 text-xs font-semibold transition z-10 duration-150 ${
+                      idSide === "back" ? "text-white" : "text-slate-600 hover:text-slate-900"
                     }`}
                   >
+                    {idSide === "back" && (
+                      <motion.div
+                        layoutId="hr-id-card-pill"
+                        className="absolute inset-0 bg-brand-600 rounded-md -z-10 shadow-sm"
+                        transition={{ type: "spring", stiffness: 350, damping: 28 }}
+                      />
+                    )}
                     Back Side
                   </button>
                 </div>
@@ -1613,34 +1774,59 @@ export default function EmployeeDetail() {
               </div>
 
               {/* Visiting Card */}
-              <div className="flex flex-col items-center p-5 rounded-2xl border border-slate-100 bg-slate-50/50 shadow-sm">
+              <div className="flex flex-col items-center p-5 rounded-2xl border border-slate-100 bg-slate-50/50 shadow-sm w-full overflow-hidden">
                 <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Visiting Card</h3>
-                <div className="h-[215px] flex items-center justify-center">
-                  <IDCard
-                    ref={visitingCardRef}
-                    employee={employee}
-                    tenant={tenant}
-                    side={visitingSide}
-                    type="visiting"
-                  />
+                <div className="w-full overflow-x-auto h-[215px] flex items-center justify-center hide-scrollbar" style={{ perspective: 1000 }}>
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.div
+                      key={visitingSide}
+                      initial={{ opacity: 0, rotateY: -90 }}
+                      animate={{ opacity: 1, rotateY: 0 }}
+                      exit={{ opacity: 0, rotateY: 90 }}
+                      transition={{ duration: 0.25, ease: "easeInOut" }}
+                      className="shrink-0"
+                    >
+                      <IDCard
+                        ref={visitingCardRef}
+                        employee={employee}
+                        tenant={tenant}
+                        side={visitingSide}
+                        type="visiting"
+                      />
+                    </motion.div>
+                  </AnimatePresence>
                 </div>
-                <div className="mt-5 flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+                <div className="mt-5 flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm relative select-none">
                   <button
                     type="button"
                     onClick={() => setVisitingSide("front")}
-                    className={`rounded-md px-3.5 py-1 text-xs font-semibold transition ${
-                      visitingSide === "front" ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    className={`relative rounded-md px-3.5 py-1 text-xs font-semibold transition z-10 duration-150 ${
+                      visitingSide === "front" ? "text-white" : "text-slate-600 hover:text-slate-900"
                     }`}
                   >
+                    {visitingSide === "front" && (
+                      <motion.div
+                        layoutId="hr-visiting-card-pill"
+                        className="absolute inset-0 bg-brand-600 rounded-md -z-10 shadow-sm"
+                        transition={{ type: "spring", stiffness: 350, damping: 28 }}
+                      />
+                    )}
                     Front Side
                   </button>
                   <button
                     type="button"
                     onClick={() => setVisitingSide("back")}
-                    className={`rounded-md px-3.5 py-1 text-xs font-semibold transition ${
-                      visitingSide === "back" ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    className={`relative rounded-md px-3.5 py-1 text-xs font-semibold transition z-10 duration-150 ${
+                      visitingSide === "back" ? "text-white" : "text-slate-600 hover:text-slate-900"
                     }`}
                   >
+                    {visitingSide === "back" && (
+                      <motion.div
+                        layoutId="hr-visiting-card-pill"
+                        className="absolute inset-0 bg-brand-600 rounded-md -z-10 shadow-sm"
+                        transition={{ type: "spring", stiffness: 350, damping: 28 }}
+                      />
+                    )}
                     Back Side
                   </button>
                 </div>
@@ -1656,7 +1842,10 @@ export default function EmployeeDetail() {
             </div>
           )}
         </div>
-      ) : null}
+            ) : null}
+          </motion.div>
+        </AnimatePresence>
+      </div>
 
       <ConfirmModal
         isOpen={deleteConfirmDocKey !== null}
@@ -1746,6 +1935,179 @@ export default function EmployeeDetail() {
           </div>
         </div>
       )}
+
+      {/* Mobile Actions Sheet / Tray */}
+      <MobileTray
+        isOpen={isActionsTrayOpen}
+        onClose={() => {
+          setIsActionsTrayOpen(false);
+          cancelReset();
+        }}
+        title={
+          actionsTrayStep === "menu" ? "Employee Actions" :
+          actionsTrayStep === "reset_password" ? "Reset Password" : "Password Updated"
+        }
+        showBack={actionsTrayStep === "reset_password"}
+        onBack={() => setActionsTrayStep("menu")}
+      >
+        <motion.div
+          animate={{ height: actionsTrayHeight }}
+          transition={{ type: "spring", stiffness: 350, damping: 28 }}
+          className="w-full flex flex-col justify-between overflow-hidden"
+        >
+          {actionsTrayStep === "menu" && (
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => {
+                  openPasswordReset();
+                  setActionsTrayStep("reset_password");
+                }}
+                className="w-full flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-98"
+              >
+                <Lock className="h-4 w-4 text-violet-500" />
+                Reset Password
+              </button>
+
+              {employee.status !== "active" && (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={async () => {
+                    await updateStatus("active");
+                    setIsActionsTrayOpen(false);
+                  }}
+                  className="w-full flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5 text-left text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition active:scale-98"
+                >
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  Reactivate Employee
+                </button>
+              )}
+
+              {employee.status === "active" && (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={async () => {
+                    await updateStatus("inactive");
+                    setIsActionsTrayOpen(false);
+                  }}
+                  className="w-full flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/40 p-3.5 text-left text-xs font-semibold text-amber-700 hover:bg-amber-100 transition active:scale-98"
+                >
+                  <AlertCircle className="h-4 w-4 text-amber-500" />
+                  Deactivate Employee
+                </button>
+              )}
+
+              {employee.status !== "terminated" && (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={async () => {
+                    await updateStatus("terminated");
+                    setIsActionsTrayOpen(false);
+                  }}
+                  className="w-full flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50/40 p-3.5 text-left text-xs font-semibold text-rose-700 hover:bg-rose-100 transition active:scale-98"
+                >
+                  <Trash2 className="h-4 w-4 text-rose-500" />
+                  Terminate Employee
+                </button>
+              )}
+            </div>
+          )}
+
+          {actionsTrayStep === "reset_password" && (
+            <div className="space-y-4 flex flex-col justify-between h-full">
+              <div className="space-y-2">
+                <p className="text-xs text-slate-500">
+                  Set a new login password for <strong className="text-slate-800">{employee.email}</strong>.
+                </p>
+                
+                {resetError && (
+                  <p className="rounded-xl border border-rose-100 bg-rose-50 p-2.5 text-[11px] font-medium text-rose-700">
+                    {resetError}
+                  </p>
+                )}
+
+                <div className="relative">
+                  <input
+                    type={showResetPassword ? "text" : "password"}
+                    placeholder="New password, min 8 characters"
+                    value={resetNewPassword}
+                    onChange={(e) => setResetNewPassword(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/30 px-3.5 py-3 text-xs outline-none focus:border-brand-600 focus:bg-white transition-all pr-10"
+                  />
+                  {resetNewPassword.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword(!showResetPassword)}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                    >
+                      {showResetPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  )}
+                </div>
+                
+                {resetNewPassword.length > 0 && resetNewPassword.length < 8 && (
+                  <p className="text-[10px] font-medium text-amber-600">
+                    ⚠️ Password must be at least 8 characters.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  disabled={resetLoading || resetNewPassword.trim().length < 8}
+                  onClick={async () => {
+                    await confirmPasswordReset();
+                    if (!resetError) {
+                      setActionsTrayStep("reset_done");
+                    }
+                  }}
+                  className="w-full rounded-xl bg-violet-600 hover:bg-violet-700 py-3 text-xs font-bold text-white shadow-lg shadow-violet-600/20 active:scale-95 disabled:opacity-50 disabled:pointer-events-none transition flex items-center justify-center gap-2"
+                >
+                  {resetLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Saving Password...
+                    </>
+                  ) : (
+                    "Reset Password"
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {actionsTrayStep === "reset_done" && (
+            <div className="space-y-4 flex flex-col justify-between h-full text-center">
+              <div className="flex flex-col items-center gap-3 mt-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 ring-4 ring-emerald-50">
+                  <Check className="h-6 w-6" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">Password Reset Completed</h4>
+                  <p className="text-xs text-slate-500 mt-1">The employee can now log in with their new credentials.</p>
+                </div>
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsActionsTrayOpen(false);
+                    cancelReset();
+                  }}
+                  className="w-full rounded-xl bg-brand-700 py-3 text-xs font-bold text-white hover:bg-brand-600 active:scale-95 transition"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+        </motion.div>
+      </MobileTray>
     </section>
   );
 }
