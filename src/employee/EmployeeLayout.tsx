@@ -73,7 +73,6 @@ function EmployeeSidebarContent({
   unreadConnectCount,
   onItemClick,
   employee,
-  onLogout,
   flatLayout = false,
 }: {
   sections: NavSection[];
@@ -81,7 +80,6 @@ function EmployeeSidebarContent({
   unreadConnectCount: number;
   onItemClick?: () => void;
   employee?: { full_name?: string; profile_photo_url?: string; department?: string } | null;
-  onLogout?: () => void;
   flatLayout?: boolean;
 }) {
   const { open } = useSidebar();
@@ -662,7 +660,6 @@ export default function EmployeeLayout() {
                     location={location}
                     unreadConnectCount={unreadConnectCount}
                     employee={employee}
-                    onLogout={handleLogout}
                     flatLayout={true}
                   />
                 </DesktopSidebar>
@@ -675,7 +672,6 @@ export default function EmployeeLayout() {
                     location={location}
                     unreadConnectCount={unreadConnectCount}
                     employee={employee}
-                    onLogout={handleLogout}
                     flatLayout={true}
                   />
                 </DesktopSidebar>
@@ -928,7 +924,6 @@ export default function EmployeeLayout() {
                 unreadConnectCount={unreadConnectCount}
                 onItemClick={() => setMobileOpen(false)}
                 employee={employee}
-                onLogout={handleLogout}
               />
             </Sidebar>
           </div>

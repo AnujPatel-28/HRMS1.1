@@ -80,7 +80,6 @@ function HRSidebarContent({
   pendingExpensesCount,
   onItemClick,
   employee,
-  onLogout,
   flatLayout = false,
 }: {
   sections: readonly NavSection[];
@@ -89,7 +88,6 @@ function HRSidebarContent({
   pendingExpensesCount: number;
   onItemClick?: () => void;
   employee?: { full_name?: string; profile_photo_url?: string; department?: string } | null;
-  onLogout?: () => void;
   flatLayout?: boolean;
 }) {
   const { open } = useSidebar();
@@ -603,7 +601,6 @@ export default function HRLayout() {
                     unreadConnectCount={unreadConnectCount}
                     pendingExpensesCount={pendingExpensesCount}
                     employee={employee}
-                    onLogout={handleLogout}
                     flatLayout={true}
                   />
                 </DesktopSidebar>
@@ -617,7 +614,6 @@ export default function HRLayout() {
                     unreadConnectCount={unreadConnectCount}
                     pendingExpensesCount={pendingExpensesCount}
                     employee={employee}
-                    onLogout={handleLogout}
                     flatLayout={true}
                   />
                 </DesktopSidebar>
@@ -868,7 +864,6 @@ export default function HRLayout() {
                 pendingExpensesCount={pendingExpensesCount}
                 onItemClick={() => setMobileOpen(false)}
                 employee={employee}
-                onLogout={handleLogout}
               />
             </Sidebar>
             {/* Mobile Logout */}
