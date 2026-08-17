@@ -2,6 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { db, setCurrentTenantId } from "../insforge/client";
 import { useAuth } from "../hooks/useAuth";
+import { BASE_DOMAIN } from "../utils/domain";
 
 export type Tenant = {
   id: string;
@@ -50,12 +51,6 @@ const tenantColumns = [
   "logo_url",
 ].join(",");
 
-// --- CENTRALIZED DOMAIN CONFIGURATION ---
-// Preparing for future wildcard migration by centralizing these constants.
-// For now, tenants are added manually to GoDaddy and Vercel.
-// Example Base Domain: hrms.talentmeshsolutions.com
-const BASE_DOMAIN = import.meta.env.VITE_BASE_DOMAIN as string | undefined;
-
 const isLocalhost = (hostname: string) =>
   hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 
@@ -63,50 +58,50 @@ const isLocalhost = (hostname: string) =>
  * Parses the hostname to extract the tenant subdomain.
  * Rules for nested subdomain architecture:
  * - hrms.talentmeshsolutions.com -> null (Super admin portal)
+ * - www.talentmeshsolutions.com  -> null (Landing page)
  * - talentmeshsolutions.com -> null (Landing page)
  * - localhost -> null (Local development)
  * - abc.hrms.talentmeshsolutions.com -> "abc" (Tenant portal)
  */
 const getSubdomain = (hostname: string): string | null => {
-  if (isLocalhost(hostname)) return null;
+  const host = hostname.toLowerCase();
+
+  if (isLocalhost(host)) return null;
 
   // Local development with tenant subdomains (e.g. talentmesh.localhost)
-  if (hostname.endsWith(".localhost")) {
-    const labels = hostname.split(".");
+  if (host.endsWith(".localhost")) {
+    const labels = host.split(".");
     if (labels.length === 2) {
       return labels[0]; // Returns "talentmesh"
     }
     return null;
   }
 
-  const labels = hostname.split(".").filter(Boolean);
-
   if (BASE_DOMAIN) {
-    const baseLabels = BASE_DOMAIN.split(".").filter(Boolean);
-    
-    // A valid tenant URL has exactly ONE extra label before the base domain.
-    // e.g. base = hrms.talentmeshsolutions.com (3 labels)
-    // tenant = abc.hrms.talentmeshsolutions.com (4 labels)
-    if (labels.length === baseLabels.length + 1) {
-      const suffix = labels.slice(1).join(".");
-      if (suffix === BASE_DOMAIN) {
-        const tenant = labels[0]; // e.g. "abc"
-        
-        if (import.meta.env.DEV) {
-          console.log(`[Tenant Debug] Detected tenant: "${tenant}" from hostname: "${hostname}"`);
-        }
-        
-        return tenant;
+    // The base domain itself is the super admin / landing host, never a tenant.
+    if (host === BASE_DOMAIN || host === `www.${BASE_DOMAIN}`) return null;
+
+    if (host.endsWith(`.${BASE_DOMAIN}`)) {
+      // A valid tenant URL has exactly ONE extra label before the base domain.
+      const prefix = host.slice(0, -(BASE_DOMAIN.length + 1));
+      const tenant = prefix.includes(".") ? null : prefix;
+
+      if (import.meta.env.DEV) {
+        console.log(`[Tenant Debug] Detected tenant: "${tenant}" from hostname: "${host}"`);
       }
+
+      return tenant;
     }
-    
-    if (import.meta.env.DEV) {
-      console.log(`[Tenant Debug] Hostname "${hostname}" does not match exact BASE_DOMAIN "${BASE_DOMAIN}". Trying fallback.`);
-    }
+
+    return null;
   }
 
-  // Fallback: extract the first label if we have 3 or more (e.g. talentmesh.talentmeshsolutions.com)
-  return labels.length >= 3 ? labels[0] : null;
+  // Fallback when VITE_BASE_DOMAIN is not configured. The platform's base host
+  // is <app>.<domain>.<tld> (3 labels), so a tenant host carries at least 4.
+  // Without this floor, the base host itself resolves to the tenant "hrms".
+  const labels = host.split(".").filter(Boolean);
+  if (labels.length >= 4 && labels[0] !== "www") return labels[0];
+  return null;
 };
 
 /**
@@ -134,7 +129,13 @@ export function TenantProvider({ children }: { children: ReactNode }) {
 
     const hostname = window.location.hostname;
     const subdomain = getSubdomain(hostname);
-    const defaultTenantId = import.meta.env.VITE_DEFAULT_TENANT_ID as string | undefined;
+
+    // VITE_DEFAULT_TENANT_ID is a local-development convenience only. On a real
+    // host the tenant must come from the subdomain — otherwise the super admin
+    // host (and the apex domain) would quietly serve one tenant's portal.
+    const defaultTenantId = isLocalhost(hostname)
+      ? (import.meta.env.VITE_DEFAULT_TENANT_ID as string | undefined)
+      : undefined;
 
     const query = db.from("tenants").select(tenantColumns).limit(1);
     const result = subdomain

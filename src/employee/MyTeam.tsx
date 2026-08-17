@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Users, Calendar as CalendarIcon, Clock, CheckCircle2, AlertTriangle, FileText, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { Users, Calendar as CalendarIcon, Clock, CheckCircle2, AlertTriangle, FileText, ChevronLeft, ChevronRight, X, UserPlus, Trash2 } from "lucide-react";
 import type { Employee, Attendance, Leave, Holiday } from "../types";
 import { db } from "../insforge/client";
 import { useTenant } from "../contexts/TenantContext";
@@ -7,6 +7,9 @@ import { useAuth } from "../hooks/useAuth";
 import { formatLocalDate } from "../utils/date";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
+import { useToast } from "../shared/ToastContext";
+import AddTeamMemberModal from "./AddTeamMemberModal";
+import { ConfirmModal } from "../shared/ConfirmModal";
 
 const TODAY = formatLocalDate(new Date());
 
@@ -18,10 +21,14 @@ interface TeamMemberWithStatus extends Employee {
 export default function MyTeam() {
   const { currentEmployee, isManager } = useAuth();
   const { tenantId } = useTenant();
+  const { success, error } = useToast();
 
   const [loading, setLoading] = useState(true);
   const [team, setTeam] = useState<TeamMemberWithStatus[]>([]);
   const [selectedMember, setSelectedMember] = useState<Employee | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<{ id: string; name: string } | null>(null);
+  const [cancellingRequest, setCancellingRequest] = useState(false);
 
   // Modal calendar states
   const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
@@ -35,13 +42,13 @@ export default function MyTeam() {
     if (!currentEmployee?.id || !tenantId) return;
     setLoading(true);
     try {
-      // 1. Fetch direct reports
+      // 1. Fetch direct reports (active + draft/pending statuses) from public view
       const { data: employeesData, error: empErr } = await db
-        .from("employees")
-        .select("*")
+        .from("employee_directory_public")
+        .select("id, user_id, manager_id, full_name, profile_photo_url, designation, department, status")
         .eq("manager_id", currentEmployee.id)
         .eq("tenant_id", tenantId)
-        .eq("status", "active")
+        .in("status", ["active", "draft", "pending_onboarding", "pending_hr_review", "inactive"])
         .order("full_name");
       if (empErr) throw empErr;
 
@@ -175,6 +182,28 @@ export default function MyTeam() {
       icon: <AlertTriangle className="h-3.5 w-3.5" />
     };
   };
+  
+  const handleCancelRequest = async (employeeId: string, name: string) => {
+    setCancellingRequest(true);
+    try {
+      const { error: deleteErr } = await db
+        .from("employees")
+        .delete()
+        .eq("id", employeeId)
+        .eq("tenant_id", tenantId);
+
+      if (deleteErr) throw deleteErr;
+
+      success(`Successfully cancelled draft onboarding request for ${name}.`);
+      setCancelTarget(null);
+      void fetchTeamData();
+    } catch (err: any) {
+      error(err.message || "Failed to cancel request.");
+      console.error(err);
+    } finally {
+      setCancellingRequest(false);
+    }
+  };
 
   // Generate calendar days
   const renderCalendarDays = () => {
@@ -258,9 +287,27 @@ export default function MyTeam() {
 
   return (
     <section className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-slate-900">My Team</h2>
-        <p className="text-sm text-slate-500">Monitor your direct reports and check their monthly attendance.</p>
+      {showAddModal && (
+        <AddTeamMemberModal
+          onClose={() => setShowAddModal(false)}
+          onCreated={() => void fetchTeamData()}
+        />
+      )}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-900">My Team</h2>
+          <p className="text-sm text-slate-500">Monitor your direct reports and check their monthly attendance.</p>
+        </div>
+        {isManager && (
+          <button
+            type="button"
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-700 shadow-sm"
+          >
+            <UserPlus className="h-4 w-4" />
+            Add Team Member
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -289,7 +336,7 @@ export default function MyTeam() {
           {team.map(member => {
             const badge = getTodayStatusLabel(member);
             return (
-              <div key={member.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm flex flex-col justify-between hover:shadow-md transition">
+              <div key={member.id} className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm flex flex-col justify-between hover:shadow-md transition ${member.status !== 'active' ? 'opacity-70 bg-slate-50/50' : ''}`}>
                 <div className="flex gap-3">
                   {member.profile_photo_url ? (
                     <img src={member.profile_photo_url} alt="" className="h-12 w-12 rounded-full object-cover shrink-0 ring-2 ring-brand-100" />
@@ -299,29 +346,54 @@ export default function MyTeam() {
                     </div>
                   )}
                   <div className="min-w-0">
-                    <h3 className="font-semibold text-slate-950 truncate">{member.full_name}</h3>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <h3 className="font-semibold text-slate-950 truncate">{member.full_name}</h3>
+                      {member.status !== 'active' && (
+                        <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">
+                          {!member.user_id ? 'Pending HR' : 'Inactive'}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-400 truncate">{member.designation ?? "Employee"}</p>
                     <p className="text-[10px] text-slate-400 uppercase tracking-wide truncate">{member.department ?? "—"} department</p>
                   </div>
                 </div>
 
                 <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
-                  <div className={`flex items-center gap-1 border px-2.5 py-1 rounded-full text-xs font-semibold ${badge.color}`}>
-                    {badge.icon}
-                    <span>{badge.label}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedMember(member);
-                      setCalendarYear(new Date().getFullYear());
-                      setCalendarMonth(new Date().getMonth());
-                    }}
-                    className="flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700 transition"
-                  >
-                    <CalendarIcon className="h-4 w-4" />
-                    <span>View Calendar</span>
-                  </button>
+                  {member.status === 'inactive' && !member.user_id ? (
+                    <>
+                      <div className="flex items-center gap-1 border px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-50 border-orange-200 text-orange-700">
+                        <span>Draft Profile</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCancelTarget({ id: member.id, name: member.full_name })}
+                        className="flex items-center gap-1 text-xs font-semibold text-rose-600 hover:text-rose-700 transition"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        <span>Cancel Request</span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className={`flex items-center gap-1 border px-2.5 py-1 rounded-full text-xs font-semibold ${badge.color}`}>
+                        {badge.icon}
+                        <span>{badge.label}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedMember(member);
+                          setCalendarYear(new Date().getFullYear());
+                          setCalendarMonth(new Date().getMonth());
+                        }}
+                        className="flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700 transition"
+                      >
+                        <CalendarIcon className="h-4 w-4" />
+                        <span>View Calendar</span>
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             );
@@ -425,6 +497,22 @@ export default function MyTeam() {
           </div>
         </div>
       )}
+
+      {/* Cancellation Confirm Modal */}
+      <ConfirmModal
+        isOpen={cancelTarget !== null}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={() => {
+          if (cancelTarget) {
+            void handleCancelRequest(cancelTarget.id, cancelTarget.name);
+          }
+        }}
+        title="Cancel Onboarding Request"
+        message={`Are you sure you want to cancel the onboarding draft request for ${cancelTarget?.name}?`}
+        confirmText="Cancel Request"
+        confirmColor="red"
+        isSubmitting={cancellingRequest}
+      />
     </section>
   );
 }

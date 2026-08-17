@@ -167,9 +167,9 @@ export default function MyTasks() {
         attachment_name = file.name;
       }
 
+      // Submitter identity is derived server-side from auth.uid(); do not pass p_employee_id.
       const { error: rpcErr } = await db.rpc('submit_task_request', {
         p_task_id: task.id,
-        p_employee_id: employee.id,
         p_notes: notes || null,
         p_attachment_url: attachment_url,
         p_attachment_name: attachment_name

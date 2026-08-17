@@ -12,6 +12,8 @@ import Policies from "./employee/Policies";
 import PunchInOut from "./employee/PunchInOut";
 import MyTeam from "./employee/MyTeam";
 import EmployeeExpenses from "./employee/Expenses";
+import MyExit from "./employee/MyExit";
+import OnboardingWizard from "./employee/OnboardingWizard";
 import HRAttendance from "./hr/Attendance";
 import HRCalendar from "./hr/Calendar";
 import HRChat from "./hr/Chat";
@@ -20,6 +22,7 @@ import EmployeeCreate from "./hr/EmployeeCreate";
 import EmployeeDetail from "./hr/EmployeeDetail";
 import EmployeeList from "./hr/EmployeeList";
 import Directory from "./hr/Directory";
+import OffboardingManagement from "./hr/OffboardingManagement";
 import HRExpenses from "./hr/Expenses";
 import HolidayList from "./hr/HolidayList";
 import HRLayout from "./hr/HRLayout";
@@ -28,6 +31,7 @@ import PolicyCenter from "./hr/PolicyCenter";
 import PolicyUpload from "./hr/PolicyUpload";
 import ShiftManagement from "./hr/ShiftManagement";
 import OfficeLocations from "./hr/OfficeLocations";
+import OrgStructureManagement from "./hr/OrgStructureManagement";
 import TaskManagement from "./hr/TaskManagement";
 import ProjectList from "./hr/pms/ProjectList";
 import ProjectDetail from "./hr/pms/ProjectDetail";
@@ -148,6 +152,7 @@ function TenantRoutes() {
           <Route path="employees" element={<EmployeeList />} />
           <Route path="employees/create" element={<EmployeeCreate />} />
           <Route path="employees/:employeeId" element={<EmployeeDetail />} />
+          <Route path="offboarding" element={<OffboardingManagement />} />
           <Route path="attendance" element={<HRAttendance />} />
           <Route path="shifts" element={<ShiftManagement />} />
           <Route path="leaves" element={<LeaveManagement />} />
@@ -158,6 +163,7 @@ function TenantRoutes() {
           <Route path="chat" element={<HRChat />} />
           <Route path="policy-center" element={<PolicyCenter />} />
           <Route path="office-locations" element={<OfficeLocations />} />
+          <Route path="org-structure" element={<OrgStructureManagement />} />
           <Route path="directory" element={<Directory />} />
           <Route path="org-chart" element={<OrgChart />} />
           <Route path="connect" element={<Connect />} />
@@ -218,6 +224,8 @@ function TenantRoutes() {
           <Route path="org-chart" element={<OrgChart />} />
           <Route path="id-card" element={<IDCardPage />} />
           <Route path="my-team" element={<MyTeam />} />
+          <Route path="onboarding" element={<OnboardingWizard />} />
+          <Route path="exit" element={<MyExit />} />
           <Route path="pms/:projectId" element={<EmployeeProjectView />} />
           <Route path="expenses" element={<EmployeeExpenses />} />
           <Route path="insurance" element={<EmployeeInsurance />} />

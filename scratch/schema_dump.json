@@ -1,0 +1,4134 @@
+{
+  "columns": [
+    {
+      "table_name": "activity",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "activity",
+      "column_name": "user_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "activity",
+      "column_name": "type",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "activity",
+      "column_name": "title",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "activity",
+      "column_name": "description",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "activity",
+      "column_name": "meta",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "activity",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "admin_users",
+      "column_name": "user_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "ai_suggestion_cache",
+      "column_name": "query_key",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "ai_suggestion_cache",
+      "column_name": "suggestions",
+      "data_type": "jsonb",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "ai_suggestion_cache",
+      "column_name": "expires_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "ai_suggestion_cache",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "announcement_dismissals",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "announcement_dismissals",
+      "column_name": "announcement_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "announcement_dismissals",
+      "column_name": "user_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "announcement_dismissals",
+      "column_name": "dismissed_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "title",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "message",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "type",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "is_active",
+      "data_type": "boolean",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "show_as_banner",
+      "data_type": "boolean",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "target_roles",
+      "data_type": "ARRAY",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "scheduled_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "expires_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "view_count",
+      "data_type": "integer",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "dismiss_count",
+      "data_type": "integer",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "announcements",
+      "column_name": "image_url",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "date",
+      "data_type": "date",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "punch_in",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "punch_out",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "punch_out_allowed",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "punch_in_ip",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "punch_out_ip",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "work_hours",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "notes",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "punch_in_lat",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "punch_in_lng",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "punch_in_location_accuracy",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "punch_in_location_status",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "punch_out_lat",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "punch_out_lng",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "punch_out_location_accuracy",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "punch_out_location_status",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "is_late",
+      "data_type": "boolean",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "session_status",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "auto_closed",
+      "data_type": "boolean",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "total_break_minutes",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "current_break_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "current_break_start",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "location_accuracy",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "location_confidence",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "location_status",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "remote_exception_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "verification_snapshot",
+      "data_type": "jsonb",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_audit_logs",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_audit_logs",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_audit_logs",
+      "column_name": "attendance_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_audit_logs",
+      "column_name": "action",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_audit_logs",
+      "column_name": "details",
+      "data_type": "jsonb",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_audit_logs",
+      "column_name": "performed_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_audit_logs",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_breaks",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_breaks",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_breaks",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_breaks",
+      "column_name": "attendance_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_breaks",
+      "column_name": "break_type",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_breaks",
+      "column_name": "started_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_breaks",
+      "column_name": "ended_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_breaks",
+      "column_name": "duration_minutes",
+      "data_type": "integer",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_breaks",
+      "column_name": "over_limit_minutes",
+      "data_type": "integer",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_breaks",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "attendance_date",
+      "data_type": "date",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "requested_punch_in",
+      "data_type": "time without time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "requested_punch_out",
+      "data_type": "time without time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "reason",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "reviewed_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "reviewed_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "rejection_reason",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "exception_type",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "start_date",
+      "data_type": "date",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "end_date",
+      "data_type": "date",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "reason",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "requested_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "approved_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "approved_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "cancelled_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "cancelled_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_selfies",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_selfies",
+      "column_name": "attendance_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_selfies",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_selfies",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_selfies",
+      "column_name": "type",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_selfies",
+      "column_name": "storage_path",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_selfies",
+      "column_name": "captured_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "attendance_selfies",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "actor_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "actor_role",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "action",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "target_type",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "target_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "details",
+      "data_type": "jsonb",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "ip_address",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "metadata",
+      "data_type": "jsonb",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "user_agent",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "calendar_events",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "calendar_events",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "calendar_events",
+      "column_name": "date",
+      "data_type": "date",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "calendar_events",
+      "column_name": "type",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "calendar_events",
+      "column_name": "task_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "calendar_events",
+      "column_name": "notes",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "calendar_events",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "calendar_events",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_channel_members",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_channel_members",
+      "column_name": "channel_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_channel_members",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_channel_members",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_channels",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_channels",
+      "column_name": "name",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_channels",
+      "column_name": "description",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "chat_channels",
+      "column_name": "type",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_channels",
+      "column_name": "target_departments",
+      "data_type": "ARRAY",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "chat_channels",
+      "column_name": "created_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "chat_channels",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_channels",
+      "column_name": "is_announcement",
+      "data_type": "boolean",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "chat_channels",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "sender_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "channel",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "content",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "attachment_url",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "attachment_name",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "is_deleted",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "channel_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "client_message_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employee_documents",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_documents",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_documents",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_documents",
+      "column_name": "file_name",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_documents",
+      "column_name": "file_url",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_documents",
+      "column_name": "file_key",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_documents",
+      "column_name": "size",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_documents",
+      "column_name": "uploaded_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_onboarding",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_onboarding",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_onboarding",
+      "column_name": "auth_user_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_onboarding",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_onboarding",
+      "column_name": "last_error",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employee_onboarding",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employee_onboarding",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employee_onboarding",
+      "column_name": "expired_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employee_shifts",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_shifts",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_shifts",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_shifts",
+      "column_name": "shift_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_shifts",
+      "column_name": "effective_from",
+      "data_type": "date",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employee_shifts",
+      "column_name": "effective_to",
+      "data_type": "date",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employee_shifts",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "user_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "full_name",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "email",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "phone",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "date_of_birth",
+      "data_type": "date",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "gender",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "address",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "city",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "state",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "pincode",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "department",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "designation",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "employee_code",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "date_of_joining",
+      "data_type": "date",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "employment_type",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "aadhaar_number",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "pan_number",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "bank_name",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "account_number",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "ifsc_code",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "emergency_contact_name",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "emergency_contact_phone",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "emergency_contact_relation",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "profile_photo_url",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "created_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "role",
+      "data_type": "USER-DEFINED",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "work_mode",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "manager_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "grade",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "blood_group",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "work_location",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "linkedin_url",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "employee_bio",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "title",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "amount",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "currency",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "category",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "expense_date",
+      "data_type": "date",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "description",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "receipt_url",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "receipt_name",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "reviewed_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "reviewed_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "rejection_reason",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "payroll_run_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "reimbursed_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "holidays",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "holidays",
+      "column_name": "name",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "holidays",
+      "column_name": "date",
+      "data_type": "date",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "holidays",
+      "column_name": "type",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "holidays",
+      "column_name": "description",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "holidays",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "holidays",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "hr_policies",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "hr_policies",
+      "column_name": "title",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "hr_policies",
+      "column_name": "description",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "hr_policies",
+      "column_name": "file_url",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "hr_policies",
+      "column_name": "file_name",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "hr_policies",
+      "column_name": "uploaded_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "hr_policies",
+      "column_name": "visible_to",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "hr_policies",
+      "column_name": "department_filter",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "hr_policies",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "hr_policies",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "hr_policies",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "insurer_name",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "policy_number",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "policy_type",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "coverage_amount",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "premium_amount",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "premium_frequency",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "start_date",
+      "data_type": "date",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "expiry_date",
+      "data_type": "date",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "rm_name",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "rm_phone",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "rm_email",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "rm_company",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "notes",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "policy_document_url",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "it_declaration_windows",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "it_declaration_windows",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "it_declaration_windows",
+      "column_name": "financial_year",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "it_declaration_windows",
+      "column_name": "is_open",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "it_declaration_windows",
+      "column_name": "opens_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declaration_windows",
+      "column_name": "closes_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declaration_windows",
+      "column_name": "opened_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declaration_windows",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "financial_year",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "tax_regime",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "ppf_amount",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "lic_premium",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "elss_mutual_fund",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "nsc_amount",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "home_loan_principal",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "tuition_fees",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "other_80c",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "health_insurance_self",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "health_insurance_parents",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "hra_rent_paid_annual",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "hra_landlord_name",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "hra_landlord_pan",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "home_loan_interest",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "prev_employer_income",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "prev_employer_tds",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "prev_employer_name",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "lta_amount",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "medical_reimbursement",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "submitted_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "verified_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "verified_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "hr_notes",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "leave_type_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "year",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "total_allocated",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "carried_forward",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "used_days",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "pending_days",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "balance",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "last_accrual_date",
+      "data_type": "date",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "name",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "code",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "days_per_year",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "accrual_type",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "carry_forward_enabled",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "carry_forward_max_days",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "encashment_enabled",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "applicable_from_day",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "probation_restricted",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "requires_document",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "min_notice_days",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "max_consecutive_days",
+      "data_type": "integer",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "is_active",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "sort_order",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "is_paid",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "leave_type",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "start_date",
+      "data_type": "date",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "end_date",
+      "data_type": "date",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "total_days",
+      "data_type": "integer",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "reason",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "reviewed_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "reviewed_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "rejection_reason",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "applied_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "leave_type_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "approved_business_days",
+      "data_type": "integer",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "title",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "body",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "type",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "reference_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "is_read",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "user_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "message",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "metadata",
+      "data_type": "jsonb",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "office_locations",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "office_locations",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "office_locations",
+      "column_name": "name",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "office_locations",
+      "column_name": "lat",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "office_locations",
+      "column_name": "lng",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "office_locations",
+      "column_name": "radius_meters",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "office_locations",
+      "column_name": "is_active",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "office_locations",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "office_locations",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "attendance_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "date",
+      "data_type": "date",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "regular_hours",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "overtime_hours",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "overtime_rate",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "overtime_amount",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "approved",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "approved_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "month",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "year",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "total_gross",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "total_deductions",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "total_net",
+      "data_type": "numeric",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "employee_count",
+      "data_type": "integer",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "run_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "approved_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "approved_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "paid_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "notes",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "payroll_run_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "month",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "year",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "days_in_month",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "working_days",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "days_present",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "days_absent",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "days_on_leave",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "half_days",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "basic_monthly",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "hra_monthly",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "special_allowance",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "other_allowances",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "gross_salary",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "pf_employee",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "pf_employer",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "esi_employee",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "esi_employer",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "tds",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "other_deductions",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "total_deductions",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "net_payable",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "pdf_url",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "emailed_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "policy_snapshot",
+      "data_type": "jsonb",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "platform_admins",
+      "column_name": "user_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "platform_admins",
+      "column_name": "email",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "platform_admins",
+      "column_name": "role",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "platform_admins",
+      "column_name": "is_active",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "platform_admins",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "platform_admins",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "platform_audit_logs",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "platform_audit_logs",
+      "column_name": "actor_user_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "platform_audit_logs",
+      "column_name": "actor_email",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "platform_audit_logs",
+      "column_name": "action",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "platform_audit_logs",
+      "column_name": "target_table",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "platform_audit_logs",
+      "column_name": "target_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "platform_audit_logs",
+      "column_name": "before_data",
+      "data_type": "jsonb",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "platform_audit_logs",
+      "column_name": "after_data",
+      "data_type": "jsonb",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "platform_audit_logs",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "platform_settings",
+      "column_name": "key",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "platform_settings",
+      "column_name": "value",
+      "data_type": "jsonb",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "platform_settings",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "post_reactions",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "post_reactions",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "post_reactions",
+      "column_name": "post_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "post_reactions",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "post_reactions",
+      "column_name": "reaction",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "post_reactions",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "posts",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "posts",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "posts",
+      "column_name": "author_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "posts",
+      "column_name": "content",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "posts",
+      "column_name": "image_url",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "posts",
+      "column_name": "type",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "posts",
+      "column_name": "is_pinned",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "posts",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "posts",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "name",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "email",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "role",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "avatar_url",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "location",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "phone",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "bio",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "company_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "is_active",
+      "data_type": "boolean",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "mfa_enabled",
+      "data_type": "boolean",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "completed_onboarding",
+      "data_type": "boolean",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "onboarding_step",
+      "data_type": "integer",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "password_set_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "role_id",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "profiles",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "name",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "description",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "manager_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "start_date",
+      "data_type": "date",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "end_date",
+      "data_type": "date",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "created_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "rate_limits",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "rate_limits",
+      "column_name": "user_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "rate_limits",
+      "column_name": "endpoint",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "rate_limits",
+      "column_name": "request_count",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "rate_limits",
+      "column_name": "window_start",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "effective_from",
+      "data_type": "date",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "ctc_annual",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "basic_percent",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "hra_percent",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "special_allowance",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "pf_applicable",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "esi_applicable",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "tds_monthly",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "other_allowances",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "created_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "name",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "start_time",
+      "data_type": "time without time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "end_time",
+      "data_type": "time without time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "working_days",
+      "data_type": "ARRAY",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "half_day_cutoff_override",
+      "data_type": "time without time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "is_default",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "is_active",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "punch_in_opens_minutes_before",
+      "data_type": "integer",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "late_mark_grace_override",
+      "data_type": "integer",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "task_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "employee_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "notes",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "attachment_url",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "attachment_name",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "submitted_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "reviewed_by",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "reviewed_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "review_notes",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "submission_type",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "candidate_name",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "resume_url",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "resume_name",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "recruitment_notes",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "metrics",
+      "data_type": "jsonb",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "title",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "description",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "assigned_to",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "assigned_by",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "department_filter",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "priority",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "due_date",
+      "data_type": "date",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "due_time",
+      "data_type": "time without time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "attendance_lock_date",
+      "data_type": "date",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "auto_red_marked_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "project_id",
+      "data_type": "uuid",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "tenant_settings",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenant_settings",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenant_settings",
+      "column_name": "key",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenant_settings",
+      "column_name": "value",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenant_settings",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "company_name",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "subdomain",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "plan",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "status",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "timezone",
+      "data_type": "text",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "punch_in_start",
+      "data_type": "time without time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "punch_in_cutoff",
+      "data_type": "time without time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "work_hours_per_day",
+      "data_type": "numeric",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "lunch_break_minutes",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "punch_out_gate_enabled",
+      "data_type": "boolean",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "max_employees",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "logo_url",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "tenants",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "test_log",
+      "column_name": "msg",
+      "data_type": "text",
+      "is_nullable": "YES"
+    },
+    {
+      "table_name": "test_mcp_sync",
+      "column_name": "id",
+      "data_type": "integer",
+      "is_nullable": "NO"
+    },
+    {
+      "table_name": "test_mcp_sync",
+      "column_name": "val",
+      "data_type": "text",
+      "is_nullable": "YES"
+    }
+  ],
+  "fks": [
+    {
+      "table_name": "announcement_dismissals",
+      "column_name": "announcement_id",
+      "foreign_table_name": "announcements",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "activity",
+      "column_name": "user_id",
+      "foreign_table_name": "profiles",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "current_break_id",
+      "foreign_table_name": "attendance_breaks",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "reviewed_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_corrections",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "approved_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "cancelled_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "requested_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_location_exceptions",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "actor_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "audit_logs",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_breaks",
+      "column_name": "attendance_id",
+      "foreign_table_name": "attendance",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_breaks",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_breaks",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "chat_channels",
+      "column_name": "created_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "chat_channels",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "employee_shifts",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "employee_shifts",
+      "column_name": "shift_id",
+      "foreign_table_name": "shifts",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "employee_shifts",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "employee_documents",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "employee_documents",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "holidays",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "hr_policies",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "hr_policies",
+      "column_name": "uploaded_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "channel_id",
+      "foreign_table_name": "chat_channels",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "sender_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "chat_messages",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "calendar_events",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "calendar_events",
+      "column_name": "task_id",
+      "foreign_table_name": "tasks",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "calendar_events",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "leave_type_id",
+      "foreign_table_name": "leave_types",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "reviewed_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "leaves",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "approved_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "run_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "payroll_runs",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "notifications",
+      "column_name": "user_id",
+      "foreign_table_name": "profiles",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "leave_types",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "office_locations",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "approved_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "attendance_id",
+      "foreign_table_name": "attendance",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "overtime_records",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "leave_type_id",
+      "foreign_table_name": "leave_types",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "leave_balances",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "payroll_run_id",
+      "foreign_table_name": "payroll_runs",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "payslips",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "reviewed_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "task_id",
+      "foreign_table_name": "tasks",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "task_submissions",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "tenant_settings",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "created_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "salary_structures",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "assigned_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "assigned_to",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "project_id",
+      "foreign_table_name": "projects",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "tasks",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "shifts",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_audit_logs",
+      "column_name": "attendance_id",
+      "foreign_table_name": "attendance",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_audit_logs",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_selfies",
+      "column_name": "attendance_id",
+      "foreign_table_name": "attendance",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_selfies",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "attendance_selfies",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "chat_channel_members",
+      "column_name": "channel_id",
+      "foreign_table_name": "chat_channels",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "chat_channel_members",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "chat_channel_members",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "created_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "manager_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "employees",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "posts",
+      "column_name": "author_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "posts",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "post_reactions",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "post_reactions",
+      "column_name": "post_id",
+      "foreign_table_name": "posts",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "post_reactions",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "created_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "manager_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "projects",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "insurance_policies",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "payroll_run_id",
+      "foreign_table_name": "payroll_runs",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "reviewed_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "expenses",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "it_declaration_windows",
+      "column_name": "opened_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "it_declaration_windows",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "employee_id",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "tenant_id",
+      "foreign_table_name": "tenants",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "it_declarations",
+      "column_name": "verified_by",
+      "foreign_table_name": "employees",
+      "foreign_column_name": "id"
+    }
+  ]
+}

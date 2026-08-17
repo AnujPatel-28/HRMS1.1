@@ -110,7 +110,7 @@ export default async function (req) {
   });
 
   const responseText = await res.clone().text();
-  console.log('[verify-employee-code] Status:', res.status, 'Body:', responseText);
+  console.log('[verify-employee-code] Status:', res.status);
 
   let data = {};
   try { data = JSON.parse(responseText); } catch { /* non-JSON response */ }

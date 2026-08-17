@@ -4,15 +4,36 @@ const projectUrl = import.meta.env.VITE_INSFORGE_URL as string | undefined;
 const apiKey = (import.meta.env.VITE_INSFORGE_ANON_KEY ?? import.meta.env.VITE_INSFORGE_KEY) as string | undefined;
 const defaultTenantId = import.meta.env.VITE_DEFAULT_TENANT_ID as string | undefined;
 
+// Edge functions moved to a new host after InsForge's Deno "deploy classic" shutdown.
+// The SDK must be pointed at `https://{app-key}.function2.insforge.app` (old `.function.` is dead).
+// Derive it from the project URL's app-key so it works for both the parent and any branch,
+// with an explicit env override for non-standard setups.
+const deriveFunctionsUrl = (base: string | undefined): string | undefined => {
+  const override = import.meta.env.VITE_INSFORGE_FUNCTIONS_URL as string | undefined;
+  if (override) return override;
+  if (!base) return undefined;
+  try {
+    const appKey = new URL(base).hostname.split(".")[0]; // e.g. "rq3qmu8y-jx7"
+    return appKey ? `https://${appKey}.function2.insforge.app` : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const functionsUrl = deriveFunctionsUrl(projectUrl);
+
 let currentTenantId: string | null = defaultTenantId ?? null;
 
 if (!projectUrl || !apiKey) {
   console.warn("Missing InsForge env vars: VITE_INSFORGE_URL / VITE_INSFORGE_ANON_KEY");
+} else {
+  console.log("InsForge Client Initialized with URL:", projectUrl, "| functionsUrl:", functionsUrl);
 }
 
 const baseInsforge = createClient({
   baseUrl: projectUrl ?? "",
   anonKey: apiKey ?? "",
+  ...(functionsUrl ? { functionsUrl } : {}),
 });
 
 export function setCurrentTenantId(tenantId: string | null) {

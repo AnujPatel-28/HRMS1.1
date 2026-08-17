@@ -84,7 +84,7 @@ export const DesktopSidebar = ({
   return (
     <motion.div
       className={cn(
-        "hidden md:flex md:flex-col shrink-0 relative",
+        "hidden md:flex md:flex-col shrink-0 relative group/desktop-sidebar",
         className
       )}
       animate={{
@@ -97,7 +97,7 @@ export const DesktopSidebar = ({
       {showToggle && (
         <button
           onClick={() => setOpen(!open)}
-          className="absolute -right-3 top-[72px] z-50 h-6 w-6 rounded-full border border-slate-200 bg-white flex items-center justify-center shadow-md hover:bg-slate-50 hover:text-brand-700 transition-all text-slate-400 group/toggle focus:outline-none"
+          className="absolute -right-3 top-[52px] z-50 h-6 w-6 rounded-full border border-slate-200 bg-white flex items-center justify-center shadow-md hover:bg-slate-50 hover:text-brand-700 transition-all text-slate-400 group/toggle focus:outline-none md:opacity-0 md:group-hover/desktop-sidebar:opacity-100 transition-opacity duration-200"
           title={open ? "Collapse sidebar" : "Expand sidebar"}
         >
           {open ? (
@@ -131,6 +131,7 @@ export const SidebarLink = ({
     <Link
       to={link.href}
       onClick={onClick}
+      title={!open ? link.label : undefined}
       className={cn(
         "relative flex items-center justify-between group/sidebar py-2.5 px-2 rounded-lg transition-colors duration-150",
         className

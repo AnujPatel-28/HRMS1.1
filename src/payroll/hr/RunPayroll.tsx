@@ -8,7 +8,7 @@ import { useToast } from "../../shared/ToastContext";
 import { Skeleton } from "../../shared/Skeleton";
 import type { Employee } from "../../types";
 import type { SalaryStructure } from "./SalaryStructures";
-import { MONTH_NAMES, formatCurrency, roundCurrency, calcPayslip, getWorkingDays, type PayslipCalc, type SalaryPolicySnapshot } from "./payroll-calc";
+import { MONTH_NAMES, formatCurrency, roundCurrency, calcPayslip, getWorkingDays, getEsiContributionPeriod, type PayslipCalc, type SalaryPolicySnapshot } from "./payroll-calc";
 import { PayrollError } from "../../utils/errors";
 import { uploadPayslipPdf } from "./payslip-pdf";
 
@@ -145,7 +145,7 @@ export default function RunPayroll() {
       const startDate = `${monthStr}-01`;
       const endDate = `${monthStr}-${new Date(year, month, 0).getDate().toString().padStart(2, "0")}`;
 
-      const [empRes, structRes, attRes, holRes, overtimeRes, settingsRes, leavesRes, existingPayslipsRes, approvedExpensesRes] = await Promise.all([
+      const [empRes, structRes, attRes, holRes, overtimeRes, settingsRes, leavesRes, existingPayslipsRes, approvedExpensesRes, esiHistoryRes] = await Promise.all([
         db.from("employees").select("*").eq("tenant_id", tenantId).eq("status", "active").order("full_name"),
         db.from("salary_structures").select("*").eq("tenant_id", tenantId).order("effective_from", { ascending: false }),
         db.from("attendance").select("employee_id,status,date").eq("tenant_id", tenantId).gte("date", startDate).lte("date", endDate),
@@ -163,6 +163,12 @@ export default function RunPayroll() {
           ? db.from("payslips").select("employee_id,net_payable,policy_snapshot").eq("tenant_id", tenantId).eq("payroll_run_id", existingRun.id)
           : Promise.resolve({ data: [], error: null }),
         db.from("expenses").select("*").eq("tenant_id", tenantId).eq("status", "approved").is("payroll_run_id", null),
+        // Earlier payslips in this ESI contribution period, to detect existing coverage.
+        db
+          .from("payslips")
+          .select("employee_id,esi_employee,month,year")
+          .eq("tenant_id", tenantId)
+          .gt("esi_employee", 0),
       ]);
 
       if (empRes.error) throw empRes.error;
@@ -174,6 +180,20 @@ export default function RunPayroll() {
       if (leavesRes.error) throw leavesRes.error;
       if (existingPayslipsRes.error) throw existingPayslipsRes.error;
       if (approvedExpensesRes.error) throw approvedExpensesRes.error;
+      if (esiHistoryRes.error) throw esiHistoryRes.error;
+
+      // Employees already covered by ESI earlier in the current contribution period keep their
+      // coverage for the rest of it, even if their wages have since crossed the ceiling.
+      const esiPeriod = getEsiContributionPeriod(year, month);
+      const periodStartOrdinal = esiPeriod.startYear * 12 + esiPeriod.startMonth;
+      const currentOrdinal = year * 12 + month;
+      const esiCoveredInPeriod = new Set<string>();
+      ((esiHistoryRes.data ?? []) as { employee_id: string; month: number; year: number }[]).forEach((slip) => {
+        const ordinal = slip.year * 12 + slip.month;
+        if (ordinal >= periodStartOrdinal && ordinal < currentOrdinal) {
+          esiCoveredInPeriod.add(slip.employee_id);
+        }
+      });
       const employees = (empRes.data ?? []) as Employee[];
       const allStructures = (structRes.data ?? []) as SalaryStructure[];
       const attendances = (attRes.data ?? []) as { employee_id: string; status: string; date: string }[];
@@ -211,12 +231,14 @@ export default function RunPayroll() {
       }
 
       const policy: SalaryPolicySnapshot = {
-        snapshot_version: 2,
+        snapshot_version: 3,
         lopCalculationMethod: (settings.lop_calculation_method as any) || "working_days",
         pfWageCeiling: settings.pf_wage_ceiling ? Number(settings.pf_wage_ceiling) : 15000,
         esiGrossCeiling: settings.esi_gross_ceiling ? Number(settings.esi_gross_ceiling) : 21000,
         professionalTaxState: settings.professional_tax_state || "",
         professionalTaxManualAmount: settings.professional_tax_manual_amount ? Number(settings.professional_tax_manual_amount) : null,
+        professionalTaxSlabsApplied: true,
+        esiContributionPeriodLockIn: true,
       };
 
       // Latest structure per employee (effective_from ≤ last day of month)
@@ -332,7 +354,9 @@ export default function RunPayroll() {
         
         // No attendance records: treat as zero presence (do not default to full pay)
         const att = attMap.get(emp.id) ?? { daysPresent: 0, daysAbsent: workingDays, paidLeaveDays: 0, unpaidLeaveDays: 0, halfDays: 0 };
-        const calc = calcPayslip(struct, att, overtimeAmount, year, month, holidayDates, policy);
+        const calc = calcPayslip(struct, att, overtimeAmount, year, month, holidayDates, policy, {
+          esiCoveredEarlierInPeriod: esiCoveredInPeriod.has(emp.id),
+        });
         
         const lateSummary = lateSummaryMap.get(emp.id) ?? {};
         const workHoursPerDay = Number(tenant?.work_hours_per_day ?? 8);

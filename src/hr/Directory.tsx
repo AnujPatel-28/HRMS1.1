@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Grid, List, MapPin, Mail, User, X, ChevronRight, Notebook } from "lucide-react";
+import { Search, Grid, List, MapPin, Mail, User, X, ChevronRight, Notebook, Lock, Globe } from "lucide-react";
 import type { Employee } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
@@ -9,12 +9,38 @@ import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { SelectDropdown } from "../shared/components/SelectDropdown";
 import { useAuth } from "../hooks/useAuth";
+import { useOrgStructure } from "../hooks/useOrgStructure";
 
 export default function Directory() {
   const navigate = useNavigate();
   const { tenantId } = useTenant();
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const { error: toastError } = useToast();
+  const { orgUnits, locations, jobTitles, employmentTypes } = useOrgStructure();
+
+  const getDepartmentLabel = (emp: Employee) => {
+    if (emp.org_unit_id) {
+      const unit = orgUnits.find((u) => u.id === emp.org_unit_id);
+      if (unit) return unit.name;
+    }
+    return emp.department || "—";
+  };
+
+  const getDesignationLabel = (emp: Employee) => {
+    if (emp.job_title_id) {
+      const job = jobTitles.find((j) => j.id === emp.job_title_id);
+      if (job) return job.title;
+    }
+    return emp.designation || "—";
+  };
+
+  const getLocationLabel = (emp: Employee) => {
+    if (emp.location_id) {
+      const loc = locations.find((l) => l.id === emp.location_id);
+      if (loc) return loc.name;
+    }
+    return emp.work_location || "—";
+  };
 
   const isHr = role === "hr";
 
@@ -25,12 +51,20 @@ export default function Directory() {
   const [gradeFilter, setGradeFilter] = useState("all");
   const [workLocationFilter, setWorkLocationFilter] = useState("all");
   const [managerFilter, setManagerFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("active");
+  const [employmentTypeFilter, setEmploymentTypeFilter] = useState("all");
   
   const [viewType, setViewType] = useState<"grid" | "list">(() => {
     return (localStorage.getItem("directory_view_preference") as "grid" | "list") || "grid";
   });
 
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+
+  const currentUserEmployeeId = useMemo(() => {
+    if (!user) return null;
+    const match = employees.find((emp) => emp.user_id === user.id);
+    return match ? match.id : null;
+  }, [employees, user]);
 
   useEffect(() => {
     localStorage.setItem("directory_view_preference", viewType);
@@ -42,11 +76,12 @@ export default function Directory() {
 
     const fetchDirectory = async () => {
       try {
-        const { data, error } = await db
-          .from("employees")
-          .select("*, manager:employees!manager_id(full_name)")
+        const query = isHr
+          ? db.from("employees").select("*, manager:employees!manager_id(full_name)")
+          : db.from("employee_directory_public").select("*");
+
+        const { data, error } = await query
           .eq("tenant_id", tenantId)
-          .eq("status", "active")
           .order("full_name", { ascending: true });
 
         if (error) throw error;
@@ -54,7 +89,7 @@ export default function Directory() {
         if (active && data) {
           const mapped = (data as any[]).map((e) => ({
             ...e,
-            manager_name: e.manager?.full_name || null,
+            manager_name: e.manager_name || e.manager?.full_name || null,
           }));
           setEmployees(mapped);
         }
@@ -69,26 +104,40 @@ export default function Directory() {
     return () => {
       active = false;
     };
-  }, [tenantId, toastError]);
+  }, [isHr, tenantId, toastError]);
 
-  const departmentOptions = [
-    { value: "all", label: "All Departments" },
-    { value: "sales", label: "Sales" },
-    { value: "dev", label: "Development" },
-    { value: "marketing", label: "Marketing" },
-    { value: "operations", label: "Operations" },
-    { value: "design", label: "Design" },
-    { value: "other", label: "Other" },
-  ];
+  const departmentOptions = useMemo(() => {
+    const lookupDepartments = orgUnits
+      .filter((unit) => unit.unit_type === "department")
+      .map((unit) => ({ value: unit.id, label: unit.name }));
 
-  const workLocationOptions = [
-    { value: "all", label: "All Locations" },
-    { value: "Head Office", label: "Head Office" },
-    { value: "Branch Office", label: "Branch Office" },
-    { value: "Remote", label: "Remote" },
-    { value: "Work From Home", label: "Work From Home" },
-    { value: "Other", label: "Other" },
-  ];
+    return lookupDepartments.length > 0
+      ? [{ value: "all", label: "All Departments" }, ...lookupDepartments]
+      : [
+          { value: "all", label: "All Departments" },
+          { value: "sales", label: "Sales" },
+          { value: "dev", label: "Development" },
+          { value: "marketing", label: "Marketing" },
+          { value: "operations", label: "Operations" },
+          { value: "design", label: "Design" },
+          { value: "other", label: "Other" },
+        ];
+  }, [orgUnits]);
+
+  const workLocationOptions = useMemo(() => {
+    const lookupLocations = locations.map((location) => ({ value: location.id, label: location.name }));
+
+    return lookupLocations.length > 0
+      ? [{ value: "all", label: "All Locations" }, ...lookupLocations]
+      : [
+          { value: "all", label: "All Locations" },
+          { value: "Head Office", label: "Head Office" },
+          { value: "Branch Office", label: "Branch Office" },
+          { value: "Remote", label: "Remote" },
+          { value: "Work From Home", label: "Work From Home" },
+          { value: "Other", label: "Other" },
+        ];
+  }, [locations]);
 
   const gradeOptions = useMemo(() => {
     const grades = new Set<string>();
@@ -116,38 +165,66 @@ export default function Directory() {
     ];
   }, [employees]);
 
+  const statusOptions = useMemo(() => {
+    if (!isHr) return [{ value: "active", label: "Active Only" }];
+    return [
+      { value: "all", label: "All Statuses" },
+      { value: "active", label: "Active Only" },
+      { value: "inactive", label: "Inactive Only" },
+      { value: "terminated", label: "Terminated Only" },
+    ];
+  }, [isHr]);
+
+  const employmentTypeOptions = useMemo(() => {
+    const lookupTypes = employmentTypes.map((t) => ({ value: t.id, label: t.name }));
+    return [
+      { value: "all", label: "All Employment Types" },
+      ...lookupTypes,
+    ];
+  }, [employmentTypes]);
+
   const clearFilters = () => {
     setSearch("");
     setDepartmentFilter("all");
     setGradeFilter("all");
     setWorkLocationFilter("all");
     setManagerFilter("all");
+    setStatusFilter("active");
+    setEmploymentTypeFilter("all");
   };
 
   const filteredEmployees = useMemo(() => {
     const normalizedQuery = search.trim().toLowerCase();
 
     return employees.filter((employee) => {
-      const matchesDepartment = departmentFilter === "all" || employee.department === departmentFilter;
+      const matchesDepartment = departmentFilter === "all" || employee.org_unit_id === departmentFilter || employee.department === departmentFilter;
       const matchesGrade = gradeFilter === "all" || employee.grade === gradeFilter;
-      const matchesLocation = workLocationFilter === "all" || employee.work_location === workLocationFilter;
+      const matchesLocation = workLocationFilter === "all" || employee.location_id === workLocationFilter || employee.work_location === workLocationFilter;
       const matchesManager = managerFilter === "all" || employee.manager_id === managerFilter;
+      const matchesStatus = statusFilter === "all" || employee.status === statusFilter;
+      const matchesEmploymentType =
+        employmentTypeFilter === "all" ||
+        employee.employment_type_id === employmentTypeFilter ||
+        employee.employment_type === employmentTypeFilter;
+
       const matchesSearch =
         normalizedQuery.length === 0 ||
         employee.full_name.toLowerCase().includes(normalizedQuery) ||
         (employee.designation ?? "").toLowerCase().includes(normalizedQuery) ||
         employee.email.toLowerCase().includes(normalizedQuery);
 
-      return matchesDepartment && matchesGrade && matchesLocation && matchesManager && matchesSearch;
+      return matchesDepartment && matchesGrade && matchesLocation && matchesManager && matchesStatus && matchesEmploymentType && matchesSearch;
     });
-  }, [employees, search, departmentFilter, gradeFilter, workLocationFilter, managerFilter]);
+  }, [employees, search, departmentFilter, gradeFilter, workLocationFilter, managerFilter, statusFilter, employmentTypeFilter]);
 
   const hasActiveFilters =
     search ||
     departmentFilter !== "all" ||
     gradeFilter !== "all" ||
     workLocationFilter !== "all" ||
-    managerFilter !== "all";
+    managerFilter !== "all" ||
+    statusFilter !== "active" ||
+    employmentTypeFilter !== "all";
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 md:p-6 shadow-sm">
@@ -221,14 +298,34 @@ export default function Directory() {
           />
         </div>
 
-        <div className="flex items-center justify-between">
-          <div className="max-w-xs md:max-w-none">
-            <SelectDropdown
-              value={managerFilter}
-              onChange={setManagerFilter}
-              options={managerOptions}
-              triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-            />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="w-full sm:w-48">
+              <SelectDropdown
+                value={managerFilter}
+                onChange={setManagerFilter}
+                options={managerOptions}
+                triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              />
+            </div>
+
+            <div className="w-full sm:w-48">
+              <SelectDropdown
+                value={employmentTypeFilter}
+                onChange={setEmploymentTypeFilter}
+                options={employmentTypeOptions}
+                triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              />
+            </div>
+
+            <div className="w-full sm:w-48">
+              <SelectDropdown
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={statusOptions}
+                triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              />
+            </div>
           </div>
 
           {hasActiveFilters && (
@@ -309,14 +406,14 @@ export default function Directory() {
                     <h3 className="font-bold text-slate-900 truncate group-hover:text-brand-600 transition-colors">
                       {emp.full_name}
                     </h3>
-                    <p className="text-xs text-slate-500 font-medium truncate mt-0.5">{emp.designation || "—"}</p>
+                    <p className="text-xs text-slate-500 font-medium truncate mt-0.5">{getDesignationLabel(emp)}</p>
                   </div>
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-1.5">
-                  {emp.department && (
+                  {getDepartmentLabel(emp) !== "—" && (
                     <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600">
-                      {emp.department}
+                      {getDepartmentLabel(emp)}
                     </span>
                   )}
                   {emp.grade && (
@@ -329,7 +426,7 @@ export default function Directory() {
                 <div className="mt-4 space-y-1.5">
                   <div className="flex items-center gap-1.5 text-xs text-slate-500">
                     <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                    <span className="truncate">{emp.work_location || "Not specified"}</span>
+                    <span className="truncate">{getLocationLabel(emp) !== "—" ? getLocationLabel(emp) : "Not specified"}</span>
                   </div>
                   <div className="flex items-center gap-1.5 text-xs text-slate-500">
                     <User className="h-3.5 w-3.5 shrink-0 text-slate-400" />
@@ -398,8 +495,8 @@ export default function Directory() {
                       </span>
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-slate-700 capitalize font-medium">{emp.department || "—"}</td>
-                  <td className="px-4 py-4 text-slate-600 capitalize font-medium">{emp.designation?.toLowerCase() || "—"}</td>
+                  <td className="px-4 py-4 text-slate-700 capitalize font-medium">{getDepartmentLabel(emp)}</td>
+                  <td className="px-4 py-4 text-slate-600 capitalize font-medium">{getDesignationLabel(emp)}</td>
                   <td className="px-4 py-4">
                     {emp.grade ? (
                       <span className="rounded-md bg-blue-50 px-2 py-1 text-xs font-bold text-blue-600">{emp.grade}</span>
@@ -408,7 +505,7 @@ export default function Directory() {
                     )}
                   </td>
                   <td className="px-4 py-4 text-slate-600 font-medium">{emp.manager_name || "—"}</td>
-                  <td className="px-4 py-4 text-slate-600 font-medium">{emp.work_location || "—"}</td>
+                  <td className="px-4 py-4 text-slate-600 font-medium">{getLocationLabel(emp)}</td>
                   {isHr && (
                     <td className="px-4 py-4 text-right">
                       <button
@@ -430,119 +527,228 @@ export default function Directory() {
         </div>
       )}
 
-      {/* DETAIL MODAL */}
-      {selectedEmployee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          {/* backdrop */}
-          <div
-            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-            onClick={() => setSelectedEmployee(null)}
-          />
-          
-          {/* modal card */}
-          <div className="relative w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl p-6 overflow-hidden animate-in fade-in zoom-in duration-200">
-            <button
-              type="button"
+      {/* QUICK PROFILE DRAWER */}
+      {selectedEmployee && (() => {
+        const statusBadge = (status: string) => {
+          switch (status) {
+            case "active":
+              return "bg-emerald-50 text-emerald-700 border-emerald-100";
+            case "inactive":
+              return "bg-amber-50 text-amber-700 border-amber-100";
+            case "terminated":
+              return "bg-rose-50 text-rose-700 border-rose-100";
+            default:
+              return "bg-slate-50 text-slate-650 border-slate-200";
+          }
+        };
+
+        const profileCompletenessVal = (() => {
+          const fields = [
+            selectedEmployee.full_name,
+            selectedEmployee.email,
+            selectedEmployee.phone,
+            selectedEmployee.date_of_joining,
+            selectedEmployee.employee_code,
+            selectedEmployee.org_unit_id || selectedEmployee.department,
+            selectedEmployee.job_title_id || selectedEmployee.designation,
+            selectedEmployee.employment_type_id || selectedEmployee.employment_type,
+            selectedEmployee.aadhaar_number,
+            selectedEmployee.pan_number,
+            selectedEmployee.bank_name,
+            selectedEmployee.account_number,
+            selectedEmployee.ifsc_code,
+          ];
+          const completed = fields.filter((f) => f && String(f).trim() !== "").length;
+          return Math.round((completed / fields.length) * 100);
+        })();
+
+        const canViewSensitive = isHr || selectedEmployee.id === currentUserEmployeeId;
+
+        return (
+          <div className="fixed inset-0 z-50 flex justify-end overflow-hidden">
+            {/* Backdrop */}
+            <div
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300"
               onClick={() => setSelectedEmployee(null)}
-              className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition"
-              title="Close modal"
-            >
-              <X className="h-5 w-5" />
-            </button>
-
-            <div className="flex items-center gap-4 border-b border-slate-100 pb-5">
-              {selectedEmployee.profile_photo_url ? (
-                <img
-                  src={selectedEmployee.profile_photo_url}
-                  alt={selectedEmployee.full_name}
-                  className="h-16 w-16 rounded-full object-cover shadow border border-slate-100"
-                />
-              ) : (
-                <div className="grid h-16 w-16 place-items-center rounded-full bg-slate-100 text-lg font-bold text-slate-600 ring-2 ring-slate-100">
-                  {selectedEmployee.full_name.slice(0, 2).toUpperCase()}
-                </div>
-              )}
-              <div className="min-w-0">
-                <h3 className="text-xl font-bold text-slate-900 truncate">{selectedEmployee.full_name}</h3>
-                <p className="text-sm font-semibold text-slate-500 mt-0.5 capitalize">{selectedEmployee.designation || "—"}</p>
-                {selectedEmployee.department && (
-                  <span className="inline-block rounded-full bg-slate-100 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-600 mt-1">
-                    {selectedEmployee.department}
-                  </span>
-                )}
+            />
+            
+            {/* Drawer */}
+            <div className="relative w-full max-w-md h-full bg-white shadow-2xl flex flex-col z-10 animate-in slide-in-from-right duration-300">
+              {/* Decorative Banner */}
+              <div className="relative h-28 bg-gradient-to-r from-brand-600 to-indigo-600 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedEmployee(null)}
+                  className="absolute right-4 top-4 rounded-full p-2 bg-white/10 hover:bg-white/20 text-white transition-colors"
+                  title="Close Drawer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-            </div>
 
-            <div className="mt-5 space-y-4 text-sm max-h-[60vh] overflow-y-auto pr-1">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Grade</span>
-                  <p className="font-semibold text-slate-800 mt-0.5">{selectedEmployee.grade || "—"}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Work Location</span>
-                  <p className="font-semibold text-slate-800 mt-0.5">{selectedEmployee.work_location || "—"}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Manager</span>
-                  <p className="font-semibold text-slate-800 mt-0.5">{selectedEmployee.manager_name || "—"}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Employee Code</span>
-                  <p className="font-semibold text-slate-800 mt-0.5 font-mono">{selectedEmployee.employee_code || "—"}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Date of Joining</span>
-                  <p className="font-semibold text-slate-800 mt-0.5">
-                    {selectedEmployee.date_of_joining ? new Date(selectedEmployee.date_of_joining).toLocaleDateString("en-IN", { day: 'numeric', month: 'short', year: 'numeric' }) : "—"}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Email</span>
-                  <a href={`mailto:${selectedEmployee.email}`} className="font-semibold text-brand-600 hover:text-brand-700 transition mt-0.5 block truncate">
-                    {selectedEmployee.email}
-                  </a>
-                </div>
-                {selectedEmployee.phone && (
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Phone</span>
-                    <p className="font-semibold text-slate-800 mt-0.5">{selectedEmployee.phone}</p>
+              {/* Identity & Status */}
+              <div className="px-6 pb-4 relative -mt-10 flex flex-col items-center text-center border-b border-slate-100 shrink-0">
+                {selectedEmployee.profile_photo_url ? (
+                  <img
+                    src={selectedEmployee.profile_photo_url}
+                    alt={selectedEmployee.full_name}
+                    className="h-20 w-20 rounded-full object-cover shadow border-4 border-white bg-white"
+                  />
+                ) : (
+                  <div className="grid h-20 w-20 place-items-center rounded-full bg-slate-100 text-xl font-bold text-slate-700 shadow border-4 border-white">
+                    {selectedEmployee.full_name.slice(0, 2).toUpperCase()}
                   </div>
                 )}
+                <h3 className="text-lg font-bold text-slate-900 mt-2">{selectedEmployee.full_name}</h3>
+                <p className="text-xs font-semibold text-slate-500 capitalize">{getDesignationLabel(selectedEmployee)}</p>
+                
+                <div className="mt-2 flex flex-wrap justify-center gap-1.5">
+                  {getDepartmentLabel(selectedEmployee) !== "—" && (
+                    <span className="rounded-full bg-brand-50 border border-brand-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-brand-600">
+                      {getDepartmentLabel(selectedEmployee)}
+                    </span>
+                  )}
+                  <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${statusBadge(selectedEmployee.status)}`}>
+                    {selectedEmployee.status}
+                  </span>
+                </div>
               </div>
 
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Bio</span>
-                <p className="text-slate-600 mt-1 leading-relaxed bg-slate-50 rounded-xl p-3 border border-slate-100">
-                  {selectedEmployee.employee_bio || "This employee has not set a bio yet."}
-                </p>
-              </div>
-            </div>
+              {/* Scrollable details */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                {/* Profile Completeness bar */}
+                {canViewSensitive && (
+                  <div className="bg-slate-50/60 rounded-xl border border-slate-200/60 p-4">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                      <span>Profile Completeness</span>
+                      <span className="text-brand-600">{profileCompletenessVal}%</span>
+                    </div>
+                    <div className="mt-2 w-full bg-slate-200/60 rounded-full h-1.5 overflow-hidden">
+                      <div 
+                        className={`h-full rounded-full bg-brand-600`}
+                        style={{ width: `${profileCompletenessVal}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
 
-            <div className="mt-6 flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
-              <button
-                type="button"
-                onClick={() => setSelectedEmployee(null)}
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition shadow-sm"
-              >
-                Close
-              </button>
-              {isHr && (
+                {/* About Bio */}
+                <div className="space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">About / Bio</span>
+                  <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 rounded-xl p-3 border border-slate-100 font-medium">
+                    {selectedEmployee.employee_bio || "This employee has not set a bio yet."}
+                  </p>
+                </div>
+
+                {/* Employment details grid */}
+                <div className="space-y-3">
+                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-1">Employment Details</h4>
+                  <div className="grid grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Grade</span>
+                      <p className="font-semibold text-slate-700 mt-0.5">{selectedEmployee.grade || "—"}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Work Location</span>
+                      <p className="font-semibold text-slate-700 mt-0.5">{getLocationLabel(selectedEmployee)}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Reporting Manager</span>
+                      <p className="font-semibold text-slate-700 mt-0.5">{selectedEmployee.manager_name || "—"}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Work Mode</span>
+                      <p className="font-semibold text-slate-700 mt-0.5 capitalize">{selectedEmployee.work_mode || "office"}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Contact information details */}
+                <div className="space-y-3 pt-2 border-t border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center justify-between">
+                    <span>Contact Info</span>
+                    {!canViewSensitive && (
+                      <span className="text-[9px] font-medium text-slate-450 normal-case flex items-center gap-1">
+                        <Lock className="h-3 w-3" />
+                        Restricted
+                      </span>
+                    )}
+                  </h4>
+
+                  <div className="space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Corporate Email</span>
+                      <a href={`mailto:${selectedEmployee.email}`} className="font-semibold text-brand-600 hover:underline">{selectedEmployee.email}</a>
+                    </div>
+
+                    {canViewSensitive ? (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500">Mobile Number</span>
+                          <a href={`tel:${selectedEmployee.phone}`} className="font-semibold text-brand-600 hover:underline">{selectedEmployee.phone || "—"}</a>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500">Employee Code</span>
+                          <span className="font-mono text-slate-700">{selectedEmployee.employee_code || "—"}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500">Date of Joining</span>
+                          <span className="font-semibold text-slate-700">
+                            {selectedEmployee.date_of_joining ? new Date(selectedEmployee.date_of_joining).toLocaleDateString("en-IN", { day: 'numeric', month: 'short', year: 'numeric' }) : "—"}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 text-center mt-2">
+                        <p className="text-[10px] text-slate-500 flex items-center justify-center gap-1.5 font-medium">
+                          <Lock className="h-3 w-3 text-slate-400" />
+                          Private contact details are restricted to HR personnel.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions Footer */}
+              <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedEmployee(null)}
+                  className="flex-1 rounded-xl border border-slate-200 bg-white py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition shadow-sm"
+                >
+                  Close
+                </button>
+
                 <button
                   type="button"
                   onClick={() => {
                     setSelectedEmployee(null);
-                    navigate(`/hr/employees/${selectedEmployee.id}`);
+                    navigate(`/hr/org-chart?focus=${selectedEmployee.id}`);
                   }}
-                  className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition shadow"
+                  className="flex-1 rounded-xl border border-slate-200 bg-white py-2 text-xs font-bold text-slate-750 hover:bg-slate-50 transition shadow-sm flex items-center justify-center gap-1"
                 >
-                  Edit Profile
+                  <Globe className="h-3.5 w-3.5 text-slate-400" />
+                  Org Chart
                 </button>
-              )}
+
+                {isHr && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedEmployee(null);
+                      navigate(`/hr/employees/${selectedEmployee.id}`);
+                    }}
+                    className="flex-1 rounded-xl bg-brand-600 py-2 text-xs font-bold text-white hover:bg-brand-700 transition shadow"
+                  >
+                    Edit Profile
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </section>
   );
 }

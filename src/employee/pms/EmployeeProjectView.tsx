@@ -68,7 +68,11 @@ export default function EmployeeProjectView() {
       setProject(projData as Project);
 
       // 2. Fetch all employees to map names/avatars
-      const { data: empData } = await db.from("employees").select("*").eq("tenant_id", tenantId).eq("status", "active");
+      const { data: empData } = await db
+        .from("employee_directory_public")
+        .select("id, full_name, profile_photo_url, designation")
+        .eq("tenant_id", tenantId)
+        .eq("status", "active");
       const empList = (empData ?? []) as Employee[];
       setAllEmployees(empList);
 
@@ -144,9 +148,9 @@ export default function EmployeeProjectView() {
         attachment_name = file.name;
       }
 
+      // Submitter identity is derived server-side from auth.uid(); do not pass p_employee_id.
       const { error: rpcErr } = await db.rpc("submit_task_request", {
         p_task_id: task.id,
-        p_employee_id: employee.id,
         p_notes: notes.trim() || null,
         p_attachment_url: attachment_url,
         p_attachment_name: attachment_name,

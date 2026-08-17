@@ -5,7 +5,8 @@ import type { Employee } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { insforge, db } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
-import { getTenantYear } from "../utils/date";
+import { useOrgStructure } from "../hooks/useOrgStructure";
+import { validateManagerAssignment } from "../utils/managerCycleValidation";
 
 
 interface FormState {
@@ -19,10 +20,13 @@ interface FormState {
   state: string;
   pincode: string;
   department: string;
+  org_unit_id: string;
   designation: string;
+  job_title_id: string;
   employee_code: string;
   date_of_joining: string;
   employment_type: string;
+  employment_type_id: string;
   aadhaar_number: string;
   pan_number: string;
   bank_name: string;
@@ -34,7 +38,10 @@ interface FormState {
   work_mode: "office" | "remote" | "hybrid";
   grade: string;
   work_location: string;
+  location_id: string;
   manager_id: string;
+  secondary_manager_id?: string;
+  probation_period?: string;
 }
 
 const initialState: FormState = {
@@ -48,10 +55,13 @@ const initialState: FormState = {
   state: "",
   pincode: "",
   department: "sales",
+  org_unit_id: "",
   designation: "",
+  job_title_id: "",
   employee_code: "",
   date_of_joining: "",
   employment_type: "full_time",
+  employment_type_id: "",
   aadhaar_number: "",
   pan_number: "",
   bank_name: "",
@@ -63,7 +73,10 @@ const initialState: FormState = {
   work_mode: "office",
   grade: "",
   work_location: "",
+  location_id: "",
   manager_id: "",
+  secondary_manager_id: "",
+  probation_period: "90",
 };
 
 const stepTitles = [
@@ -88,6 +101,7 @@ export default function EmployeeCreate() {
   const navigate = useNavigate();
   const { tenantId } = useTenant();
   const { logAction } = useAuditLog();
+  const { orgUnits, jobTitles, locations, employmentTypes } = useOrgStructure();
 
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<FormState>(initialState);
@@ -125,9 +139,17 @@ export default function EmployeeCreate() {
   const [isManagerDropdownOpen, setIsManagerDropdownOpen] = useState(false);
   const managerDropdownRef = useRef<HTMLDivElement>(null);
 
+  const [secondaryManagerSearch, setSecondaryManagerSearch] = useState("");
+  const [isSecondaryManagerDropdownOpen, setIsSecondaryManagerDropdownOpen] = useState(false);
+  const secondaryManagerDropdownRef = useRef<HTMLDivElement>(null);
+
   const selectedManager = useMemo(() => {
     return activeEmployees.find((emp) => emp.id === form.manager_id);
   }, [activeEmployees, form.manager_id]);
+
+  const selectedSecondaryManager = useMemo(() => {
+    return activeEmployees.find((emp) => emp.id === form.secondary_manager_id);
+  }, [activeEmployees, form.secondary_manager_id]);
 
   // Synchronize managerSearch input with selectedManager name
   useEffect(() => {
@@ -138,11 +160,23 @@ export default function EmployeeCreate() {
     }
   }, [selectedManager, form.manager_id, isManagerDropdownOpen]);
 
+  // Synchronize secondaryManagerSearch input
+  useEffect(() => {
+    if (selectedSecondaryManager && !isSecondaryManagerDropdownOpen) {
+      setSecondaryManagerSearch(selectedSecondaryManager.full_name);
+    } else if (!form.secondary_manager_id && !isSecondaryManagerDropdownOpen) {
+      setSecondaryManagerSearch("");
+    }
+  }, [selectedSecondaryManager, form.secondary_manager_id, isSecondaryManagerDropdownOpen]);
+
   // Close dropdown on click outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (managerDropdownRef.current && !managerDropdownRef.current.contains(event.target as Node)) {
         setIsManagerDropdownOpen(false);
+      }
+      if (secondaryManagerDropdownRef.current && !secondaryManagerDropdownRef.current.contains(event.target as Node)) {
+        setIsSecondaryManagerDropdownOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -154,6 +188,12 @@ export default function EmployeeCreate() {
     if (!q) return activeEmployees;
     return activeEmployees.filter(emp => emp.full_name.toLowerCase().includes(q));
   }, [activeEmployees, managerSearch]);
+
+  const filteredSecondaryManagers = useMemo(() => {
+    const q = secondaryManagerSearch.toLowerCase().trim();
+    if (!q) return activeEmployees;
+    return activeEmployees.filter(emp => emp.full_name.toLowerCase().includes(q));
+  }, [activeEmployees, secondaryManagerSearch]);
 
   useEffect(() => {
     if (tenantId) {
@@ -286,8 +326,110 @@ export default function EmployeeCreate() {
     }
   };
 
+  const legacyDepartmentOptions = useMemo(() => [
+    { value: "sales", label: "Sales" },
+    { value: "dev", label: "Development" },
+    { value: "marketing", label: "Marketing" },
+    { value: "operations", label: "Operations" },
+    { value: "design", label: "Design" },
+    { value: "other", label: "Other" },
+  ], []);
+
+  const legacyEmploymentTypeOptions = useMemo(() => [
+    { value: "full_time", label: "Full Time" },
+    { value: "part_time", label: "Part Time" },
+    { value: "contract", label: "Contract" },
+    { value: "intern", label: "Intern" },
+  ], []);
+
+  const legacyLocationOptions = useMemo(() => [
+    { value: "Head Office", label: "Head Office" },
+    { value: "Branch Office", label: "Branch Office" },
+    { value: "Remote", label: "Remote" },
+    { value: "Work From Home", label: "Work From Home" },
+    { value: "Other", label: "Other" },
+  ], []);
+
+  const departmentOptions = useMemo(() => {
+    const normalizedLegacy = new Set(legacyDepartmentOptions.map((option) => option.value));
+    const mappedOrgUnits = orgUnits
+      .filter((unit) => unit.unit_type === "department")
+      .map((unit) => {
+        const normalizedName = unit.name.trim().toLowerCase().replace(/\s+/g, "_");
+        return {
+          value: unit.id,
+          label: unit.name,
+          legacyValue: normalizedLegacy.has(normalizedName) ? normalizedName : "other",
+        };
+      });
+
+    return mappedOrgUnits.length > 0
+      ? mappedOrgUnits
+      : legacyDepartmentOptions.map((option) => ({ ...option, legacyValue: option.value }));
+  }, [legacyDepartmentOptions, orgUnits]);
+
+  const employmentTypeOptions = useMemo(() => {
+    const mappedTypes = employmentTypes.map((type) => ({
+      value: type.id,
+      label: type.name,
+      legacyValue: type.code,
+    }));
+
+    return mappedTypes.length > 0
+      ? mappedTypes
+      : legacyEmploymentTypeOptions.map((option) => ({ ...option, legacyValue: option.value }));
+  }, [employmentTypes, legacyEmploymentTypeOptions]);
+
+  const locationOptions = useMemo(() => {
+    const mappedLocations = locations.map((location) => ({
+      value: location.id,
+      label: location.name,
+      legacyValue: location.name,
+    }));
+
+    return mappedLocations.length > 0
+      ? mappedLocations
+      : legacyLocationOptions.map((option) => ({ ...option, legacyValue: option.value }));
+  }, [legacyLocationOptions, locations]);
+
   const handleChange = (key: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleDepartmentChange = (value: string) => {
+    const selected = departmentOptions.find((option) => option.value === value);
+    setForm((prev) => ({
+      ...prev,
+      org_unit_id: orgUnits.some((unit) => unit.id === value) ? value : "",
+      department: selected?.legacyValue ?? value,
+    }));
+  };
+
+  const handleDesignationChange = (value: string) => {
+    const selected = jobTitles.find((jobTitle) => jobTitle.title.toLowerCase() === value.trim().toLowerCase());
+    setForm((prev) => ({
+      ...prev,
+      designation: value,
+      job_title_id: selected?.id ?? "",
+    }));
+  };
+
+  const handleEmploymentTypeChange = (value: string) => {
+    const selected = employmentTypeOptions.find((option) => option.value === value);
+    setForm((prev) => ({
+      ...prev,
+      employment_type_id: employmentTypes.some((type) => type.id === value) ? value : "",
+      employment_type: selected?.legacyValue ?? value,
+    }));
+  };
+
+  const handleLocationChange = (value: string) => {
+    const selected = locationOptions.find((option) => option.value === value);
+    setForm((prev) => ({
+      ...prev,
+      location_id: locations.some((location) => location.id === value) ? value : "",
+      work_location: selected?.legacyValue ?? value,
+    }));
   };
 
   const handleEmployeeCode = (value: string) => {
@@ -409,10 +551,13 @@ export default function EmployeeCreate() {
                 state: empData.state || "",
                 pincode: empData.pincode || "",
                 department: empData.department || "sales",
+                org_unit_id: empData.org_unit_id || "",
                 designation: empData.designation || "",
+                job_title_id: empData.job_title_id || "",
                 employee_code: empData.employee_code || "",
                 date_of_joining: empData.date_of_joining || "",
                 employment_type: empData.employment_type || "full_time",
+                employment_type_id: empData.employment_type_id || "",
                 aadhaar_number: empData.aadhaar_number || "",
                 pan_number: empData.pan_number || "",
                 bank_name: empData.bank_name || "",
@@ -424,6 +569,7 @@ export default function EmployeeCreate() {
                 work_mode: empData.work_mode || "office",
                 grade: empData.grade || "",
                 work_location: empData.work_location || "",
+                location_id: empData.location_id || "",
                 manager_id: empData.manager_id || "",
               });
             }
@@ -527,6 +673,13 @@ export default function EmployeeCreate() {
     }
 
     try {
+      if (form.manager_id) {
+        const mgrValidation = await validateManagerAssignment(null, form.manager_id, tenantId);
+        if (!mgrValidation.isValid) {
+          throw new Error(mgrValidation.message || "Invalid manager assignment.");
+        }
+      }
+
       let currentEmployeeId = insertedEmployeeId;
 
       if (!currentEmployeeId) {
@@ -536,99 +689,53 @@ export default function EmployeeCreate() {
           throw new Error(`Email ${form.email.trim().toLowerCase()} is already registered in the system.`);
         }
 
-        // ── Insert employee record using the HR session (satisfies RLS) ──
-        const insertRes = await db
-          .from("employees")
-          .insert([
-            {
-              user_id: createdUserId,
-              tenant_id: tenantId,
-              full_name: form.full_name.trim(),
-              email: form.email.trim().toLowerCase(),
-              phone: form.phone.trim(),
-              date_of_birth: form.date_of_birth || null,
-              gender: form.gender || null,
-              address: form.address.trim() || null,
-              city: form.city.trim() || null,
-              state: form.state.trim() || null,
-              pincode: form.pincode.trim() || null,
-              department: form.department,
-              designation: form.designation.trim(),
-              employee_code: form.employee_code.trim(),
-              date_of_joining: form.date_of_joining,
-              employment_type: form.employment_type,
-              aadhaar_number: form.aadhaar_number.trim(),
-              pan_number: form.pan_number.trim(),
-              bank_name: form.bank_name.trim() || null,
-              account_number: form.account_number.trim() || null,
-              ifsc_code: form.ifsc_code.trim() || null,
-              emergency_contact_name: form.emergency_contact_name.trim(),
-              emergency_contact_phone: form.emergency_contact_phone.trim(),
-              emergency_contact_relation: form.emergency_contact_relation.trim() || null,
-              status: "active",
-              work_mode: form.work_mode,
-              grade: form.grade.trim() || null,
-              work_location: form.work_location || null,
-              manager_id: form.manager_id || null,
-            },
-          ])
-          .select()
-          .single();
 
-        if (insertRes.error || !insertRes.data?.id) {
+        // ── Create employee record atomically via RPC ──
+        const { data: newEmpId, error: rpcError } = await db.rpc("create_employee_transaction", {
+          p_user_id: createdUserId,
+          p_full_name: form.full_name.trim(),
+          p_email: form.email.trim().toLowerCase(),
+          p_phone: form.phone.trim(),
+          p_date_of_birth: form.date_of_birth || null,
+          p_gender: form.gender || null,
+          p_address: form.address.trim() || null,
+          p_city: form.city.trim() || null,
+          p_state: form.state.trim() || null,
+          p_pincode: form.pincode.trim() || null,
+          p_department: form.department,
+          p_org_unit_id: form.org_unit_id || null,
+          p_designation: form.designation.trim(),
+          p_job_title_id: form.job_title_id || null,
+          p_employee_code: form.employee_code.trim(),
+          p_date_of_joining: form.date_of_joining || null,
+          p_employment_type: form.employment_type,
+          p_employment_type_id: form.employment_type_id || null,
+          p_aadhaar_number: form.aadhaar_number.trim(),
+          p_pan_number: form.pan_number.trim(),
+          p_bank_name: form.bank_name.trim() || null,
+          p_account_number: form.account_number.trim() || null,
+          p_ifsc_code: form.ifsc_code.trim() || null,
+          p_emergency_contact_name: form.emergency_contact_name.trim(),
+          p_emergency_contact_phone: form.emergency_contact_phone.trim(),
+          p_emergency_contact_relation: form.emergency_contact_relation.trim() || null,
+          p_work_mode: form.work_mode,
+          p_grade: form.grade.trim() || null,
+          p_work_location: form.work_location || null,
+          p_location_id: form.location_id || null,
+          p_manager_id: form.manager_id || null,
+          p_secondary_manager_id: form.secondary_manager_id || null,
+          p_probation_period: form.probation_period ? parseInt(form.probation_period, 10) : null
+        });
+
+        if (rpcError || !newEmpId) {
           throw new Error(
-            insertRes.error?.message ??
-            "Employee profile could not be saved. Please try again."
+            rpcError?.message ??
+            "Employee profile could not be saved via transaction. Please try again."
           );
         }
 
-        currentEmployeeId = insertRes.data.id as string;
+        currentEmployeeId = newEmpId as string;
         setInsertedEmployeeId(currentEmployeeId);
-
-        // ── Auto-initialize leave balances for the new employee ──
-        // Silently seed leave_balance rows for every active leave type
-        // so the employee portal shows correct balances immediately.
-        try {
-          // Fetch tenant settings to get the correct timezone
-          const { data: tenantSettings } = await db.from("tenant_settings").select("timezone").eq("tenant_id", tenantId).maybeSingle();
-          const tz = tenantSettings?.timezone || "UTC";
-
-          const currentYear = new Date().getFullYear();
-          const targetYear = getTenantYear(tz);
-          const { data: leaveTypesData } = await db
-            .from("leave_types")
-            .select("id, days_per_year, accrual_type")
-            .eq("tenant_id", tenantId)
-            .eq("is_active", true);
-
-          if (leaveTypesData && leaveTypesData.length > 0) {
-            const balanceRows = leaveTypesData.map((lt: { id: string; days_per_year: number; accrual_type: string }) => {
-              let initialBalance = lt.days_per_year;
-              if (lt.accrual_type === "monthly") {
-                if (targetYear === currentYear) {
-                  const elapsedMonths = new Date().getMonth() + 1;
-                  initialBalance = Number(((lt.days_per_year / 12) * elapsedMonths).toFixed(2));
-                } else if (targetYear > currentYear) {
-                  initialBalance = 0;
-                }
-              }
-              return {
-                tenant_id: tenantId,
-                employee_id: currentEmployeeId as string,
-                leave_type_id: lt.id,
-                year: targetYear,
-                total_allocated: lt.days_per_year,
-                used_days: 0,
-                carried_forward: 0,
-                balance: initialBalance,
-              };
-            });
-            await db.from("leave_balances").upsert(balanceRows, { onConflict: "tenant_id,employee_id,leave_type_id,year", ignoreDuplicates: true });
-          }
-        } catch (leaveErr) {
-          // Non-fatal: employee is created; HR can always use "Initialize Balances" as a fallback
-          console.warn("Could not auto-initialize leave balances for new employee:", leaveErr);
-        }
       } else {
         // Update the existing employee profile to capture any new edits made during the recovery flow
         const updateRes = await db
@@ -643,10 +750,13 @@ export default function EmployeeCreate() {
             state: form.state.trim() || null,
             pincode: form.pincode.trim() || null,
             department: form.department,
+            org_unit_id: form.org_unit_id || null,
             designation: form.designation.trim(),
+            job_title_id: form.job_title_id || null,
             employee_code: form.employee_code.trim(),
             date_of_joining: form.date_of_joining,
             employment_type: form.employment_type,
+            employment_type_id: form.employment_type_id || null,
             aadhaar_number: form.aadhaar_number.trim(),
             pan_number: form.pan_number.trim(),
             bank_name: form.bank_name.trim() || null,
@@ -658,7 +768,9 @@ export default function EmployeeCreate() {
             work_mode: form.work_mode,
             grade: form.grade.trim() || null,
             work_location: form.work_location || null,
+            location_id: form.location_id || null,
             manager_id: form.manager_id || null,
+            secondary_manager_id: form.secondary_manager_id || null,
           })
           .eq("tenant_id", tenantId)
           .eq("id", currentEmployeeId);
@@ -722,7 +834,6 @@ export default function EmployeeCreate() {
       }
 
       setIsCreated(true);
-      void logAction("employee.created", "employee", currentEmployeeId);
       sessionStorage.removeItem(`hrms_employee_draft_${tenantId}`);
 
     } catch (err) {
@@ -1025,6 +1136,7 @@ export default function EmployeeCreate() {
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                   required
                 />
+
               </label>
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Date of Birth</span>
@@ -1109,17 +1221,14 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Department *</span>
                 <select
-                  value={form.department}
-                  onChange={(event) => handleChange("department", event.target.value)}
+                  value={form.org_unit_id || form.department}
+                  onChange={(event) => handleDepartmentChange(event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                   required
                 >
-                  <option value="sales">Sales</option>
-                  <option value="dev">Development</option>
-                  <option value="marketing">Marketing</option>
-                  <option value="operations">Operations</option>
-                  <option value="design">Design</option>
-                  <option value="other">Other</option>
+                  {departmentOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                 </select>
               </label>
               <label className="text-sm">
@@ -1128,11 +1237,18 @@ export default function EmployeeCreate() {
                   type="text"
                   placeholder="e.g. Software Engineer"
                   maxLength={100}
+                  list="job-title-options"
                   value={form.designation}
-                  onChange={(event) => handleChange("designation", event.target.value)}
+                  onChange={(event) => handleDesignationChange(event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                   required
                 />
+                <datalist id="job-title-options">
+                  {jobTitles.map((jobTitle) => (
+                    <option key={jobTitle.id} value={jobTitle.title} />
+                  ))}
+                </datalist>
+
               </label>
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Employee Code *</span>
@@ -1145,6 +1261,7 @@ export default function EmployeeCreate() {
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                   required
                 />
+
               </label>
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Date of Joining *</span>
@@ -1159,14 +1276,13 @@ export default function EmployeeCreate() {
               <label className="text-sm md:col-span-2">
                 <span className="mb-1 block text-slate-600">Employment Type</span>
                 <select
-                  value={form.employment_type}
-                  onChange={(event) => handleChange("employment_type", event.target.value)}
+                  value={form.employment_type_id || form.employment_type}
+                  onChange={(event) => handleEmploymentTypeChange(event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                 >
-                  <option value="full_time">Full Time</option>
-                  <option value="part_time">Part Time</option>
-                  <option value="contract">Contract</option>
-                  <option value="intern">Intern</option>
+                  {employmentTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                 </select>
               </label>
               <label className="text-sm">
@@ -1195,16 +1311,14 @@ export default function EmployeeCreate() {
               <label className="text-sm md:col-span-2">
                 <span className="mb-1 block text-slate-600">Work Location</span>
                 <select
-                  value={form.work_location}
-                  onChange={(event) => handleChange("work_location", event.target.value)}
+                  value={form.location_id || form.work_location}
+                  onChange={(event) => handleLocationChange(event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                 >
                   <option value="">Select Work Location</option>
-                  <option value="Head Office">Head Office</option>
-                  <option value="Branch Office">Branch Office</option>
-                  <option value="Remote">Remote</option>
-                  <option value="Work From Home">Work From Home</option>
-                  <option value="Other">Other</option>
+                  {locationOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                 </select>
               </label>
               <div className="relative text-sm md:col-span-2 font-medium text-slate-700" ref={managerDropdownRef}>
@@ -1294,6 +1408,107 @@ export default function EmployeeCreate() {
                   </div>
                 )}
               </div>
+
+              {/* Secondary Reporting Manager Search Selection */}
+              <div className="relative text-sm md:col-span-2 font-medium text-slate-700" ref={secondaryManagerDropdownRef}>
+                <span className="mb-1 block text-slate-600 font-normal">Secondary / Functional Manager (Optional)</span>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search functional manager..."
+                    value={secondaryManagerSearch}
+                    onFocus={() => {
+                      setIsSecondaryManagerDropdownOpen(true);
+                      if (selectedSecondaryManager) {
+                        setSecondaryManagerSearch("");
+                      }
+                    }}
+                    onChange={(e) => {
+                      setSecondaryManagerSearch(e.target.value);
+                      setIsSecondaryManagerDropdownOpen(true);
+                    }}
+                    className="w-full rounded-lg border border-slate-300 pl-3 pr-10 py-2 outline-none ring-brand-600 focus:ring font-normal text-slate-900"
+                  />
+                  {form.secondary_manager_id ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleChange("secondary_manager_id", "");
+                        setSecondaryManagerSearch("");
+                      }}
+                      className="absolute right-8 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-semibold"
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <ChevronDown className="h-4 w-4" />
+                  </div>
+                </div>
+
+                {selectedSecondaryManager && !isSecondaryManagerDropdownOpen && (
+                  <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-200 px-3 py-1.5 text-xs text-slate-700 font-normal">
+                    {selectedSecondaryManager.profile_photo_url ? (
+                      <img src={selectedSecondaryManager.profile_photo_url} alt="" className="h-5 w-5 rounded-full object-cover" />
+                    ) : (
+                      <div className="grid h-5 w-5 place-items-center rounded-full bg-slate-200 font-bold text-slate-600">
+                        {selectedSecondaryManager.full_name.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <div>
+                      <span className="font-semibold text-slate-900">{selectedSecondaryManager.full_name}</span>
+                      <span className="text-slate-500"> — {selectedSecondaryManager.designation || "No designation"}</span>
+                    </div>
+                  </div>
+                )}
+
+                {isSecondaryManagerDropdownOpen && (
+                  <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5">
+                    {filteredSecondaryManagers.length === 0 ? (
+                      <div className="px-4 py-2 text-slate-500 text-xs font-normal">No active employees found</div>
+                    ) : (
+                      filteredSecondaryManagers.map((emp) => (
+                        <button
+                          key={emp.id}
+                          type="button"
+                          onClick={() => {
+                            handleChange("secondary_manager_id", emp.id);
+                            setSecondaryManagerSearch(emp.full_name);
+                            setIsSecondaryManagerDropdownOpen(false);
+                          }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 transition-colors font-normal ${
+                            form.secondary_manager_id === emp.id ? "bg-slate-50 font-semibold" : ""
+                          }`}
+                        >
+                          {emp.profile_photo_url ? (
+                            <img src={emp.profile_photo_url} alt="" className="h-6 w-6 rounded-full object-cover" />
+                          ) : (
+                            <div className="grid h-6 w-6 place-items-center rounded-full bg-slate-100 font-bold text-slate-600 text-[10px]">
+                              {emp.full_name.slice(0, 2).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-xs text-slate-900 truncate font-semibold">{emp.full_name}</p>
+                            <p className="text-[10px] text-slate-500 truncate">{emp.designation || "—"}</p>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Probation Period Input */}
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-600">Probation Period (Days)</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.probation_period}
+                  onChange={(event) => handleChange("probation_period", event.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
+                />
+              </label>
             </div>
           ) : null}
 
@@ -1310,6 +1525,7 @@ export default function EmployeeCreate() {
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                   required
                 />
+
               </label>
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">PAN Number *</span>
@@ -1322,6 +1538,7 @@ export default function EmployeeCreate() {
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                   required
                 />
+
               </label>
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Upload Aadhaar Document</span>
@@ -1388,6 +1605,7 @@ export default function EmployeeCreate() {
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                   required
                 />
+
               </label>
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Emergency Contact Phone *</span>
@@ -1400,6 +1618,7 @@ export default function EmployeeCreate() {
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                   required
                 />
+
               </label>
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Relationship</span>

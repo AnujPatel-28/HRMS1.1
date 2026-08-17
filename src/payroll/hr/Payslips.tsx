@@ -33,7 +33,7 @@ const MAX_EMAIL_BATCHES = 10;
 // Old snapshots below this version fall back to DB column values (safe defaults).
 // CRITICAL: Never auto-regenerate historical payslips. Always render from stored DB values.
 // Changing PF/ESI ceilings must NOT retroactively alter what employees see on old payslips.
-const SUPPORTED_SNAPSHOT_VERSION = 2;
+const SUPPORTED_SNAPSHOT_VERSION = 3;
 
 interface PayrollRun {
   id: string;

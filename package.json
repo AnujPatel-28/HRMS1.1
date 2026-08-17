@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:hrms-workflows": "node scratch/test-exceptions.js && node scratch/test-leave-approval.js"
+    "test:hrms-workflows": "node scratch/test-exceptions.js && node scratch/test-leave-approval.js",
+    "check:policy-drift": "node scripts/check-policy-drift.mjs"
   },
   "dependencies": {
     "@insforge/sdk": "^1.2.5",
@@ -21,6 +22,7 @@
     "leaflet": "^1.9.4",
     "lucide-react": "^1.8.0",
     "papaparse": "^5.5.3",
+    "pg": "^8.22.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",

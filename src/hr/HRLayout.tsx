@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, Clock, Palmtree, Calendar, MessageSquare, Contact, GitBranch, ClipboardList, Gift, FileText, Wallet, Settings, Rss, FolderKanban, Receipt, Shield, Briefcase, ChevronDown, Menu, Columns, Layers, LayoutGrid } from "lucide-react";
+import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, Clock, Palmtree, Calendar, MessageSquare, Contact, GitBranch, ClipboardList, Gift, FileText, Wallet, Settings, Rss, FolderKanban, Receipt, Shield, Briefcase, ChevronDown, Menu, Columns, Layers, LayoutGrid, Network } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
@@ -30,6 +30,8 @@ const sections: readonly NavSection[] = [
       { label: "Employees", href: "/hr/employees", icon: Users },
       { label: "Directory", href: "/hr/directory", icon: Contact },
       { label: "Org Chart", href: "/hr/org-chart", icon: GitBranch },
+      { label: "Org Setup", href: "/hr/org-structure", icon: Network },
+      { label: "Offboarding", href: "/hr/offboarding", icon: LogOut },
       { label: "Insurance", href: "/hr/insurance", icon: Shield },
     ],
   },
@@ -81,6 +83,7 @@ function HRSidebarContent({
   onItemClick,
   employee,
   flatLayout = false,
+  isLight = false,
 }: {
   sections: readonly NavSection[];
   location: any;
@@ -89,6 +92,7 @@ function HRSidebarContent({
   onItemClick?: () => void;
   employee?: { full_name?: string; profile_photo_url?: string; department?: string } | null;
   flatLayout?: boolean;
+  isLight?: boolean;
 }) {
   const { open } = useSidebar();
   const [openSection, setOpenSection] = useState<string | null>(() => {
@@ -115,10 +119,39 @@ function HRSidebarContent({
     section.items.some((item) => item.href === location.pathname)
   );
 
+  const borderClass = isLight ? "border-slate-200" : "border-white/10";
+  const textTitleClass = isLight ? "text-slate-800 font-bold" : "text-white font-bold";
+  const textSubtitleClass = isLight ? "text-slate-600 font-medium" : "text-slate-300 font-semibold";
+  const textNameClass = isLight ? "text-slate-800 font-semibold" : "text-white font-semibold";
+  const textMutedClass = isLight ? "text-slate-500" : "text-slate-400";
+  const ringClass = isLight ? "ring-2 ring-slate-100" : "ring-2 ring-white/10";
+  const avatarBgClass = isLight ? "bg-slate-200 text-slate-800" : "bg-white/10 text-white";
+
+  const getLinkClass = (isActive: boolean) => {
+    if (isActive) {
+      return isLight 
+        ? "bg-brand-600/15 font-semibold text-brand-700 shadow-sm ring-1 ring-brand-600/10" 
+        : "bg-emerald-500/10 font-semibold text-emerald-400 shadow-sm ring-1 ring-emerald-500/20";
+    } else {
+      return isLight 
+        ? "text-slate-600 hover:bg-black/5 hover:text-slate-900" 
+        : "text-slate-300 hover:bg-white/10 hover:text-white";
+    }
+  };
+
+  const getIconClass = (isActive: boolean) => {
+    return cn(
+      "h-4 w-4 shrink-0 transition-colors",
+      isActive
+        ? (isLight ? "text-brand-600" : "text-emerald-400")
+        : (isLight ? "text-slate-500 group-hover/sidebar:text-slate-800" : "text-slate-400 group-hover/sidebar:text-slate-200")
+    );
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* ── Logo / Brand header ── */}
-      <div className="flex items-center gap-2.5 h-16 border-b border-white/10 shrink-0 mb-4 pl-[2px] pr-0">
+      <div className={cn("flex items-center gap-2.5 h-16 shrink-0 mb-4 pl-[2px] pr-0 border-b", borderClass)}>
         <div className="h-8 w-8 shrink-0 rounded-lg bg-brand-600 flex items-center justify-center shadow-sm">
           <span className="text-white font-black text-xs leading-none">T</span>
         </div>
@@ -131,8 +164,8 @@ function HRSidebarContent({
           transition={{ duration: 0.2, ease: "easeInOut" }}
           className="overflow-hidden whitespace-nowrap flex flex-col min-w-0"
         >
-          <p className="text-[10px] font-bold uppercase tracking-widest text-white leading-none">TalentMesh</p>
-          <p className="text-xs font-semibold text-slate-300 mt-0.5">HR Portal</p>
+          <p className={cn("text-[10px] uppercase tracking-widest leading-none", textTitleClass)}>TalentMesh</p>
+          <p className={cn("text-xs mt-0.5", textSubtitleClass)}>HR Portal</p>
         </motion.div>
       </div>
 
@@ -146,17 +179,11 @@ function HRSidebarContent({
               href: "/hr/dashboard",
               icon: (
                 <Home
-                  className={cn(
-                    "h-4 w-4 shrink-0 transition-colors",
-                    location.pathname === "/hr/dashboard" ? "text-white" : "text-slate-400 group-hover/sidebar:text-slate-200"
-                  )}
+                  className={getIconClass(location.pathname === "/hr/dashboard")}
                 />
               ),
             }}
-            className={location.pathname === "/hr/dashboard" 
-              ? "bg-white/10 font-semibold text-white shadow-sm ring-1 ring-white/10" 
-              : "text-slate-300 hover:bg-white/10 hover:text-white"
-            }
+            className={getLinkClass(location.pathname === "/hr/dashboard")}
             onClick={onItemClick}
           />
 
@@ -177,17 +204,11 @@ function HRSidebarContent({
                   href: defaultHref,
                   icon: (
                     <SectionIcon
-                      className={cn(
-                        "h-4 w-4 shrink-0 transition-colors",
-                        isActive ? "text-white" : "text-slate-400 group-hover/sidebar:text-slate-200"
-                      )}
+                      className={getIconClass(isActive)}
                     />
                   ),
                 }}
-                className={isActive 
-                  ? "bg-white/10 font-semibold text-white shadow-sm ring-1 ring-white/10" 
-                  : "text-slate-300 hover:bg-white/10 hover:text-white"
-                }
+                className={getLinkClass(isActive)}
                 onClick={onItemClick}
               >
                 {showBadge && (
@@ -214,7 +235,7 @@ function HRSidebarContent({
                 {open ? (
                   <button
                     onClick={() => toggleSection(section.title)}
-                    className="flex w-full items-center justify-between px-2.5 py-1 rounded-md text-slate-400 hover:text-slate-200 transition duration-150 text-left group"
+                    className={cn("flex w-full items-center justify-between px-2.5 py-1 rounded-md transition duration-150 text-left group", isLight ? "text-slate-600 hover:text-slate-900" : "text-slate-400 hover:text-slate-200")}
                   >
                     <div className="flex items-center gap-1.5">
                       <SectionIcon className="h-4 w-4 shrink-0" />
@@ -236,10 +257,10 @@ function HRSidebarContent({
                       onClick={() => toggleSection(section.title)}
                       title={section.title}
                     >
-                      <SectionIcon className="h-4 w-4 text-slate-400 hover:text-slate-200 transition-colors" />
+                      <SectionIcon className={cn("h-4 w-4 transition-colors", isLight ? "text-slate-500 hover:text-slate-800" : "text-slate-400 hover:text-slate-200")} />
                     </div>
                     {sIdx < sections.length - 1 && (
-                      <div className="h-px bg-white/10 w-8 mt-2" />
+                      <div className={cn("h-px w-8 mt-2", isLight ? "bg-slate-200" : "bg-white/10")} />
                     )}
                   </div>
                 )}
@@ -272,17 +293,11 @@ function HRSidebarContent({
                               href,
                               icon: (
                                 <Icon
-                                  className={cn(
-                                    "h-4 w-4 shrink-0 transition-colors",
-                                    isActive ? "text-white" : "text-slate-400 group-hover/sidebar:text-slate-200"
-                                  )}
+                                  className={getIconClass(isActive)}
                                 />
                               ),
                             }}
-                            className={isActive 
-                              ? "bg-white/10 font-semibold text-white shadow-sm ring-1 ring-white/10" 
-                              : "text-slate-300 hover:bg-white/10 hover:text-white"
-                            }
+                            className={getLinkClass(isActive)}
                             onClick={onItemClick}
                           >
                             {showBadge && (
@@ -309,13 +324,13 @@ function HRSidebarContent({
 
       {/* ── User avatar footer (simple display) ── */}
       {employee && (
-        <div className="mt-auto pt-3 border-t border-white/10 shrink-0">
+        <div className={cn("mt-auto pt-3 shrink-0 border-t", borderClass)}>
           <div className="flex items-center gap-2.5 min-w-0 px-1 py-1">
             {employee.profile_photo_url ? (
-              <img src={employee.profile_photo_url} alt="" className="h-8 w-8 rounded-full object-cover ring-2 ring-white/10 shrink-0" />
+              <img src={employee.profile_photo_url} alt="" className={cn("h-8 w-8 rounded-full object-cover shrink-0", ringClass)} />
             ) : (
-              <div className="h-8 w-8 rounded-full bg-white/10 flex items-center justify-center shrink-0">
-                <span className="text-xs font-bold text-white">{employee.full_name?.slice(0, 2).toUpperCase() ?? '?'}</span>
+              <div className={cn("h-8 w-8 rounded-full flex items-center justify-center shrink-0", avatarBgClass)}>
+                <span className="text-xs font-bold">{employee.full_name?.slice(0, 2).toUpperCase() ?? '?'}</span>
               </div>
             )}
             <motion.div
@@ -324,8 +339,8 @@ function HRSidebarContent({
               transition={{ duration: 0.2, ease: 'easeInOut' }}
               className="overflow-hidden whitespace-nowrap min-w-0"
             >
-              <p className="text-xs font-semibold text-white truncate">{employee.full_name ?? 'HR User'}</p>
-              <p className="text-[10px] text-slate-400 truncate">{employee.department ?? 'HR'}</p>
+              <p className={cn("text-xs truncate", textNameClass)}>{employee.full_name ?? 'HR User'}</p>
+              <p className={cn("text-[10px] truncate", textMutedClass)}>{employee.department ?? 'HR'}</p>
             </motion.div>
           </div>
         </div>
@@ -585,16 +600,16 @@ export default function HRLayout() {
 
             {/* Main content (Desktop Classic) */}
             <main className="min-w-0 flex-1">
-              <Outlet />
+              <Outlet context={{ layoutStyle }} />
             </main>
           </div>
         ) : (
           /* Desktop Unified Card Layout (dropdown / double_sidebar) */
-          <div className={cn("w-full hidden md:flex md:rounded-none md:border-none md:shadow-none overflow-hidden", (layoutStyle === 'double_sidebar' && activeSection) ? "bg-[#0e2246]" : "bg-[#0a1c3a]")} style={{ height: '100vh' }}>
+          <div className={cn("w-full hidden md:flex md:rounded-none md:border-none md:shadow-none overflow-hidden", (layoutStyle === 'dropdown' || layoutStyle === 'double_sidebar') ? "bg-gradient-to-b from-brand-50/30 via-slate-50/50 to-slate-100/40" : "bg-[#0a1c3a]")} style={{ height: '100vh' }}>
             {/* Main Sidebar */}
             {layoutStyle === 'double_sidebar' ? (
               <Sidebar open={false}>
-                <DesktopSidebar className="border-r border-white/10 bg-[#0a1c3a] pt-0 px-2.5 pb-3 shrink-0 rounded-tl-3xl" style={{ height: '100vh' }} showToggle={false}>
+                <DesktopSidebar className="border-r border-slate-200/50 bg-gradient-to-b from-brand-50 via-slate-50 to-slate-100 pt-0 px-2.5 pb-3 shrink-0 rounded-tl-3xl" style={{ height: '100vh' }} showToggle={false}>
                   <HRSidebarContent
                     sections={sections}
                     location={location}
@@ -602,12 +617,13 @@ export default function HRLayout() {
                     pendingExpensesCount={pendingExpensesCount}
                     employee={employee}
                     flatLayout={true}
+                    isLight={true}
                   />
                 </DesktopSidebar>
               </Sidebar>
             ) : (
               <Sidebar>
-                <DesktopSidebar className="border-r border-white/10 bg-[#0a1c3a] pt-0 px-2.5 pb-3 shrink-0 rounded-tl-3xl" style={{ height: '100vh' }} showToggle={true}>
+                <DesktopSidebar className="border-r border-slate-200/50 bg-gradient-to-b from-brand-50/50 via-slate-50/40 to-slate-100/50 pt-0 px-2.5 pb-3 shrink-0 rounded-tl-3xl" style={{ height: '100vh' }} showToggle={true}>
                   <HRSidebarContent
                     sections={sections}
                     location={location}
@@ -615,6 +631,7 @@ export default function HRLayout() {
                     pendingExpensesCount={pendingExpensesCount}
                     employee={employee}
                     flatLayout={true}
+                    isLight={true}
                   />
                 </DesktopSidebar>
               </Sidebar>
@@ -623,18 +640,24 @@ export default function HRLayout() {
             {/* Secondary sliding panel */}
             <div
               className={cn(
-                "h-full bg-[#0e2246] border-r border-white/10 transition-all duration-300 ease-in-out overflow-hidden flex flex-col shrink-0",
+                "h-full bg-gradient-to-b from-brand-50 via-slate-50 to-slate-100 border-r border-slate-200/80 transition-all duration-300 ease-in-out overflow-hidden flex flex-col shrink-0",
                 layoutStyle === 'double_sidebar' && activeSection ? "w-52" : "w-0 border-r-0"
               )}
             >
               {layoutStyle === 'double_sidebar' && activeSection && (
                 <div className="flex flex-col h-full py-4 px-3 select-none">
                   <div className="h-10 flex items-center px-2.5 mb-3">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-600">
                       {activeSection.title}
                     </span>
                   </div>
-                  <div className="flex flex-col gap-1 flex-1 overflow-y-auto hide-scrollbar">
+                  <motion.div
+                    key={activeSection.title}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
+                    className="flex flex-col gap-1 flex-1 overflow-y-auto hide-scrollbar"
+                  >
                     {activeSection.items.map((item) => {
                       const ItemIcon = item.icon;
                       const isCurrent = item.href === location.pathname;
@@ -643,18 +666,18 @@ export default function HRLayout() {
                           key={item.href}
                           to={item.href}
                           className={cn(
-                            "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-all duration-155",
+                            "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition-all duration-155 group",
                             isCurrent
-                              ? "bg-white/10 text-white font-semibold shadow-sm ring-1 ring-white/10"
-                              : "text-slate-300 hover:bg-white/10 hover:text-white"
+                              ? "bg-brand-600/15 text-brand-700 font-bold shadow-sm ring-1 ring-brand-600/10"
+                              : "text-slate-700 hover:bg-brand-600/5 hover:text-brand-700"
                           )}
                         >
-                          <ItemIcon className={cn("h-4 w-4 shrink-0", isCurrent ? "text-white" : "text-slate-400")} />
+                          <ItemIcon className={cn("h-4 w-4 shrink-0 transition-colors", isCurrent ? "text-brand-600" : "text-slate-500 group-hover:text-brand-600")} />
                           <span>{item.label}</span>
                         </Link>
                       );
                     })}
-                  </div>
+                  </motion.div>
                 </div>
               )}
             </div>
@@ -825,7 +848,7 @@ export default function HRLayout() {
                 </div>
               </div>
               <div className="flex-1 p-6 overflow-y-auto bg-[url('/bg1.1.1.svg')] bg-cover bg-center bg-no-repeat bg-fixed">
-                <Outlet />
+                <Outlet context={{ layoutStyle }} />
               </div>
             </main>
           </div>
@@ -833,24 +856,24 @@ export default function HRLayout() {
 
         {/* ── Mobile: just the outlet ── */}
         <main className="md:hidden min-w-0 flex-1">
-          <Outlet />
+          <Outlet context={{ layoutStyle }} />
         </main>
 
         {/* Mobile Slide-over Drawer */}
-        <aside className={`fixed inset-y-0 left-0 z-50 w-[88vw] max-w-sm transform overflow-y-auto pb-24 bg-[#0a1c3a] p-4 shadow-xl transition-transform duration-300 ease-in-out md:hidden ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <aside className={`fixed inset-y-0 left-0 z-50 w-[88vw] max-w-sm transform overflow-y-auto pb-24 ${layoutStyle === 'dropdown' ? "bg-gradient-to-b from-brand-50/90 via-slate-50/90 to-slate-100/90 border-r border-slate-200/50" : "bg-[#0a1c3a]"} p-4 shadow-xl transition-transform duration-300 ease-in-out md:hidden ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
           <div className="mb-6 flex items-start justify-between gap-3">
             <div>
-              <span className="font-semibold text-white">Navigation</span>
-              <p className="mt-1 text-xs text-slate-400">{employee?.full_name ?? "HR User"}</p>
+              <span className={`font-semibold ${layoutStyle === 'dropdown' ? 'text-slate-800' : 'text-white'}`}>Navigation</span>
+              <p className={`mt-1 text-xs ${layoutStyle === 'dropdown' ? 'text-slate-500' : 'text-slate-400'}`}>{employee?.full_name ?? "HR User"}</p>
             </div>
-            <button onClick={() => setMobileOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white">
+            <button onClick={() => setMobileOpen(false)} className={`rounded-lg p-1 ${layoutStyle === 'dropdown' ? 'text-slate-500 hover:bg-black/5 hover:text-slate-800' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}>
               <X className="h-5 w-5" />
             </button>
           </div>
           <div className="h-full space-y-4">
             <Link
               to="/select"
-              className="mb-3 inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-white/10 hover:text-white"
+              className={`mb-3 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${layoutStyle === 'dropdown' ? 'border border-slate-200 text-slate-600 hover:bg-black/5 hover:text-slate-800' : 'border border-white/10 text-slate-300 hover:bg-white/10 hover:text-white'}`}
               onClick={() => setMobileOpen(false)}
             >
               <ArrowLeft className="h-4 w-4" />
@@ -864,6 +887,7 @@ export default function HRLayout() {
                 pendingExpensesCount={pendingExpensesCount}
                 onItemClick={() => setMobileOpen(false)}
                 employee={employee}
+                isLight={layoutStyle === 'dropdown'}
               />
             </Sidebar>
             {/* Mobile Logout */}
@@ -923,4 +947,3 @@ export default function HRLayout() {
     </div>
   );
 }
-

@@ -13,12 +13,12 @@ export interface Employee {
   city: string | null;
   state: string | null;
   pincode: string | null;
-  department: "sales" | "dev" | "marketing" | "operations" | "design" | "other" | null;
+  department: string | null;
   designation: string | null;
   employee_code: string | null;
   date_of_joining: string | null;
-  employment_type: "full_time" | "part_time" | "contract" | "intern" | null;
-  status: "active" | "inactive" | "terminated";
+  employment_type: string | null;
+  status: "active" | "inactive" | "terminated" | "draft" | "pending_hr_review" | "pending_onboarding";
   aadhaar_number: string | null;
   pan_number: string | null;
   bank_name: string | null;
@@ -40,6 +40,149 @@ export interface Employee {
   employee_bio?: string | null;
   manager_name?: string | null;
   role?: EmployeeRole | null;
+  probation_end_date?: string | null;
+  employment_confirmed_at?: string | null;
+  probation_status?: "on_probation" | "confirmed" | "extended" | "not_applicable" | null;
+  secondary_manager_id?: string | null;
+  org_unit_id?: string | null;
+  job_title_id?: string | null;
+  location_id?: string | null;
+  employment_type_id?: string | null;
+}
+
+export interface OrgUnit {
+  id: string;
+  tenant_id: string;
+  parent_id: string | null;
+  name: string;
+  unit_type: "company" | "business_unit" | "division" | "department" | "team" | "sub_team" | "project" | "other";
+  code: string | null;
+  description?: string | null;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JobTitle {
+  id: string;
+  tenant_id: string;
+  title: string;
+  code: string | null;
+  grade: string | null;
+  level: string | null;
+  description?: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkLocation {
+  id: string;
+  tenant_id: string;
+  name: string;
+  code?: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  timezone?: string | null;
+  is_remote?: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmploymentTypeOption {
+  id: string;
+  tenant_id: string;
+  name: string;
+  code: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExitRequest {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  exit_type: "resignation" | "termination" | "retirement" | "contract_end" | "absconding";
+  initiated_by: string;
+  initiated_by_role: "employee" | "hr";
+  last_working_date: string | null;
+  notice_period_days: number | null;
+  reason: string | null;
+  hr_notes: string | null;
+  // Note: "clearance_pending" means "All clearances are approved/completed, final HR completion is pending".
+  status: "pending_approval" | "notice_period" | "clearance_pending" | "completed" | "withdrawn" | "rejected";
+  clearance_assets: boolean;
+  clearance_it: boolean;
+  clearance_finance: boolean;
+  clearance_hr: boolean;
+  clearance_admin: boolean;
+  exit_interview_done: boolean;
+  exit_feedback: string | null;
+  created_at: string;
+  updated_at: string;
+  employee?: {
+    full_name: string;
+    designation: string | null;
+    department: string | null;
+    profile_photo_url: string | null;
+  };
+  clearances?: ExitClearance[];
+  exit_interview_data?: ExitInterviewData;
+  exit_interview_completed_at?: string | null;
+  exit_interview_completed_by?: string | null;
+}
+
+export interface ExitClearance {
+  id: string;
+  tenant_id: string;
+  exit_request_id: string;
+  template_id: string | null;
+  department: string;
+  label: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  approved_by: string | null;
+  approved_at: string | null;
+  remarks: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Snapshot of whether this clearance was required at the time of seeding. Defaults true. */
+  is_required?: boolean;
+}
+
+export interface ExitInterviewData {
+  primary_reason?: "career_growth" | "compensation" | "manager" | "relocation" | "personal" | "performance" | "culture" | "other";
+  reason_notes?: string;
+  manager_feedback?: string;
+  work_environment_rating?: number;
+  compensation_rating?: number;
+  growth_rating?: number;
+  rehire_eligible?: boolean;
+  risk_level?: "low" | "medium" | "high";
+  knowledge_transfer_done?: boolean;
+  company_property_notes?: string;
+  hr_action_items?: string[];
+  completed_by_name?: string;
+  completed_at?: string;
+  /** Populated when migrated from legacy exit_feedback text */
+  legacy_feedback?: string;
+  migration_source?: string;
+}
+
+export interface OnboardingSelfProgress {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  personal_details_completed: boolean;
+  bank_details_completed: boolean;
+  documents_completed: boolean;
+  emergency_contact_completed: boolean;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Attendance {
@@ -160,6 +303,38 @@ export interface HRPolicy {
   uploaded_by: string | null;
   visible_to: "all" | "hr_only" | "department-specific";
   department_filter: string | null;
+  org_unit_id?: string | null;
+  org_unit_name?: string | null;
+  storage_path?: string | null;
+  version_number: number;
+  effective_date?: string | null;
+  expires_at?: string | null;
+  requires_acknowledgement: boolean;
+  supersedes_policy_id?: string | null;
+  acknowledged_count?: number;
+  total_targeted?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmployeeVisibleHRPolicy {
+  id: string;
+  tenant_id: string;
+  title: string;
+  description: string | null;
+  file_name: string | null;
+  file_url: string;
+  visible_to: "all" | "department-specific";
+  department_filter: string | null;
+  org_unit_id?: string | null;
+  org_unit_name?: string | null;
+  storage_path?: string | null;
+  version_number: number;
+  effective_date?: string | null;
+  expires_at?: string | null;
+  requires_acknowledgement: boolean;
+  supersedes_policy_id?: string | null;
+  acknowledged_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -295,4 +470,3 @@ export interface Expense {
   reimbursed_at: string | null;
   created_at: string;
 }
-

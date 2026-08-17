@@ -118,11 +118,11 @@ export default function MyLeaves() {
         setForm(prev => ({ ...prev, leave_type_id: types[0].id }));
       }
 
-      // Fetch team employees if in manager view
+      // Fetch team employees if in manager view from public view
       if (isManagerMode && directReportIds.length > 0) {
         const { data: teamData, error: teamErr } = await db
-          .from("employees")
-          .select("*")
+          .from("employee_directory_public")
+          .select("id, full_name, profile_photo_url, designation, department")
           .eq("tenant_id", tenantId)
           .in("id", directReportIds);
         if (!teamErr && teamData) {

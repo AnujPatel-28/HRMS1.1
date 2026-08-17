@@ -1,0 +1,21 @@
+-- Collapse the duplicate self-access SELECT policies on public.employees.
+--
+-- Two permissive SELECT policies granted the same thing:
+--   employees_self_read    USING (user_id = auth.uid() AND tenant_id = get_auth_tenant_id())
+--   employees_self_select  USING (user_id = (SELECT auth.uid()))
+--
+-- Permissive policies OR together, so the broader one (employees_self_select) already decides the
+-- outcome and the tenant condition in employees_self_read has never had any effect. Two rules where
+-- a reader expects one, and the dead condition invites the false belief that self-access is
+-- tenant-checked here.
+--
+-- Keeping the BROADER one is deliberate and is behaviour-preserving:
+--   * Tenant isolation is not lost — `tenant_active_restrictive` is RESTRICTIVE FOR ALL TO public and
+--     ANDs can_access_tenant(tenant_id) onto every operation on this table regardless.
+--   * Keeping the narrower one instead would NARROW access: get_auth_tenant_id() reads
+--     auth.users.metadata->>'tenant_id', which is not reliably populated for HR-created employees.
+--     Those users would lose the ability to read their own row.
+--
+-- Net effect on who can see what: none. This removes a redundant rule, not a restriction.
+
+DROP POLICY IF EXISTS employees_self_read ON public.employees;

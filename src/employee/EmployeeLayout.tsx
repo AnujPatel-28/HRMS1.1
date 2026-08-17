@@ -36,6 +36,7 @@ const BASE_SECTIONS: NavSection[] = [
       { label: "My ID Card", href: "/employee/id-card", icon: CreditCard },
       { label: "Directory", href: "/employee/directory", icon: Contact },
       { label: "Org Chart", href: "/employee/org-chart", icon: GitBranch },
+      { label: "Resignation", href: "/employee/exit", icon: LogOut },
     ],
   },
   {
@@ -74,6 +75,7 @@ function EmployeeSidebarContent({
   onItemClick,
   employee,
   flatLayout = false,
+  isLight = false,
 }: {
   sections: NavSection[];
   location: any;
@@ -81,6 +83,7 @@ function EmployeeSidebarContent({
   onItemClick?: () => void;
   employee?: { full_name?: string; profile_photo_url?: string; department?: string } | null;
   flatLayout?: boolean;
+  isLight?: boolean;
 }) {
   const { open } = useSidebar();
   const [openSection, setOpenSection] = useState<string | null>(() => {
@@ -119,10 +122,39 @@ function EmployeeSidebarContent({
     )
   );
 
+  const borderClass = isLight ? "border-slate-200" : "border-white/10";
+  const textTitleClass = isLight ? "text-slate-800 font-bold" : "text-white font-bold";
+  const textSubtitleClass = isLight ? "text-slate-600 font-medium" : "text-slate-300 font-semibold";
+  const textNameClass = isLight ? "text-slate-800 font-semibold" : "text-white font-semibold";
+  const textMutedClass = isLight ? "text-slate-500" : "text-slate-400";
+  const ringClass = isLight ? "ring-2 ring-slate-100" : "ring-2 ring-white/10";
+  const avatarBgClass = isLight ? "bg-slate-200 text-slate-800" : "bg-white/10 text-white";
+
+  const getLinkClass = (isActive: boolean) => {
+    if (isActive) {
+      return isLight 
+        ? "bg-brand-600/15 font-semibold text-brand-700 shadow-sm ring-1 ring-brand-600/10" 
+        : "bg-white/10 font-semibold text-white shadow-sm ring-1 ring-white/10";
+    } else {
+      return isLight 
+        ? "text-slate-600 hover:bg-black/5 hover:text-slate-900" 
+        : "text-slate-300 hover:bg-white/10 hover:text-white";
+    }
+  };
+
+  const getIconClass = (isActive: boolean) => {
+    return cn(
+      "h-4 w-4 shrink-0 transition-colors",
+      isActive
+        ? (isLight ? "text-brand-600" : "text-white")
+        : (isLight ? "text-slate-500 group-hover/sidebar:text-slate-800" : "text-slate-400 group-hover/sidebar:text-slate-200")
+    );
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* ── Logo / Brand header ── */}
-      <div className="flex items-center gap-2.5 h-16 border-b border-white/10 shrink-0 mb-4 pl-[2px] pr-0">
+      <div className={cn("flex items-center gap-2.5 h-16 shrink-0 mb-4 pl-[2px] pr-0 border-b", borderClass)}>
         <div className="h-8 w-8 shrink-0 rounded-lg bg-brand-600 flex items-center justify-center shadow-sm">
           <span className="text-white font-black text-xs leading-none">T</span>
         </div>
@@ -135,8 +167,8 @@ function EmployeeSidebarContent({
           transition={{ duration: 0.2, ease: "easeInOut" }}
           className="overflow-hidden whitespace-nowrap flex flex-col min-w-0"
         >
-          <p className="text-[10px] font-bold uppercase tracking-widest text-white leading-none">TalentMesh</p>
-          <p className="text-xs font-semibold text-slate-300 mt-0.5">Employee Portal</p>
+          <p className={cn("text-[10px] uppercase tracking-widest leading-none", textTitleClass)}>TalentMesh</p>
+          <p className={cn("text-xs mt-0.5", textSubtitleClass)}>Employee Portal</p>
         </motion.div>
       </div>
 
@@ -150,17 +182,11 @@ function EmployeeSidebarContent({
             href: "/employee/dashboard",
             icon: (
               <LayoutDashboard
-                className={cn(
-                  "h-4 w-4 shrink-0 transition-colors",
-                  location.pathname === "/employee/dashboard" ? "text-white" : "text-slate-400 group-hover/sidebar:text-slate-200"
-                )}
+                className={getIconClass(location.pathname === "/employee/dashboard")}
               />
             ),
           }}
-          className={location.pathname === "/employee/dashboard" 
-            ? "bg-white/10 font-semibold text-white shadow-sm ring-1 ring-white/10" 
-            : "text-slate-300 hover:bg-white/10 hover:text-white"
-          }
+          className={getLinkClass(location.pathname === "/employee/dashboard")}
           onClick={onItemClick}
         />
 
@@ -181,17 +207,11 @@ function EmployeeSidebarContent({
                   href: defaultHref,
                   icon: (
                     <SectionIcon
-                      className={cn(
-                        "h-4 w-4 shrink-0 transition-colors",
-                        isActive ? "text-white" : "text-slate-400 group-hover/sidebar:text-slate-200"
-                      )}
+                      className={getIconClass(isActive)}
                     />
                   ),
                 }}
-                className={isActive 
-                  ? "bg-white/10 font-semibold text-white shadow-sm ring-1 ring-white/10" 
-                  : "text-slate-300 hover:bg-white/10 hover:text-white"
-                }
+                className={getLinkClass(isActive)}
                 onClick={onItemClick}
               >
                 {showBadge && (
@@ -213,7 +233,7 @@ function EmployeeSidebarContent({
                 {open ? (
                   <button
                     onClick={() => toggleSection(section.title)}
-                    className="flex w-full items-center justify-between px-2.5 py-1 rounded-md text-slate-400 hover:text-slate-200 transition duration-150 text-left group"
+                    className={cn("flex w-full items-center justify-between px-2.5 py-1 rounded-md transition duration-150 text-left group", isLight ? "text-slate-600 hover:text-slate-900" : "text-slate-400 hover:text-slate-200")}
                   >
                     <div className="flex items-center gap-1.5">
                       <SectionIcon className="h-4 w-4 shrink-0" />
@@ -235,10 +255,10 @@ function EmployeeSidebarContent({
                       onClick={() => toggleSection(section.title)}
                       title={section.title}
                     >
-                      <SectionIcon className="h-4 w-4 text-slate-400 hover:text-slate-200 transition-colors" />
+                      <SectionIcon className={cn("h-4 w-4 transition-colors", isLight ? "text-slate-500 hover:text-slate-800" : "text-slate-400 hover:text-slate-200")} />
                     </div>
                     {sIdx < sections.length - 1 && (
-                      <div className="h-px bg-white/10 w-8 mt-2" />
+                      <div className={cn("h-px w-8 mt-2", isLight ? "bg-slate-200" : "bg-white/10")} />
                     )}
                   </div>
                 )}
@@ -272,17 +292,11 @@ function EmployeeSidebarContent({
                               href,
                               icon: (
                                 <Icon
-                                  className={cn(
-                                    "h-4 w-4 shrink-0 transition-colors",
-                                    isActive ? "text-white" : "text-slate-400 group-hover/sidebar:text-slate-200"
-                                  )}
+                                  className={getIconClass(isActive)}
                                 />
                               ),
                             }}
-                            className={isActive
-                              ? "bg-white/10 font-semibold text-white shadow-sm ring-1 ring-white/10"
-                              : "text-slate-300 hover:bg-white/10 hover:text-white"
-                            }
+                            className={getLinkClass(isActive)}
                             onClick={onItemClick}
                           >
                             {showBadge && (
@@ -304,14 +318,14 @@ function EmployeeSidebarContent({
 
       {/* ── User avatar footer (simple display) ── */}
       {employee && (
-        <div className="mt-auto pt-3 border-t border-white/10 shrink-0">
+        <div className={cn("mt-auto pt-3 shrink-0 border-t", borderClass)}>
           <div className="flex items-center gap-2.5 min-w-0 px-1 py-1">
             {/* Avatar — always visible */}
             {employee.profile_photo_url ? (
-              <img src={employee.profile_photo_url} alt="" className="h-8 w-8 rounded-full object-cover ring-2 ring-white/10 shrink-0" />
+              <img src={employee.profile_photo_url} alt="" className={cn("h-8 w-8 rounded-full object-cover shrink-0", ringClass)} />
             ) : (
-              <div className="h-8 w-8 rounded-full bg-white/10 flex items-center justify-center shrink-0">
-                <span className="text-xs font-bold text-white">{employee.full_name?.slice(0, 2).toUpperCase() ?? '?'}</span>
+              <div className={cn("h-8 w-8 rounded-full flex items-center justify-center shrink-0", avatarBgClass)}>
+                <span className="text-xs font-bold">{employee.full_name?.slice(0, 2).toUpperCase() ?? '?'}</span>
               </div>
             )}
             {/* Name — slides in when expanded */}
@@ -321,8 +335,8 @@ function EmployeeSidebarContent({
               transition={{ duration: 0.2, ease: 'easeInOut' }}
               className="overflow-hidden whitespace-nowrap min-w-0"
             >
-              <p className="text-xs font-semibold text-white truncate">{employee.full_name ?? 'Employee'}</p>
-              <p className="text-[10px] text-slate-400 truncate">{employee.department ?? 'Employee'}</p>
+              <p className={cn("text-xs truncate", textNameClass)}>{employee.full_name ?? 'Employee'}</p>
+              <p className={cn("text-[10px] truncate", textMutedClass)}>{employee.department ?? 'Employee'}</p>
             </motion.div>
           </div>
         </div>
@@ -345,6 +359,22 @@ export default function EmployeeLayout() {
     return (localStorage.getItem('sidebar_layout_style') as 'dropdown' | 'double_sidebar' | 'classic') || 'double_sidebar';
   });
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [onboardingIncomplete, setOnboardingIncomplete] = useState(false);
+
+  useEffect(() => {
+    if (!employee?.id || !tenantId) return;
+    
+    db.from("employee_onboarding_self")
+      .select("completed_at")
+      .eq("tenant_id", tenantId)
+      .eq("employee_id", employee.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!error && data) {
+          setOnboardingIncomplete(!data.completed_at);
+        }
+      });
+  }, [employee?.id, tenantId]);
 
   const toggleLayout = () => {
     let next: 'dropdown' | 'double_sidebar' | 'classic';
@@ -644,13 +674,27 @@ export default function EmployeeLayout() {
             </aside>
 
             {/* Main content (Desktop Classic) */}
-            <main className="min-w-0 flex-1">
+            <main className="min-w-0 flex-1 p-6">
+              {onboardingIncomplete && location.pathname !== "/employee/onboarding" && (
+                <div className="mb-4 flex items-center justify-between p-3.5 bg-brand-50 border border-brand-100 rounded-xl shadow-sm text-xs font-semibold text-brand-800 animate-in fade-in slide-in-from-top-2">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-600 text-white font-bold text-[10px]">!</span>
+                    <span>Welcome! Please complete your onboarding profile details.</span>
+                  </div>
+                  <Link
+                    to="/employee/onboarding"
+                    className="px-3 py-1 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-lg transition"
+                  >
+                    Complete Onboarding →
+                  </Link>
+                </div>
+              )}
               <Outlet />
             </main>
           </div>
         ) : (
           /* Desktop Unified Card Layout (dropdown / double_sidebar) */
-          <div className={cn("w-full hidden md:flex md:rounded-none md:border-none md:shadow-none overflow-hidden", (layoutStyle === 'double_sidebar' && activeSection) ? "bg-[#0e2246]" : "bg-[#0a1c3a]")} style={{height: '100vh'}}>
+          <div className={cn("w-full hidden md:flex md:rounded-none md:border-none md:shadow-none overflow-hidden", (layoutStyle === 'double_sidebar' && activeSection) ? "bg-[#0e2246]" : (layoutStyle === 'dropdown' ? "bg-gradient-to-b from-brand-50/30 via-slate-50/50 to-slate-100/40" : "bg-[#0a1c3a]"))} style={{height: '100vh'}}>
             {/* Main Sidebar */}
             {layoutStyle === 'double_sidebar' ? (
               <Sidebar open={false}>
@@ -666,13 +710,14 @@ export default function EmployeeLayout() {
               </Sidebar>
             ) : (
               <Sidebar>
-                <DesktopSidebar className="border-r border-white/10 bg-[#0a1c3a] pt-0 px-2.5 pb-3 shrink-0 rounded-tl-3xl" style={{height: '100vh'}} showToggle={true}>
+                <DesktopSidebar className="border-r border-slate-200/50 bg-gradient-to-b from-brand-50/50 via-slate-50/40 to-slate-100/50 pt-0 px-2.5 pb-3 shrink-0 rounded-tl-3xl" style={{height: '100vh'}} showToggle={true}>
                   <EmployeeSidebarContent
                     sections={sections}
                     location={location}
                     unreadConnectCount={unreadConnectCount}
                     employee={employee}
                     flatLayout={true}
+                    isLight={true}
                   />
                 </DesktopSidebar>
               </Sidebar>
@@ -894,6 +939,20 @@ export default function EmployeeLayout() {
                 </div>
               </div>
               <div className="flex-1 p-6 overflow-y-auto bg-[url('/bg3.1.svg')] bg-cover bg-center bg-no-repeat bg-fixed">
+                {onboardingIncomplete && location.pathname !== "/employee/onboarding" && (
+                  <div className="mb-4 flex items-center justify-between p-3.5 bg-brand-50 border border-brand-100 rounded-xl shadow-sm text-xs font-semibold text-brand-800 animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-600 text-white font-bold text-[10px]">!</span>
+                      <span>Welcome! Please complete your onboarding profile details.</span>
+                    </div>
+                    <Link
+                      to="/employee/onboarding"
+                      className="px-3 py-1 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-lg transition animate-pulse"
+                    >
+                      Complete Onboarding →
+                    </Link>
+                  </div>
+                )}
                 <Outlet />
               </div>
             </main>
@@ -901,18 +960,32 @@ export default function EmployeeLayout() {
         )}
 
         {/* ── Mobile: just the outlet ── */}
-        <main className="md:hidden min-w-0 flex-1">
+        <main className="md:hidden min-w-0 flex-1 p-4 bg-slate-50 min-h-screen">
+          {onboardingIncomplete && location.pathname !== "/employee/onboarding" && (
+            <div className="mb-4 flex flex-col p-3 bg-brand-50 border border-brand-100 rounded-xl shadow-sm text-xs font-semibold text-brand-800 gap-2">
+              <div className="flex items-center gap-2">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-600 text-white font-bold text-[10px] shrink-0">!</span>
+                <span>Welcome! Please complete your onboarding details.</span>
+              </div>
+              <Link
+                to="/employee/onboarding"
+                className="px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white text-center font-bold rounded-lg transition"
+              >
+                Complete Onboarding
+              </Link>
+            </div>
+          )}
           <Outlet />
         </main>
 
         {/* Mobile Slide-over Drawer */}
-        <aside className={`fixed inset-y-0 right-0 z-50 w-full max-w-xs transform bg-[#0a1c3a] p-4 shadow-xl transition-transform duration-300 ease-in-out md:hidden ${mobileOpen ? "translate-x-0" : "translate-x-full"}`}>
+        <aside className={`fixed inset-y-0 right-0 z-50 w-full max-w-xs transform ${layoutStyle === 'dropdown' ? "bg-gradient-to-b from-brand-50/90 via-slate-50/90 to-slate-100/90 border-l border-slate-200/50" : "bg-[#0a1c3a]"} p-4 shadow-xl transition-transform duration-300 ease-in-out md:hidden ${mobileOpen ? "translate-x-0" : "translate-x-full"}`}>
           <div className="mb-6 flex items-start justify-between gap-3">
             <div>
-              <span className="font-semibold text-white">Navigation</span>
-              <p className="mt-1 text-xs text-slate-400">{employee?.full_name ?? "Employee"}</p>
+              <span className={`font-semibold ${layoutStyle === 'dropdown' ? 'text-slate-800' : 'text-white'}`}>Navigation</span>
+              <p className={`mt-1 text-xs ${layoutStyle === 'dropdown' ? 'text-slate-500' : 'text-slate-400'}`}>{employee?.full_name ?? "Employee"}</p>
             </div>
-            <button onClick={() => setMobileOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white">
+            <button onClick={() => setMobileOpen(false)} className={`rounded-lg p-1 ${layoutStyle === 'dropdown' ? 'text-slate-500 hover:bg-black/5 hover:text-slate-800' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}>
               <X className="h-5 w-5" />
             </button>
           </div>
@@ -924,6 +997,7 @@ export default function EmployeeLayout() {
                 unreadConnectCount={unreadConnectCount}
                 onItemClick={() => setMobileOpen(false)}
                 employee={employee}
+                isLight={layoutStyle === 'dropdown'}
               />
             </Sidebar>
           </div>

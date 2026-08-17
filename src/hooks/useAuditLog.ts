@@ -71,7 +71,7 @@ export function useAuditLog() {
 
       await db.from("audit_logs").insert([{
         tenant_id: currentTenantId,
-        actor_id: currentActorId || null,
+        actor_id: currentEmployeeId || null,
         actor_role: currentRole || "unknown",
         action,
         target_type: targetType || null,

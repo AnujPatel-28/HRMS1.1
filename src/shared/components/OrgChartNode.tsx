@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import type { OrgNode } from "../../utils/orgChart";
-import { isAncestorOf } from "../../utils/orgChart";
+import { isAncestorOf, getTotalDescendantCount } from "../../utils/orgChart";
+import { Link2, AlertTriangle, HelpCircle } from "lucide-react";
 
 interface OrgChartNodeProps {
   node: OrgNode;
@@ -11,9 +12,33 @@ interface OrgChartNodeProps {
   highlightedNodeId: string | null;
 }
 
+const getDeptStyle = (dept: string) => {
+  const d = (dept || "").toLowerCase();
+  if (d.includes("eng") || d.includes("tech") || d.includes("dev")) {
+    return { borderClass: "border-t-blue-500", tagClass: "text-blue-700 bg-blue-50" };
+  }
+  if (d.includes("hr") || d.includes("people") || d.includes("talent")) {
+    return { borderClass: "border-t-pink-500", tagClass: "text-pink-700 bg-pink-50" };
+  }
+  if (d.includes("prod") || d.includes("design") || d.includes("ux")) {
+    return { borderClass: "border-t-purple-500", tagClass: "text-purple-700 bg-purple-50" };
+  }
+  if (d.includes("sale") || d.includes("market") || d.includes("growth")) {
+    return { borderClass: "border-t-emerald-500", tagClass: "text-emerald-700 bg-emerald-50" };
+  }
+  if (d.includes("fin") || d.includes("audit") || d.includes("acc")) {
+    return { borderClass: "border-t-amber-500", tagClass: "text-amber-700 bg-amber-50" };
+  }
+  if (d.includes("ops") || d.includes("admin")) {
+    return { borderClass: "border-t-indigo-500", tagClass: "text-indigo-700 bg-indigo-50" };
+  }
+  return { borderClass: "border-t-slate-400", tagClass: "text-slate-700 bg-slate-50" };
+};
+
 export function OrgChartNode({
   node,
   depth,
+  isRoot = false,
   onNodeClick,
   forceExpandState,
   highlightedNodeId,
@@ -39,16 +64,6 @@ export function OrgChartNode({
     }
   }, [isAncestor]);
 
-  // Scroll to this node if it is currently highlighted/focused
-  useEffect(() => {
-    if (highlightedNodeId === node.id) {
-      const element = document.getElementById(`node-${node.id}`);
-      if (element) {
-        element.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
-      }
-    }
-  }, [highlightedNodeId, node.id]);
-
   const isHighlighted = highlightedNodeId === node.id;
 
   // Generate short initials for fallback avatar
@@ -61,33 +76,56 @@ export function OrgChartNode({
       .toUpperCase();
   }, [node.full_name]);
 
+  const deptStyle = useMemo(() => getDeptStyle(node.department), [node.department]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }} className="org-node-container">
       {/* Node Card */}
       <div
         id={`node-${node.id}`}
         onClick={() => onNodeClick(node)}
+        className={`hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group border-t-4 ${deptStyle.borderClass} ${
+          isHighlighted ? "bg-emerald-50/30 ring-2 ring-emerald-500" : "bg-white"
+        }`}
         style={{
-          background: isHighlighted ? "#f0fdf4" : "var(--color-background-primary)",
-          border: isHighlighted
-            ? "2px solid var(--color-brand-600, #059669)"
-            : "1px solid var(--color-border-secondary)",
+          borderLeft: "1px solid var(--color-border-secondary)",
+          borderRight: "1px solid var(--color-border-secondary)",
+          borderBottom: "1px solid var(--color-border-secondary)",
           borderRadius: "12px",
           padding: "16px",
           cursor: "pointer",
-          minWidth: "180px",
+          minWidth: "190px",
           maxWidth: "220px",
           textAlign: "center",
           boxShadow: isHighlighted
-            ? "0 10px 25px -5px rgba(5, 150, 105, 0.15), 0 8px 10px -6px rgba(5, 150, 105, 0.15)"
+            ? "0 10px 25px -5px rgba(16, 185, 129, 0.15), 0 8px 10px -6px rgba(16, 185, 129, 0.15)"
             : "0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05)",
-          transform: isHighlighted ? "scale(1.06)" : "none",
-          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          transform: isHighlighted ? "scale(1.05)" : "none",
           position: "relative",
           zIndex: isHighlighted ? 10 : 1,
+          opacity: node.status && node.status !== "active" ? 0.75 : 1,
         }}
-        className="hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group"
       >
+        {node.secondary_manager_id && (
+          <span
+            className="absolute top-2 left-2 rounded-full border border-dashed border-indigo-400 bg-indigo-50 px-1.5 py-0.5 text-[8px] font-bold text-indigo-700 uppercase tracking-wider"
+            title={node.secondary_manager_name ? `Dotted-line: ${node.secondary_manager_name}` : "Dotted-line manager assigned"}
+          >
+            {node.secondary_manager_name
+              ? `\u27cb ${node.secondary_manager_name.split(" ")[0]}`
+              : "Matrix"}
+          </span>
+        )}
+        {node.hasCycle && (
+          <span className="absolute top-2 right-2 rounded-full bg-rose-100 p-1 text-rose-700 border border-rose-200" title="Circular reporting loop detected!">
+            <AlertTriangle className="h-3.5 w-3.5 animate-bounce" />
+          </span>
+        )}
+        {!node.manager_id && !isRoot && !node.hasCycle && (
+          <span className="absolute top-2 right-2 rounded-full bg-amber-100 p-1 text-amber-700 border border-amber-200" title="Orphan node: Missing manager reference">
+            <HelpCircle className="h-3.5 w-3.5 animate-pulse" />
+          </span>
+        )}
         {/* Highlight Pulse Glow */}
         {isHighlighted && (
           <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
@@ -102,7 +140,7 @@ export function OrgChartNode({
             src={node.profile_photo_url}
             alt={node.full_name}
             style={{ width: "52px", height: "52px", borderRadius: "50%", margin: "0 auto 10px", objectFit: "cover" }}
-            className="ring-2 ring-slate-100 group-hover:ring-brand-100 transition-all duration-200"
+            className="ring-2 ring-slate-100 group-hover:ring-brand-100 transition-all duration-200 shadow-sm"
           />
         ) : (
           <div
@@ -119,7 +157,7 @@ export function OrgChartNode({
               fontWeight: "600",
               margin: "0 auto 10px",
             }}
-            className="ring-2 ring-slate-100"
+            className="ring-2 ring-slate-100 shadow-sm"
           >
             {initials}
           </div>
@@ -131,47 +169,56 @@ export function OrgChartNode({
         <p style={{ fontSize: "11px", color: "var(--color-text-secondary)", margin: "0 0 2px" }} className="font-medium">
           {node.designation}
         </p>
-        <p style={{ fontSize: "10px", color: "var(--color-text-secondary)", margin: 0 }} className="opacity-85 capitalize">
-          {node.department}
-        </p>
 
-        {node.grade && (
-          <span className="inline-block mt-2 px-2 py-0.5 text-[9px] font-bold text-slate-500 bg-slate-100 rounded-full">
-            {node.grade}
+        {node.department && (
+          <span className={`inline-block mt-1 px-2 py-0.5 text-[9px] font-bold rounded-full capitalize ${deptStyle.tagClass}`}>
+            {node.department}
           </span>
+        )}
+
+        {node.status && node.status !== "active" && (
+          <div className="mt-2">
+            <span className="inline-block px-2 py-0.5 text-[9px] font-bold text-amber-700 bg-amber-50 rounded-full border border-amber-100 capitalize">
+              {node.status === "inactive" ? "Pending HR" : node.status.replace(/_/g, " ")}
+            </span>
+          </div>
+        )}
+
+        {node.secondary_manager_id && (
+          <div className="mt-2 pt-1.5 border-t border-dashed border-indigo-200 text-[9px] font-bold text-indigo-650 flex items-center justify-center gap-1">
+            <Link2 className="h-3 w-3 shrink-0 animate-pulse" />
+            <span>Matrix: {node.secondary_manager_name || "Assigned"}</span>
+          </div>
         )}
 
         {/* Expand / Collapse Action Trigger */}
         {node.children.length > 0 && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded(!expanded);
-            }}
-            style={{
-              marginTop: "10px",
-              fontSize: "10px",
-              fontWeight: "600",
-              padding: "4px 10px",
-              background: expanded ? "var(--color-background-secondary)" : "#059669",
-              border: "none",
-              borderRadius: "20px",
-              cursor: "pointer",
-              color: expanded ? "var(--color-text-secondary)" : "#ffffff",
-              transition: "all 0.2s",
-            }}
-            className="hover:scale-105 shadow-sm inline-flex items-center gap-1"
-          >
-            {expanded ? (
-              <>
-                <span>▲</span> Collapse
-              </>
-            ) : (
-              <>
-                <span>▼</span> {node.children.length} {node.children.length === 1 ? "report" : "reports"}
-              </>
-            )}
-          </button>
+          <div className="mt-3">
+            <p className="text-[9px] text-slate-400 font-semibold mb-1">
+              {getTotalDescendantCount(node)} total reports
+            </p>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpanded(!expanded);
+              }}
+              className={`px-3 py-1 rounded-full text-[10px] font-bold shadow-sm inline-flex items-center gap-1 transition-all hover:scale-105 ${
+                expanded
+                  ? "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  : "bg-brand-600 text-white hover:bg-brand-700"
+              }`}
+            >
+              {expanded ? (
+                <>
+                  <span>▲</span> Collapse
+                </>
+              ) : (
+                <>
+                  <span>▼</span> {node.children.length} {node.children.length === 1 ? "report" : "reports"}
+                </>
+              )}
+            </button>
+          </div>
         )}
       </div>
 

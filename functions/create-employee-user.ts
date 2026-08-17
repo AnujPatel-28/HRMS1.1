@@ -59,19 +59,28 @@ const getAuthUserDetailsByEmailV2 = async (email) => {
 };
 
 // New Helper: Check if email is linked to any employee record
-const checkEmployeeRecordExists = async (email) => {
-  const res = await fetch(`${BASE_URL}/api/database/rpc/check_employee_exists_by_email`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${ADMIN_KEY}`,
-    },
-    body: JSON.stringify({ user_email: email }),
-  });
+const checkEmployeeRecordExists = async (email, employeeId = null) => {
+  try {
+    const adminClient = createClient({ baseUrl: BASE_URL, anonKey: ADMIN_KEY });
+    let query = adminClient.database
+      .from("employees")
+      .select("id")
+      .eq("email", email);
 
-  if (!res.ok) return false;
-  const data = await res.json().catch(() => false);
-  return !!data;
+    if (employeeId) {
+      query = query.neq("id", employeeId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error("[create-employee-user] checkEmployeeRecordExists query error:", error);
+      return false;
+    }
+    return !!(data && data.length > 0);
+  } catch (err) {
+    console.error("[create-employee-user] checkEmployeeRecordExists exception:", err);
+    return false;
+  }
 };
 
 const deleteAuthUser = async (userId) => {
@@ -156,6 +165,7 @@ export default async function (req) {
     const password = (body.password ?? "").trim();
     const name = (body.name ?? body.full_name ?? "").trim();
     const tenantId = (body.tenant_id ?? body.metadata?.tenant_id ?? DEFAULT_TENANT_ID).trim();
+    const employeeId = body.employee_id || null;
 
     if (!email || !password || !name) {
       return json({ message: "email, password, and name are required", error: "email, password, and name are required" }, 400);
@@ -203,7 +213,7 @@ export default async function (req) {
     }
 
     // 1. Check if employee record exists globally in public.employees (Cross-Tenant check)
-    const employeeExists = await checkEmployeeRecordExists(email);
+    const employeeExists = await checkEmployeeRecordExists(email, employeeId);
     if (employeeExists) {
       console.warn(`[create-employee-user] Email ${email} already mapped to an existing employee record.`);
       return json(
