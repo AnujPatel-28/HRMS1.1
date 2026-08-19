@@ -7,7 +7,7 @@
  * `employees` caused a full outage (42P17 infinite recursion) that no code review could have caught,
  * because the policies existed in no reviewable file.
  *
- * Checks provenance (does a policy of this name appear in migrations/), NOT text equivalence.
+ * Checks provenance (is this policy CREATEd for this table in migrations/), NOT text equivalence.
  * A later migration legitimately supersedes an earlier one's text, so comparing bodies would produce
  * false failures. What we are enforcing is "nothing was applied outside migration control".
  *
@@ -47,7 +47,22 @@ const migrationText = readdirSync(migrationsDir)
   .map((f) => readFileSync(join(migrationsDir, f), "utf8"))
   .join("\n");
 
-const untracked = rows.filter((p) => !migrationText.includes(p.policyname));
+// Match the (table, policy) PAIR, not the bare name.
+//
+// This previously tested `migrationText.includes(p.policyname)` against every migration concatenated
+// together, so a policy counted as tracked if its name appeared ANYWHERE — for any table. RLS policy
+// names are generic and deliberately repeated across tables (`tenant_isolation`, `admin_bypass`,
+// `tenant_active_restrictive`), so untracked policies passed silently. Found 2026-08-20:
+// `notifications` carried live RESTRICTIVE `tenant_isolation` and `tenant_active_restrictive` that are
+// defined for no table in any migration, and the guard reported OK — the exact drift it exists to catch.
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const isTracked = (p) =>
+  new RegExp(
+    `CREATE\\s+POLICY\\s+"?${escapeRe(p.policyname)}"?\\s+ON\\s+(?:public\\.)?"?${escapeRe(p.tablename)}"?\\b`,
+    "i",
+  ).test(migrationText);
+
+const untracked = rows.filter((p) => !isTracked(p));
 
 if (untracked.length === 0) {
   console.log(`OK — all ${rows.length} live RLS policies are defined in migrations/.`);

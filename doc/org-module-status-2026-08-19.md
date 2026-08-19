@@ -375,6 +375,24 @@ units reference the type, so it cannot be changed through the UI — but no DB c
 `usageCounts` is a load-time snapshot, so a unit created by another HR user after the tab loaded leaves
 the lock stale-false. A CHECK/trigger belongs in the Slice B migration set.
 
+> ⚠️ **Two corrections to (d), established 2026-08-20 — read before acting on it.**
+>
+> **1. "A refused write returns 200 with an empty array" is wrong for INSERT.** A `WITH CHECK`
+> violation raises `42501` and PostgREST returns **403 with an error body**. Only UPDATE/DELETE refuse
+> by matching zero rows through `USING`, and only SELECT returns `[]`. The silence at the 16 unguarded
+> sites therefore comes from **discarding the returned `error` object**, not from a deceptive 200. The
+> practical rule is unchanged — check `error` *and* treat an empty array as failure — but the stated
+> reason in `session_context_2026-08-18.md` §3 conflates the two cases and should be fixed there too.
+>
+> **2. Only 2 of the 6 "refused" sites are actually refused.** The inventory over-counted. Verified
+> against the live backend: `Expenses.tsx:188` is unreachable (its HR lookup returns `[]` under the
+> revoked broad SELECT, and the insert is guarded on that being non-empty); `MyTasks.tsx:238` is
+> unreachable (the `tasks` INSERT it follows has no permissive policy for a non-HR caller, so the row
+> never exists); `MyTasks.tsx:274`/`:303` are never refused (their RPCs raise "Insufficient role"
+> for non-HR, and for HR `notifications_hr_all` permits the insert). The genuinely refused surface is
+> **one event through one function** — `submit_task_request`, via `MyTasks.tsx:188` and
+> `EmployeeProjectView.tsx:169`. The other four are separate defects with separate causes.
+
 **(d) `notifications` INSERT is refused for employee-role submitters — pre-existing, now visible.**
 `notifications_self_rw` permits inserting only where the row's `employee_id` is your own, so an employee
 can never notify their unit head, parent unit head, or HR. The new resolver picks the right recipient
@@ -383,6 +401,43 @@ the same way and `submit_task_request` inserts no notification server-side — b
 guard makes it loud instead of silent. Fix needs either a tenant-scoped INSERT policy on `notifications`
 or a SECURITY DEFINER fan-out RPC. **Not authored.** `src/employee/Expenses.tsx:172-177` is the identical
 twin and still unguarded.
+
+---
+
+## 3d. The policy drift guard was broken, and 34 policies are untracked
+
+**Correction to a claim made earlier in this session.** `npm run check:policy-drift` reported
+"OK — all 253 live RLS policies are defined in migrations/" and that was cited as evidence the
+backend was under control. **The guard was not checking what it claimed.**
+
+`scripts/check-policy-drift.mjs:50` tested `migrationText.includes(p.policyname)` — the bare policy
+name, against every migration concatenated into one string. RLS policy names are generic and
+deliberately repeated across tables (`tenant_isolation`, `admin_bypass`, `tenant_active_restrictive`),
+so a policy counted as tracked whenever its name appeared **anywhere, for any table**. It fetched
+`tablename` from `pg_policies` and then never used it.
+
+Fixed to match the `(table, policy)` pair via a `CREATE POLICY "<name>" ON <table>` regex. The real
+number:
+
+```
+before fix   OK — all 253 live RLS policies are defined in migrations/
+after fix    POLICY DRIFT: 34 of 253 live policies are in no migration   (19 tables)
+```
+
+**All 34 are the RESTRICTIVE tenant fences** — `tenant_isolation` and `tenant_active_restrictive` on
+`tasks`, `leaves`, `projects`, `notifications`, `task_submissions`, `leave_balances`, `shifts`,
+`tenant_settings` and 11 more. These are the policies that stop one tenant reading another's data:
+the most security-critical objects in a shared-schema multi-tenant system, and they exist in no
+reviewable, replayable file.
+
+They are not invisible — most appear in the loose root script `insforge-enterprise-03-restrictive.sql`
+and in `migration-archive/pending-review/`. But they are outside migration control, so they cannot be
+replayed onto a new project or a branch, and a change to one would not show up in a diff. This is
+precisely the Phase 0a problem, one layer deeper than the audit found it: the audit baselined the
+PERMISSIVE policies and the broken guard then certified the RESTRICTIVE ones as covered.
+
+**Not fixed here** — baselining 34 tenant-isolation policies is its own piece of work with its own
+verification (they must be captured byte-identical, as Phase 0a did). Queued, not done.
 
 ---
 
