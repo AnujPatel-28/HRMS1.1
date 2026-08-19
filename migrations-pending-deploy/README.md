@@ -19,20 +19,20 @@ migrations strictly in order and refuses to skip a pending one, so a deploy-gate
 3. Move the file into `migrations/`, renumbering it above the current head if needed.
 4. `npx @insforge/cli db migrations up <version>`.
 
+> **Release-check URL note.** Step 2 above cites `rq3qmu8y.insforge.site`. That host was a mistaken
+> deploy and was decommissioned on 2026-08-19. **Production is `hrms.talentmeshsolutions.com`**, built
+> from GitHub `main` on the user's own Vercel — check that host.
+
+## Released
+
+### ~~`20260817190000_drop-submit-task-request-identity-overload.sql`~~ — APPLIED 2026-08-19
+
+Released as `migrations/20260819190000_drop-submit-task-request-identity-overload.sql`. Renumbered
+because the applied head had moved to `20260818140000` while it waited, so the original number would
+have sorted behind applied work. Live bundle was verified to pass no `p_employee_id`, and the applied
+result was verified as `P0001 Unauthenticated` rather than `PGRST202`/`PGRST203`.
+
 ## Currently pending
-
-### `20260817190000_drop-submit-task-request-identity-overload.sql`
-
-Drops `submit_task_request(p_task_id, p_employee_id, p_notes, p_attachment_url, p_attachment_name)`,
-which trusts a client-supplied employee id and never calls `auth.uid()` — any caller can submit a task
-as any employee. The surviving 4-arg form derives the submitter from `auth.uid()`.
-
-**Blocked on:** two call sites, both already fixed in the working tree but not deployed —
-- `src/employee/MyTasks.tsx:170`
-- `src/employee/pms/EmployeeProjectView.tsx:151`
-
-**Release check:** the live bundle must contain no `p_employee_id` next to `submit_task_request`.
-As of 2026-08-17 it still did, in both call sites.
 
 ### `20260819120000_repoint-department-rls-to-org-units.sql`
 
