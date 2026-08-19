@@ -24,6 +24,23 @@
 >
 > Every real slug answers; only the control 404s. **Edge functions are restored in production.**
 >
+> **The task-submission identity hole is closed too** (`20260819190000`, applied 2026-08-19). The 5-arg
+> `submit_task_request` overload trusted a client-supplied `p_employee_id` and never referenced
+> `auth.uid()`, so any authenticated caller could submit a task as any employee. Renumbered from
+> `20260817190000` before applying — the applied head had moved to `20260818140000` while it waited, so
+> the original number would have sorted behind applied work and the CLI refuses to skip.
+>
+> ```
+> before   p_task_id, p_notes, p_attachment_url, p_attachment_name
+>          p_task_id, p_employee_id, p_notes, p_attachment_url, p_attachment_name   ← vulnerable
+> after    p_task_id, p_notes, p_attachment_url, p_attachment_name                  ← only this
+> ```
+>
+> Verified live afterwards, not just by the apply message: calling it with the admin key returns
+> `P0001 Unauthenticated`, not `PGRST202` (unroutable) or `PGRST203` (ambiguous overload) — so the
+> function still routes, the overload ambiguity is gone, and its server-side identity check fires when
+> there is no `auth.uid()`.
+>
 > **Correction to the handoff doc:** `test-admin.html` is **not** served on production. It returns 200
 > only because `vercel.json` rewrites `/(.*)` → `/index.html`; the body is the SPA and contains no key.
 > Checking the status code alone is what produced the earlier claim. It **is** still real on the stray

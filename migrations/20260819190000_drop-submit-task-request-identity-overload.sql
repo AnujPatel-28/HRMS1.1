@@ -1,0 +1,27 @@
+-- Drops the last identity-parameter overload:
+--   submit_task_request(p_task_id, p_employee_id, p_notes, p_attachment_url, p_attachment_name)
+--
+-- It trusts a client-supplied employee id and never references auth.uid(), so any authenticated
+-- caller could submit a task as any employee. The surviving 4-arg form derives the submitter from
+-- auth.uid(), resolves their employee row within the task's tenant, and verifies the task is
+-- actually assigned to them.
+--
+-- Renumbered from 20260817190000 (it sat in migrations-pending-deploy/ while the frontend was
+-- unshipped). The applied head was 20260818140000 by the time the gate cleared, so the original
+-- number would have sorted BEHIND already-applied work — the CLI applies strictly in order and
+-- refuses to skip. New number sorts after the head. Content is unchanged.
+--
+-- PRECONDITIONS — all verified 2026-08-19 immediately before applying:
+--   1. Frontend deployed: main merged and pushed (d0beb81..e26a2f0), Vercel live.
+--   2. LIVE bundle /assets/index-B1JvTIBb.js on hrms.talentmeshsolutions.com calls the 4-arg form:
+--        submit_task_request`,{p_task_id:n.id,p_notes:...        ← no p_employee_id
+--      Both call sites confirmed. Checked against the served bundle, not src/.
+--   3. Only two callers exist in src/ (MyTasks.tsx:172, EmployeeProjectView.tsx:153); neither
+--      passes p_employee_id. Other p_employee_id hits in src/ belong to unrelated RPCs
+--      (Attendance, EmployeeDetail, ShiftManagement).
+--   4. No edge function calls submit_task_request (grep over functions/ is empty).
+--
+-- Rollback: re-create from 20260814160000_baseline-untracked-functions.sql, which holds the exact
+-- definition captured from the live database.
+
+DROP FUNCTION IF EXISTS public.submit_task_request(p_task_id uuid, p_employee_id uuid, p_notes text, p_attachment_url text, p_attachment_name text);
