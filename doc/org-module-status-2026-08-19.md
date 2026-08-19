@@ -204,10 +204,44 @@ The admin key it carries was rotated 2026-08-17 and its grace period has expired
 inert. **The password is not** — `admin@talentmeshsolutions.com` / `Password123!` is published in
 plaintext on a public URL and is only inert if that account's password has since been changed.
 
-Recommendation, now a security item rather than a tidy-up: **delete the deployment**
-(`npx @insforge/cli deployments`), and change that account's password regardless. The deployment cannot
-be usefully synced — it was built against a backend that no longer exists. Outward-facing, so it needs
-sign-off; not done.
+**Resolved 2026-08-19 — with a caveat about what "delete" was actually possible.**
+
+The CLI **cannot delete a deployment.** `deployments` offers only `deploy | list | status | cancel |
+env`, and `cancel` on a READY deployment fails with `deployment_not_canceled` (it is for in-flight
+builds). True removal needs the InsForge dashboard.
+
+What was done instead: the site was **overwritten with a static decommission placeholder**, which
+removes every file the old build published. First attempt failed — the Vercel project has `vite build`
+pinned, so a bare HTML directory exits 127; a `vercel.json` with `buildCommand` + `outputDirectory`
+overrides it. Verified after:
+
+```
+/                        decommission placeholder
+/test-admin.html         404, 0 secrets      (was: the real file, key + password)
+/assets/index-BFfY_BEv.js 404                (old app bundle gone)
+```
+
+The URL still resolves and the deployment record still exists — **ask InsForge support or use the
+dashboard to remove it properly.**
+
+❗ **Still open, and the real remaining risk: the password.**
+`admin@talentmeshsolutions.com` is **superadmin**, not an HR admin — user id
+`92142722-7cb8-4198-95e7-c2aa5da80b22`. `Password123!` was publicly readable for weeks and must be
+assumed known. Reset it with the admin key:
+
+```bash
+curl -X POST "https://rq3qmu8y.ap-southeast.insforge.app/api/database/rpc/update_user_password" \
+  -H "Authorization: Bearer $(node -e "console.log(require('./.insforge/project.json').api_key)")" \
+  -H "Content-Type: application/json" \
+  -d '{"p_user_id":"92142722-7cb8-4198-95e7-c2aa5da80b22","p_password":"<NEW_PASSWORD>"}'
+```
+
+⚠️ **The response is not a success signal.** Probed with a nonexistent uuid, it returns `true` / HTTP
+200 anyway — the function reports success regardless of rows affected. **Verify by logging in.**
+
+Also present and worth a look: `corrupted_old_admin@talentmeshsolutions.com`, also `superadmin`
+(`940e174c-6f80-40c7-bf9c-313a0070590a`). Left alone — deleting or disabling accounts is the user's
+call.
 
 ---
 
