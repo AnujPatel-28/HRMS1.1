@@ -14,6 +14,7 @@ export interface SelectDropdownProps {
   triggerClassName?: string;
   dropdownClassName?: string;
   searchable?: boolean;
+  placeholder?: string;
 }
 
 export function SelectDropdown({ 
@@ -23,7 +24,8 @@ export function SelectDropdown({
   containerClassName = "", 
   triggerClassName = "",
   dropdownClassName = "min-w-full",
-  searchable = false
+  searchable = false,
+  placeholder = "Select..."
 }: SelectDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -58,7 +60,7 @@ export function SelectDropdown({
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center justify-between gap-2 outline-none ${triggerClassName}`}
       >
-        <span className="truncate">{selectedOption?.label ?? "Select..."}</span>
+        <span className="truncate">{selectedOption?.label ?? placeholder}</span>
         <ChevronDown className={`h-4 w-4 shrink-0 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
       </button>
 

@@ -26,6 +26,8 @@ let currentTenantId: string | null = defaultTenantId ?? null;
 
 if (!projectUrl || !apiKey) {
   console.warn("Missing InsForge env vars: VITE_INSFORGE_URL / VITE_INSFORGE_ANON_KEY");
+} else {
+  console.log("InsForge Client Initialized with URL:", projectUrl, "| functionsUrl:", functionsUrl);
 }
 
 const baseInsforge = createClient({
@@ -108,3 +110,6 @@ export const db = database;
 export const auth = insforge.auth;
 export const storage = insforge.storage;
 export const realtime = insforge.realtime;
+
+
+

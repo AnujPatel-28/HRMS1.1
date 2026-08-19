@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Building2, CalendarDays, Check, Clock, ImagePlus, IndianRupee, Save, Settings2 } from "lucide-react";
+import { Building2, CalendarDays, Check, Clock, ImagePlus, IndianRupee, Save, Settings2, ShieldAlert } from "lucide-react";
 import { Link } from "react-router-dom";
 import { db, storage } from "../insforge/client";
 import { useTenant } from "../contexts/TenantContext";
@@ -285,15 +285,18 @@ function suggestLeaveCode(name: string) {
  * PostgREST permission-denied = code PGRST301 or HTTP 403.
  * Postgres permission-denied  = code 42501.
  * Stale-write sentinel        = Error("STALE_WRITE") thrown by saveSettingRows / save fns.
+ * P2 RPC prefixes             = message starting with STALE_WRITE, PERMISSION_DENIED, INVALID_POLICY_VALUE.
  */
-function classifyDbError(err: unknown): "stale" | "permission" | "network" | "unknown" {
+function classifyDbError(err: unknown): "stale" | "permission" | "invalid" | "network" | "unknown" {
   if (!err) return "unknown";
   const e = err as { message?: string; code?: string; status?: number };
-  if (e.message === "STALE_WRITE") return "stale";
+  if (e.message === "STALE_WRITE" || e.message?.startsWith("STALE_WRITE:")) return "stale";
+  if (e.message?.startsWith("INVALID_POLICY_VALUE:")) return "invalid";
   if (
     e.code === "PGRST301" ||
     e.code === "42501" ||
     e.status === 403 ||
+    e.message?.startsWith("PERMISSION_DENIED:") ||
     e.message?.toLowerCase().includes("permission denied")
   ) return "permission";
   if (
@@ -307,10 +310,15 @@ function classifyDbError(err: unknown): "stale" | "permission" | "network" | "un
 
 function toastSaveError(toastFn: (msg: string) => void, err: unknown, section: string) {
   const kind = classifyDbError(err);
-  if (kind === "stale")      return toastFn("Another admin has modified these settings. Please refresh.");
+  if (kind === "stale")   return toastFn("Another admin has modified these settings. Please refresh.");
   if (kind === "permission") return toastFn(`Permission denied — you may not have rights to edit ${section}.`);
-  if (kind === "network")    return toastFn("Network error — check your connection and try again.");
-  /* unknown */               toastFn(`Failed to save ${section}. Please try again or contact support.`);
+  if (kind === "invalid") {
+    const e = err as { message?: string };
+    const detail = e.message?.replace(/^INVALID_POLICY_VALUE:\s*/, "") ?? "Invalid policy value.";
+    return toastFn(detail);
+  }
+  if (kind === "network") return toastFn("Network error — check your connection and try again.");
+  /* unknown */            toastFn(`Failed to save ${section}. Please try again or contact support.`);
 }
 
 function Toggle({
@@ -717,47 +725,77 @@ export default function PolicyCenter() {
 
     setSavingTab("attendance");
     try {
-      let query = db.from("tenants").update({
-        punch_in_start: tenantForm.punch_in_start,
-        punch_in_cutoff: tenantForm.punch_in_cutoff,
-        work_hours_per_day: Number(tenantForm.work_hours_per_day || defaultTenantForm.work_hours_per_day),
-        lunch_break_minutes: Number(tenantForm.lunch_break_minutes || defaultTenantForm.lunch_break_minutes),
-        updated_at: new Date().toISOString(),
-      }).eq("id", tenantId);
-      
-      if (tenantUpdatedAt) query = query.eq("updated_at", tenantUpdatedAt);
-      
-      const { data: updateData, error: tenantUpdateError } = await query.select("updated_at").maybeSingle();
-      if (tenantUpdateError) throw tenantUpdateError;
-      if (tenantUpdatedAt && !updateData) throw new Error("STALE_WRITE");
-      if (updateData) setTenantUpdatedAt(updateData.updated_at);
-      await saveSettingRows([
-        { key: "late_mark_enabled", value: String(attendancePolicy.late_mark_enabled) },
-        { key: "late_mark_grace_minutes", value: attendancePolicy.late_mark_grace_minutes || "0" },
-        { key: "late_mark_threshold", value: attendancePolicy.late_mark_threshold || "3" },
-        { key: "late_mark_deduction_hours", value: attendancePolicy.late_mark_deduction_hours || "0.5" },
-        { key: "overtime_enabled", value: String(attendancePolicy.overtime_enabled) },
-        { key: "overtime_rate", value: attendancePolicy.overtime_rate || "1.5" },
-        { key: "geofence_enabled", value: String(attendancePolicy.geofence_enabled) },
-        { key: "office_lat", value: attendancePolicy.office_lat.trim() },
-        { key: "office_lng", value: attendancePolicy.office_lng.trim() },
-        { key: "geofence_radius_meters", value: attendancePolicy.geofence_radius_meters || "500" },
-        { key: "geofence_mode", value: attendancePolicy.geofence_mode },
-        { key: "regularization_enabled", value: String(attendancePolicy.regularization_enabled) },
-        { key: "regularization_window_days", value: attendancePolicy.regularization_window_days || "7" },
-        { key: "payroll_lock_date", value: attendancePolicy.payroll_lock_date || "" },
-        { key: "break_tracking_enabled", value: String(attendancePolicy.break_tracking_enabled) },
-        { key: "break_deduction_mode", value: attendancePolicy.break_deduction_mode },
-        { key: "short_break_limit_minutes", value: attendancePolicy.short_break_limit_minutes || "15" },
-        { key: "remote_work_handling", value: attendancePolicy.remote_work_handling },
-        { key: "gps_verification_mode", value: attendancePolicy.gps_verification_mode },
-        { key: "attendance_selfie_mode", value: attendancePolicy.attendance_selfie_mode },
-        { key: "selfie_retention_days", value: attendancePolicy.selfie_retention_days },
-        { key: "high_confidence_max", value: attendancePolicy.high_confidence_max || "50" },
-        { key: "medium_confidence_max", value: attendancePolicy.medium_confidence_max || "150" },
-        { key: "low_confidence_max", value: attendancePolicy.low_confidence_max || "300" },
-      ], "attendance-policy", "Attendance policy saved", "attendance");
+      // Build expected setting versions map from the keys this RPC will write
+      const attendanceSettingKeys = [
+        "late_mark_enabled", "late_mark_grace_minutes", "late_mark_threshold",
+        "late_mark_deduction_hours", "overtime_enabled", "overtime_rate",
+        "geofence_enabled", "office_lat", "office_lng", "geofence_radius_meters",
+        "geofence_mode", "regularization_enabled", "regularization_window_days",
+        "payroll_lock_date", "break_tracking_enabled", "break_deduction_mode",
+        "short_break_limit_minutes", "remote_work_handling", "gps_verification_mode",
+        "attendance_selfie_mode", "selfie_retention_days", "high_confidence_max",
+        "medium_confidence_max", "low_confidence_max",
+      ];
+      const expectedSettingVersions: Record<string, string> = {};
+      for (const k of attendanceSettingKeys) {
+        if (settingUpdatedAtMap[k]) expectedSettingVersions[k] = settingUpdatedAtMap[k];
+      }
+
+      const { data: rpcData, error: rpcError } = await db.rpc(
+        "save_attendance_policy_transaction",
+        {
+          p_tenant_id: tenantId,
+          p_expected_tenant_updated_at: tenantUpdatedAt ?? null,
+          p_expected_setting_versions: Object.keys(expectedSettingVersions).length > 0
+            ? expectedSettingVersions
+            : null,
+          p_policy: {
+            punch_in_start: tenantForm.punch_in_start,
+            punch_in_cutoff: tenantForm.punch_in_cutoff,
+            work_hours_per_day: tenantForm.work_hours_per_day || defaultTenantForm.work_hours_per_day,
+            lunch_break_minutes: tenantForm.lunch_break_minutes || defaultTenantForm.lunch_break_minutes,
+            late_mark_enabled: String(attendancePolicy.late_mark_enabled),
+            late_mark_grace_minutes: attendancePolicy.late_mark_grace_minutes || "0",
+            late_mark_threshold: attendancePolicy.late_mark_threshold || "3",
+            late_mark_deduction_hours: attendancePolicy.late_mark_deduction_hours || "0.5",
+            overtime_enabled: String(attendancePolicy.overtime_enabled),
+            overtime_rate: attendancePolicy.overtime_rate || "1.5",
+            geofence_enabled: String(attendancePolicy.geofence_enabled),
+            office_lat: attendancePolicy.office_lat.trim(),
+            office_lng: attendancePolicy.office_lng.trim(),
+            geofence_radius_meters: attendancePolicy.geofence_radius_meters || "500",
+            geofence_mode: attendancePolicy.geofence_mode,
+            regularization_enabled: String(attendancePolicy.regularization_enabled),
+            regularization_window_days: attendancePolicy.regularization_window_days || "7",
+            payroll_lock_date: attendancePolicy.payroll_lock_date || "",
+            break_tracking_enabled: String(attendancePolicy.break_tracking_enabled),
+            break_deduction_mode: attendancePolicy.break_deduction_mode,
+            short_break_limit_minutes: attendancePolicy.short_break_limit_minutes || "15",
+            remote_work_handling: attendancePolicy.remote_work_handling,
+            gps_verification_mode: attendancePolicy.gps_verification_mode,
+            attendance_selfie_mode: attendancePolicy.attendance_selfie_mode,
+            selfie_retention_days: attendancePolicy.selfie_retention_days,
+            high_confidence_max: attendancePolicy.high_confidence_max || "50",
+            medium_confidence_max: attendancePolicy.medium_confidence_max || "150",
+            low_confidence_max: attendancePolicy.low_confidence_max || "300",
+          },
+        }
+      );
+
+      if (rpcError) throw rpcError;
+
+      // Update local version tokens from RPC response
+      const result = rpcData as {
+        tenant_updated_at: string;
+        setting_versions: Record<string, string>;
+      };
+      if (result?.tenant_updated_at) setTenantUpdatedAt(result.tenant_updated_at);
+      if (result?.setting_versions) {
+        setSettingUpdatedAtMap((prev) => ({ ...prev, ...result.setting_versions }));
+      }
+
       await refreshTenant();
+      setBaselineAttendancePolicy(attendancePolicy);
       setBaselineTenantForm((current) => ({
         ...current,
         punch_in_start: tenantForm.punch_in_start,
@@ -765,6 +803,8 @@ export default function PolicyCenter() {
         work_hours_per_day: tenantForm.work_hours_per_day,
         lunch_break_minutes: tenantForm.lunch_break_minutes,
       }));
+      setShowUnsavedBanner(false);
+      success("Attendance policy saved");
     } catch (err) {
       console.error("saveAttendancePolicy:", err);
       toastSaveError(toastError, err, "attendance policy");
@@ -827,23 +867,45 @@ export default function PolicyCenter() {
 
     setSavingTab("task");
     try {
-      let query = db.from("tenants").update({
-        punch_out_gate_enabled: taskPolicy.punch_out_gate_enabled,
-        updated_at: new Date().toISOString(),
-      }).eq("id", tenantId);
-      
-      if (tenantUpdatedAt) query = query.eq("updated_at", tenantUpdatedAt);
-      
-      const { data: updateData, error: tenantUpdateError } = await query.select("updated_at").maybeSingle();
-      if (tenantUpdateError) throw tenantUpdateError;
-      if (tenantUpdatedAt && !updateData) throw new Error("STALE_WRITE");
-      if (updateData) setTenantUpdatedAt(updateData.updated_at);
-      await saveSettingRows([
-        { key: "task_eod_redmark_time", value: taskPolicy.task_eod_redmark_time || "23:30" },
-        { key: "task_grace_period_minutes", value: taskPolicy.task_grace_period_minutes || "0" },
-      ], "task-policy", "Task policy saved", "task");
+      const taskSettingKeys = ["task_eod_redmark_time", "task_grace_period_minutes"];
+      const expectedSettingVersions: Record<string, string> = {};
+      for (const k of taskSettingKeys) {
+        if (settingUpdatedAtMap[k]) expectedSettingVersions[k] = settingUpdatedAtMap[k];
+      }
+
+      const { data: rpcData, error: rpcError } = await db.rpc(
+        "save_task_policy_transaction",
+        {
+          p_tenant_id: tenantId,
+          p_expected_tenant_updated_at: tenantUpdatedAt ?? null,
+          p_expected_setting_versions: Object.keys(expectedSettingVersions).length > 0
+            ? expectedSettingVersions
+            : null,
+          p_policy: {
+            punch_out_gate_enabled: String(taskPolicy.punch_out_gate_enabled),
+            task_eod_redmark_time: taskPolicy.task_eod_redmark_time || "23:30",
+            task_grace_period_minutes: taskPolicy.task_grace_period_minutes || "0",
+          },
+        }
+      );
+
+      if (rpcError) throw rpcError;
+
+      // Update local version tokens from RPC response
+      const result = rpcData as {
+        tenant_updated_at: string;
+        setting_versions: Record<string, string>;
+      };
+      if (result?.tenant_updated_at) setTenantUpdatedAt(result.tenant_updated_at);
+      if (result?.setting_versions) {
+        setSettingUpdatedAtMap((prev) => ({ ...prev, ...result.setting_versions }));
+      }
+
       await refreshTenant();
+      setBaselineTaskPolicy(taskPolicy);
       setBaselineTenantForm((current) => ({ ...current, punch_out_gate_enabled: taskPolicy.punch_out_gate_enabled }));
+      setShowUnsavedBanner(false);
+      success("Task policy saved");
     } catch (err) {
       console.error("saveTaskPolicy:", err);
       toastSaveError(toastError, err, "task policy");
@@ -951,24 +1013,6 @@ export default function PolicyCenter() {
     setLeaveTypeModalOpen(true);
   }
 
-  /**
-   * Compute the prorated initial leave balance for a given leave type.
-   * - monthly: prorate by elapsed months in the current year
-   * - lump_sum: grant the full year entitlement upfront
-   */
-  function computeInitialBalance(daysPerYear: number, accrualType: string, targetYear: number): number {
-    const currentYear = new Date().getFullYear();
-    if (accrualType === "monthly") {
-      if (targetYear === currentYear) {
-        const elapsedMonths = new Date().getMonth() + 1; // 1-based (Jan=1, May=5, ...)
-        return Number(((daysPerYear / 12) * elapsedMonths).toFixed(2));
-      } else if (targetYear > currentYear) {
-        return 0; // future year starts at zero; cron will accrue
-      }
-    }
-    return daysPerYear; // lump_sum — full entitlement on day 1
-  }
-
   async function saveLeaveType() {
     if (!tenantId) return;
     
@@ -981,7 +1025,6 @@ export default function PolicyCenter() {
     setSavingTab("leave-type");
     try {
       const payload = {
-        tenant_id: tenantId,
         name: leaveTypeForm.name.trim(),
         code: leaveTypeForm.code.trim().toUpperCase().slice(0, 5),
         days_per_year: Number(leaveTypeForm.days_per_year || 0),
@@ -998,78 +1041,13 @@ export default function PolicyCenter() {
         is_paid: leaveTypeForm.is_paid,
       };
 
-      const isNew = !leaveTypeForm.id;
-      let newLeaveTypeId: string | null = null;
+      const { error: rpcError } = await db.rpc("save_leave_type_transaction", {
+        p_leave_type_id: leaveTypeForm.id || null,
+        p_expected_updated_at: leaveTypeForm.updated_at || null,
+        p_payload: payload,
+      });
 
-      if (leaveTypeForm.id) {
-        const now = new Date().toISOString();
-        const { data: updateData, error: updateError } = await db.from("leave_types").update({ ...payload, updated_at: now }).eq("tenant_id", tenantId).eq("id", leaveTypeForm.id).eq("updated_at", leaveTypeForm.updated_at as string).select("id").maybeSingle();
-        if (updateError) throw updateError;
-        if (leaveTypeForm.updated_at && !updateData) throw new Error("STALE_WRITE");
-      } else {
-        const { data: insertData, error: insertError } = await db.from("leave_types").insert([{ ...payload, updated_at: new Date().toISOString() }]).select("id").single();
-        if (insertError) throw insertError;
-        newLeaveTypeId = insertData?.id ?? null;
-      }
-
-      // ── Auto-initialize balances for all active employees when a NEW leave type is added ──
-      if (isNew && newLeaveTypeId && payload.is_active) {
-        const targetYear = getTenantYear(tenantForm.timezone || "UTC");
-        const initialBalance = computeInitialBalance(payload.days_per_year, payload.accrual_type, targetYear);
-
-        const { data: empData } = await db.from("employees").select("id").eq("tenant_id", tenantId).eq("status", "active");
-        const empIds = (empData ?? []).map((e: { id: string }) => e.id);
-
-        if (empIds.length > 0) {
-          const balanceRows = empIds.map((employeeId: string) => ({
-            tenant_id: tenantId,
-            employee_id: employeeId,
-            leave_type_id: newLeaveTypeId as string,
-            year: targetYear,
-            total_allocated: payload.days_per_year,
-            used_days: 0,
-            carried_forward: 0,
-            balance: initialBalance,
-          }));
-          // ignoreDuplicates = true ensures this is fully idempotent
-          await db.from("leave_balances").upsert(balanceRows, { onConflict: "tenant_id,employee_id,leave_type_id,year", ignoreDuplicates: true });
-        }
-      }
-
-      // ── Recalculate existing balances when days_per_year changes on an EDIT ──
-      if (!isNew && leaveTypeForm.id) {
-        const targetYear = getTenantYear(tenantForm.timezone || "UTC");
-        const newProrated = computeInitialBalance(payload.days_per_year, payload.accrual_type, targetYear);
-
-        // Fetch existing balance rows for this leave type in the current year
-        const { data: existingBalances } = await db
-          .from("leave_balances")
-          .select("id, used_days, pending_days, carried_forward")
-          .eq("tenant_id", tenantId)
-          .eq("leave_type_id", leaveTypeForm.id)
-          .eq("year", targetYear);
-
-        if (existingBalances && existingBalances.length > 0) {
-          // Update each row: new balance = prorated_entitlement - used - pending + carried
-          // GREATEST(0, ...) prevents negative balances
-          for (const row of existingBalances) {
-            const newBalance = Math.max(
-              0,
-              Number((
-                newProrated
-                - Number(row.used_days || 0)
-                - Number(row.pending_days || 0)
-                + Number(row.carried_forward || 0)
-              ).toFixed(2)),
-            );
-            await db
-              .from("leave_balances")
-              .update({ total_allocated: payload.days_per_year, balance: newBalance, updated_at: new Date().toISOString() })
-              .eq("id", row.id);
-          }
-        }
-      }
-
+      if (rpcError) throw rpcError;
 
       success("Leave type saved.");
       setLeaveTypeModalOpen(false);
@@ -1077,11 +1055,7 @@ export default function PolicyCenter() {
       void loadPolicyCenter();
     } catch (err: any) {
       console.error(err);
-      if (err.message === "STALE_WRITE") {
-        toastError("Another admin has modified this leave type. Please refresh.");
-      } else {
-        toastError("Failed to save leave type.");
-      }
+      toastSaveError(toastError, err, "leave type");
     } finally {
       setSavingTab(null);
     }
@@ -1089,15 +1063,23 @@ export default function PolicyCenter() {
 
   async function deactivateLeaveType(leaveTypeId: string) {
     if (!tenantId) return;
+    
+    const leaveType = leaveTypes.find((lt) => lt.id === leaveTypeId);
+    const expectedUpdatedAt = leaveType?.updated_at || null;
+
     setSavingTab("leave-type");
     try {
-      const { error: deactivateError } = await db.from("leave_types").update({ is_active: false, updated_at: new Date().toISOString() }).eq("tenant_id", tenantId).eq("id", leaveTypeId);
+      const { error: deactivateError } = await db.rpc("deactivate_leave_type_transaction", {
+        p_leave_type_id: leaveTypeId,
+        p_expected_updated_at: expectedUpdatedAt,
+      });
       if (deactivateError) throw deactivateError;
+      
       success("Leave type deactivated.");
       void loadPolicyCenter();
     } catch (err) {
       console.error(err);
-      toastError("Failed to deactivate leave type.");
+      toastSaveError(toastError, err, "leave type");
     } finally {
       setSavingTab(null);
     }
@@ -1112,25 +1094,40 @@ export default function PolicyCenter() {
         { name: "Sick Leave", code: "SL", days_per_year: 6, accrual_type: "lump_sum" as const },
         { name: "Earned Leave", code: "EL", days_per_year: 15, accrual_type: "monthly" as const },
       ];
-      const { error: upsertError } = await db.from("leave_types").upsert(defaults.map((item) => ({
-        tenant_id: tenantId,
-        ...item,
-        carry_forward_enabled: item.code === "EL",
-        carry_forward_max_days: item.code === "EL" ? 15 : 0,
-        encashment_enabled: item.code === "EL",
-        applicable_from_day: 0,
-        probation_restricted: false,
-        requires_document: false,
-        min_notice_days: 0,
-        max_consecutive_days: null,
-        is_active: true,
-      })), { onConflict: "tenant_id,code", ignoreDuplicates: true });
-      if (upsertError) throw upsertError;
+      for (const item of defaults) {
+        const payload = {
+          name: item.name,
+          code: item.code,
+          days_per_year: item.days_per_year,
+          accrual_type: item.accrual_type,
+          carry_forward_enabled: item.code === "EL",
+          carry_forward_max_days: item.code === "EL" ? 15 : 0,
+          encashment_enabled: item.code === "EL",
+          applicable_from_day: 0,
+          probation_restricted: false,
+          requires_document: false,
+          min_notice_days: 0,
+          max_consecutive_days: null,
+          is_active: true,
+          is_paid: true,
+        };
+        const { error: saveError } = await db.rpc("save_leave_type_transaction", {
+          p_leave_type_id: null,
+          p_expected_updated_at: null,
+          p_payload: payload,
+        });
+        if (saveError) {
+          if (saveError.message?.includes("already exists")) {
+            continue;
+          }
+          throw saveError;
+        }
+      }
       success("Default leave types created.");
       void loadPolicyCenter();
     } catch (err) {
       console.error(err);
-      toastError("Failed to set up default leave types.");
+      toastSaveError(toastError, err, "default leave types");
     } finally {
       setSavingTab(null);
     }
@@ -1140,43 +1137,19 @@ export default function PolicyCenter() {
     if (!tenantId) return;
     setSavingTab("leave-balances");
     try {
-      const { data: freshEmployees, error: empError } = await db.from("employees").select("id").eq("tenant_id", tenantId).eq("status", "active");
-      if (empError) throw empError;
-      const liveEmployeeIds = (freshEmployees || []).map(e => e.id);
-
-
       const targetYear = dryRunStats.targetYear;
-      const existingKeys = new Set(
-        leaveBalanceRows
-          .filter((row) => row.year === targetYear)
-          .map((row) => `${row.employee_id}:${row.leave_type_id}`),
-      );
-      const rowsToInsert = liveEmployeeIds.flatMap((employeeId) =>
-        activeLeaveTypes
-          .filter((leaveType) => !existingKeys.has(`${employeeId}:${leaveType.id}`))
-          .map((leaveType) => ({
-            tenant_id: tenantId,
-            employee_id: employeeId,
-            leave_type_id: leaveType.id,
-            year: targetYear,
-            total_allocated: leaveType.days_per_year,
-            used_days: 0,
-            carried_forward: 0,
-            balance: computeInitialBalance(leaveType.days_per_year, leaveType.accrual_type, targetYear),
-          })),
-      );
+      const { data: rpcData, error: rpcError } = await db.rpc("initialize_leave_balances_transaction", {
+        p_year: targetYear,
+      });
+      if (rpcError) throw rpcError;
 
-      if (rowsToInsert.length > 0) {
-        const { error: insertError } = await db.from("leave_balances").upsert(rowsToInsert, { onConflict: "tenant_id,employee_id,leave_type_id,year", ignoreDuplicates: true });
-        if (insertError) throw insertError;
-      }
-
-      success(`Leave balances set up for ${rowsToInsert.length} employee-leave combinations.`);
+      const result = rpcData as { balances_created: number };
+      success(`Leave balances set up for ${result?.balances_created ?? 0} employee-leave combinations.`);
       setShowDryRun(false);
       void loadPolicyCenter();
     } catch (err) {
       console.error(err);
-      toastError("Failed to initialize leave balances.");
+      toastSaveError(toastError, err, "leave balances");
     } finally {
       setSavingTab(null);
     }
@@ -1427,6 +1400,15 @@ export default function PolicyCenter() {
                       </label>
                     </div>
                   </div>
+                  {attendancePolicy.geofence_mode === "strict" && (
+                    <div className="flex gap-2 rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800">
+                      <ShieldAlert className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold">Strict Geo-fencing Active</p>
+                        <p className="text-xs text-amber-700 mt-1">Strict enforcement will block all employees outside configured office branches from punching in. Ensure remote/hybrid employees are configured with correct WFH exceptions or locations.</p>
+                      </div>
+                    </div>
+                  )}
                   <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">Currently set to warn-only. Employees outside the fence can still punch in but their record is flagged for HR review.</p>
                 </>
               ) : null}
@@ -1497,6 +1479,15 @@ export default function PolicyCenter() {
                     <span className="font-semibold block">In & Out Both</span>
                   </label>
                 </div>
+                {attendancePolicy.attendance_selfie_mode !== "disabled" && (
+                  <div className="flex gap-2 rounded-xl bg-blue-50 border border-blue-200 p-4 text-sm text-blue-800 mt-3">
+                    <ShieldAlert className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Selfie Verification Warning</p>
+                      <p className="text-xs text-blue-700 mt-1">Selfie verification requires camera permissions in the employee's browser. Ensure employees are notified of this requirement before activation.</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1557,6 +1548,13 @@ export default function PolicyCenter() {
       {activeTab === "leave" ? (
         <div className="space-y-4">
           <SectionCard title="Leave Types Manager">
+            <div className="flex gap-2 rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800 mb-4">
+              <ShieldAlert className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">Operational Balance Recalculation Warning</p>
+                <p className="text-xs text-amber-700 mt-1">Modifying leave type 'days per year' or accrual modes dynamically triggers recalculations of all active employee balances for the year, which might adjust remaining leaves. Proceed with caution.</p>
+              </div>
+            </div>
             {leaveTypes.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-6 text-center">
                 <p className="text-sm text-slate-700">You haven't configured leave types yet. Set them up to enable proper leave balance tracking for your employees.</p>
@@ -1653,6 +1651,13 @@ export default function PolicyCenter() {
           </SectionCard>
 
           <SectionCard title="Statutory Settings">
+            <div className="flex gap-2 rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800 mb-4">
+              <ShieldAlert className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">Statutory Ceiling Warning</p>
+                <p className="text-xs text-amber-700 mt-1">Changing the Loss of Pay method or statutory PF/ESI ceilings immediately impacts future payslip calculations. Ensure changes align with the current tax cycle.</p>
+              </div>
+            </div>
             <div className="grid gap-4 md:grid-cols-2">
               <FieldLabel label="PF wage ceiling">
                 <input type="number" min={0} value={salaryPolicy.pf_wage_ceiling} onChange={(event) => setSalaryPolicy((current) => ({ ...current, pf_wage_ceiling: event.target.value }))} className={inputClass} />
@@ -1734,6 +1739,15 @@ export default function PolicyCenter() {
                   <p className="mt-1 text-xs text-slate-500">Minutes after due time before task is considered overdue</p>
                 </FieldLabel>
               </div>
+              {taskPolicy.punch_out_gate_enabled && (
+                <div className="flex gap-2 rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800 mt-4">
+                  <ShieldAlert className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold">Punch Out Gate Active</p>
+                    <p className="text-xs text-amber-700 mt-1">Employees will be blocked from punching out until all assigned tasks for the day are marked as completed and approved.</p>
+                  </div>
+                </div>
+              )}
             </div>
           </SectionCard>
 

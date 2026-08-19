@@ -1,15 +1,17 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { ArrowLeft, LogOut, Menu, X } from "lucide-react";
+import { ArrowLeft, LogOut, Menu, X, FileSpreadsheet, Play, Receipt } from "lucide-react";
 import { useTenant } from "../contexts/TenantContext";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
 import { NotificationBell } from "../shared/NotificationBell";
+import { RequireModule } from "../shared/RequireModule";
+import { Sidebar, DesktopSidebar, SidebarLink } from "../components/ui/sidebar";
 
-const links: { label: string; href: string; disabled?: boolean; note?: string }[] = [
-  { label: "Salary Structures", href: "/payroll/hr/salaries" },
-  { label: "Run Payroll", href: "/payroll/hr/run" },
-  { label: "Payslips", href: "/payroll/hr/payslips" },
+const links: { label: string; href: string; icon: React.ElementType; disabled?: boolean; note?: string }[] = [
+  { label: "Salary Structures", href: "/payroll/hr/salaries", icon: FileSpreadsheet },
+  { label: "Run Payroll", href: "/payroll/hr/run", icon: Play },
+  { label: "Payslips", href: "/payroll/hr/payslips", icon: Receipt },
 ];
 
 export default function PayrollLayout() {
@@ -76,31 +78,78 @@ export default function PayrollLayout() {
           />
         )}
 
+        {/* Desktop Sidebar (Hover-expandable) */}
+        <Sidebar>
+          <DesktopSidebar className="md:sticky md:top-24 md:rounded-xl md:border md:border-white/10 md:bg-[#0a1c3a] md:p-3 md:shadow-xl md:-translate-y-1">
+            <div className="flex flex-col gap-1">
+              {links.map((link) => {
+                const Icon = link.icon;
+                const isActive = window.location.pathname === link.href;
+                
+                return link.disabled ? (
+                  <div
+                    key={link.label}
+                    className="flex cursor-not-allowed items-center justify-between rounded-lg px-3 py-2 text-sm font-display text-slate-500"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Icon className="h-5 w-5 shrink-0 text-slate-600" />
+                      <span>{link.label}</span>
+                    </div>
+                    {link.note && (
+                      <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-slate-400">
+                        {link.note}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <SidebarLink
+                    key={link.href}
+                    link={{
+                      label: link.label,
+                      href: link.href,
+                      icon: <Icon className={`h-5 w-5 shrink-0 transition-colors ${isActive ? "text-white" : "text-slate-400"}`} />,
+                    }}
+                    className={isActive 
+                      ? "bg-white/10 text-white font-semibold shadow-sm ring-1 ring-white/10" 
+                      : "text-slate-300 hover:bg-white/10 hover:text-white"
+                    }
+                  />
+                );
+              })}
+            </div>
+          </DesktopSidebar>
+        </Sidebar>
+
+        {/* Mobile Slide-over Drawer */}
         <aside
-          className={`fixed inset-y-0 left-0 z-50 w-[88vw] max-w-sm transform bg-white p-4 shadow-xl transition-transform duration-200 ease-in-out md:sticky md:top-24 md:z-30 md:w-56 md:max-w-none md:translate-x-0 md:self-start md:bg-transparent md:p-0 md:shadow-none ${
+          className={`fixed inset-y-0 left-0 z-50 w-[88vw] max-w-sm transform bg-[#0a1c3a] p-4 shadow-xl transition-transform duration-200 ease-in-out md:hidden ${
             mobileOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          <div className="mb-6 flex items-center justify-between md:hidden">
-            <span className="font-semibold text-slate-900">Payroll</span>
+          <div className="mb-6 flex items-center justify-between">
+            <span className="font-semibold text-white">Payroll</span>
             <button
               type="button"
               onClick={() => setMobileOpen(false)}
-              className="rounded-lg p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white"
             >
               <X className="h-5 w-5" />
             </button>
           </div>
-          <div className="h-full space-y-1 md:h-fit md:rounded-xl md:border md:border-slate-200 md:bg-white md:p-3 md:shadow-xl md:-translate-y-1">
-            {links.map((link) =>
-              link.disabled ? (
+          <div className="h-full space-y-1">
+            {links.map((link) => {
+              const Icon = link.icon;
+              return link.disabled ? (
                 <div
                   key={link.label}
-                  className="flex cursor-not-allowed items-center justify-between rounded-lg px-3 py-2 text-sm font-display text-slate-400"
+                  className="flex cursor-not-allowed items-center justify-between rounded-lg px-3 py-2 text-sm font-display text-slate-500"
                 >
-                  <span>{link.label}</span>
+                  <div className="flex items-center gap-3">
+                    <Icon className="h-5 w-5 shrink-0 text-slate-600" />
+                    <span>{link.label}</span>
+                  </div>
                   {link.note && (
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-slate-400">
                       {link.note}
                     </span>
                   )}
@@ -111,20 +160,25 @@ export default function PayrollLayout() {
                   to={link.href}
                   onClick={() => setMobileOpen(false)}
                   className={({ isActive }) =>
-                    `block rounded-lg px-3 py-2 text-sm font-display ${
-                      isActive ? "bg-brand-50 font-semibold text-brand-700" : "text-slate-600 hover:bg-slate-100"
+                    `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-display ${
+                      isActive 
+                        ? "bg-white/10 font-semibold text-white shadow-sm ring-1 ring-white/10" 
+                        : "text-slate-300 hover:bg-white/10 hover:text-white"
                     }`
                   }
                 >
-                  {link.label}
+                  <Icon className="h-5 w-5 shrink-0" />
+                  <span>{link.label}</span>
                 </NavLink>
-              ),
-            )}
+              );
+            })}
           </div>
         </aside>
 
         <main className="min-w-0 flex-1">
-          <Outlet />
+          <RequireModule to="/select">
+            <Outlet />
+          </RequireModule>
         </main>
       </div>
     </div>

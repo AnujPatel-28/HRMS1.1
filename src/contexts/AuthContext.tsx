@@ -2,7 +2,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { auth, db } from "../insforge/client";
-import type { EmployeeRole } from "../types";
+import type { EmployeeRole, Employee } from "../types";
 
 type AuthUser = {
   id: string;
@@ -26,6 +26,8 @@ type AuthContextValue = {
   role: EmployeeRole | null;
   tenantId: string | null;
   loading: boolean;
+  isManager: boolean;
+  currentEmployee: Employee | null;
   login: (email: string, password: string) => Promise<LoginResult>;
   verifyEmail: (email: string, otp: string) => Promise<{ error: string | null }>;
   logout: () => Promise<void>;
@@ -63,6 +65,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [role, setRole] = useState<EmployeeRole | null>(null);
   const [tenantId, setTenantId] = useState<string | null>(null);
+  const [isManager, setIsManager] = useState(false);
+  const [currentEmployee, setCurrentEmployee] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refreshUser = useCallback(async (showLoading = true) => {
@@ -72,6 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       setRole(null);
       setTenantId(null);
+      setIsManager(false);
+      setCurrentEmployee(null);
       if (showLoading) setLoading(false);
       return;
     }
@@ -98,6 +104,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       setRole(null);
       setTenantId(null);
+      setIsManager(false);
+      setCurrentEmployee(null);
       if (showLoading) setLoading(false);
       return;
     }
@@ -105,6 +113,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(nextUser);
     setRole(resolvedRole);
     setTenantId(resolvedRole === "superadmin" ? null : resolvedTenantId);
+
+    // Dynamic Manager check
+    let emp: Employee | null = null;
+    let managerCheck = false;
+    if (resolvedRole !== "superadmin" && resolvedTenantId) {
+      const { data: empData } = await db
+        .from("employees")
+        .select("*")
+        .eq("user_id", nextUser.id)
+        .eq("tenant_id", resolvedTenantId)
+        .maybeSingle();
+      if (empData) {
+        const empStatus = (empData as Employee).status;
+
+        // Guard: block pre-active employees from accessing the system mid-session.
+        // This catches the case where an employee's status is downgraded after login.
+        if (
+          empStatus === "draft" ||
+          empStatus === "pending_hr_review" ||
+          empStatus === "pending_onboarding"
+        ) {
+          await auth.signOut();
+          setUser(null);
+          setRole(null);
+          setTenantId(null);
+          setIsManager(false);
+          setCurrentEmployee(null);
+          if (showLoading) setLoading(false);
+          return;
+        }
+
+        emp = empData as Employee;
+        const { count } = await db
+          .from("employees")
+          .select("*", { count: "exact", head: true })
+          .eq("manager_id", empData.id)
+          .eq("tenant_id", resolvedTenantId);
+        managerCheck = (count ?? 0) > 0;
+      }
+    }
+    setCurrentEmployee(emp);
+    setIsManager(managerCheck);
+
     if (showLoading) setLoading(false);
   }, []);
 
@@ -151,7 +202,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       setRole(null);
       setTenantId(null);
+      setIsManager(false);
+      setCurrentEmployee(null);
       return { error: "This company account is suspended. Please contact TalentMesh support." };
+    }
+
+    // Guard: block pre-active employees at login with a specific, actionable message.
+    // This runs after authentication succeeds so the error is unambiguous — the
+    // credentials are correct but the account hasn't been activated by HR yet.
+    if (signedInRole !== "superadmin" && signedInUser?.id && signedInTenantId) {
+      const { data: empStatusRow } = await db
+        .from("employees")
+        .select("status")
+        .eq("user_id", signedInUser.id)
+        .eq("tenant_id", signedInTenantId)
+        .maybeSingle();
+
+      const empStatus = (empStatusRow as { status?: string } | null)?.status;
+
+      if (empStatus === "draft" || empStatus === "pending_hr_review") {
+        await auth.signOut();
+        setUser(null);
+        setRole(null);
+        setTenantId(null);
+        setIsManager(false);
+        setCurrentEmployee(null);
+        return {
+          error:
+            "Your account is pending HR activation. Please contact your HR team.",
+        };
+      }
+
+      if (empStatus === "pending_onboarding") {
+        await auth.signOut();
+        setUser(null);
+        setRole(null);
+        setTenantId(null);
+        setIsManager(false);
+        setCurrentEmployee(null);
+        return {
+          error:
+            "Your account setup is incomplete. Please check your email for an onboarding link, or contact your HR team.",
+        };
+      }
     }
 
     return { error: null };
@@ -172,6 +265,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setRole(null);
     setTenantId(null);
+    setIsManager(false);
+    setCurrentEmployee(null);
   }, []);
 
   useEffect(() => {
@@ -179,8 +274,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshUser]);
 
   const value = useMemo(
-    () => ({ user, role, tenantId, loading, login, verifyEmail, logout, refreshUser }),
-    [user, role, tenantId, loading, login, verifyEmail, logout, refreshUser],
+    () => ({ user, role, tenantId, loading, isManager, currentEmployee, login, verifyEmail, logout, refreshUser }),
+    [user, role, tenantId, loading, isManager, currentEmployee, login, verifyEmail, logout, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

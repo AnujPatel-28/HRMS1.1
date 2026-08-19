@@ -1,23 +1,28 @@
 import { useEffect, useMemo, useState, useRef } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import type { Attendance, Employee, Leave, Task } from "../types";
+import { useNavigate, useParams, Link } from "react-router-dom";
+import type { Attendance, Employee, EmployeeGrade, EmployeeUnitAssignment, Leave, Task } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db, storage, insforge } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
 import { useEmployee } from "../hooks/useEmployee";
+import { useOrgStructure } from "../hooks/useOrgStructure";
+import { validateManagerAssignment } from "../utils/managerCycleValidation";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { useToast } from "../shared/ToastContext";
-import { File, Calendar, ClipboardList, MoreVertical, Upload, Loader2, Trash2, Camera, Lock, Eye, EyeOff, CheckCircle2, X } from "lucide-react";
+import { File, Calendar, ClipboardList, MoreVertical, Upload, Loader2, Trash2, Camera, Lock, Eye, EyeOff, CheckCircle2, X, ChevronDown, Printer, Network } from "lucide-react";
 import { ConfirmModal } from "../shared/ConfirmModal";
+import InitiateExitModal from "./components/InitiateExitModal";
+import EmployeeTimeline from "./components/EmployeeTimeline";
 
-type TabKey = "personal" | "identity" | "documents" | "attendance" | "leaves" | "tasks";
+type TabKey = "personal" | "identity" | "documents" | "attendance" | "leaves" | "tasks" | "id_card" | "history";
 
 type StorageDoc = {
   key: string;
   url: string;
   uploadedAt: string;
   size: number;
+  name: string;
 };
 
 const tabs: { key: TabKey; label: string }[] = [
@@ -27,33 +32,280 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: "attendance", label: "Attendance History" },
   { key: "leaves", label: "Leave History" },
   { key: "tasks", label: "Tasks" },
+  { key: "id_card", label: "ID Card" },
+  { key: "history", label: "History & Timeline" },
 ];
 
 import { formatLocalDate } from "../utils/date";
+import { IDCard } from "../shared/components/IDCard";
 
-const maskValue = (value: string | null, visible: boolean, minVisible = 4) => {
-  if (!value) return "—";
-  if (visible) return value;
-  if (value.length <= minVisible) return "*".repeat(value.length);
-  return `${"*".repeat(Math.max(value.length - minVisible, 0))}${value.slice(-minVisible)}`;
-};
 
 export default function EmployeeDetail() {
   const { employeeId } = useParams<{ employeeId: string }>();
   const navigate = useNavigate();
-  const { tenantId } = useTenant();
+  const { tenantId, tenant } = useTenant();
   const { logAction } = useAuditLog();
   const { success, error: toastError } = useToast();
   const { employee: currentHrEmployee } = useEmployee();
+  const { orgUnits, jobTitles, locations, employmentTypes } = useOrgStructure();
 
   const [activeTab, setActiveTab] = useState<TabKey>("personal");
   const [employee, setEmployee] = useState<Employee | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Employee>>({});
+  const [activeEmployees, setActiveEmployees] = useState<Employee[]>([]);
+  const [managerSearch, setManagerSearch] = useState("");
+  const [isManagerDropdownOpen, setIsManagerDropdownOpen] = useState(false);
+  const [directReportsCount, setDirectReportsCount] = useState(0);
+  const [activating, setActivating] = useState(false);
+  const [deletingDraft, setDeletingDraft] = useState(false);
+  const [showDeleteDraftModal, setShowDeleteDraftModal] = useState(false);
+  const [initiateExitOpen, setInitiateExitOpen] = useState(false);
+  type ActivationStep = null | "verifying" | "setting-password" | "done";
+  const [activationStep, setActivationStep] = useState<ActivationStep>(null);
+
+  const [otpValue, setOtpValue] = useState("");
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordError, setNewPasswordError] = useState<string | null>(null);
+  const [createdUserId, setCreatedUserId] = useState<string | null>(null);
+  const managerDropdownRef = useRef<HTMLDivElement>(null);
+
+  const selectedManager = useMemo(() => {
+    return activeEmployees.find((emp) => emp.id === editForm.manager_id);
+  }, [activeEmployees, editForm.manager_id]);
+
+  const [secondaryManagerSearch, setSecondaryManagerSearch] = useState("");
+  const [isSecondaryManagerDropdownOpen, setIsSecondaryManagerDropdownOpen] = useState(false);
+  const secondaryManagerDropdownRef = useRef<HTMLDivElement>(null);
+  const [onboardingSelf, setOnboardingSelf] = useState<any | null>(null);
+
+  const selectedSecondaryManager = useMemo(() => {
+    return activeEmployees.find((emp) => emp.id === editForm.secondary_manager_id);
+  }, [activeEmployees, editForm.secondary_manager_id]);
+
+  const profileCompleteness = useMemo(() => {
+    if (!employee) return 0;
+    const fields = [
+      employee.full_name,
+      employee.email,
+      employee.phone,
+      employee.date_of_joining,
+      employee.employee_code,
+      employee.org_unit_id || employee.department,
+      employee.job_title_id || employee.designation,
+      employee.employment_type_id || employee.employment_type,
+      employee.aadhaar_number,
+      employee.pan_number,
+      employee.bank_name,
+      employee.account_number,
+      employee.ifsc_code,
+    ];
+    const completed = fields.filter((f) => f && String(f).trim() !== "").length;
+    return Math.round((completed / fields.length) * 100);
+  }, [employee]);
+
+  const filteredSecondaryManagers = useMemo(() => {
+    const q = secondaryManagerSearch.toLowerCase().trim();
+    if (!q) return activeEmployees;
+    return activeEmployees.filter(emp => emp.full_name.toLowerCase().includes(q));
+  }, [activeEmployees, secondaryManagerSearch]);
+
+  useEffect(() => {
+    if (isEditing) {
+      if (selectedManager && !isManagerDropdownOpen) {
+        setManagerSearch(selectedManager.full_name);
+      } else if (!editForm.manager_id && !isManagerDropdownOpen) {
+        setManagerSearch("");
+      }
+    } else {
+      setManagerSearch(employee?.manager_name || "");
+    }
+  }, [selectedManager, editForm.manager_id, isManagerDropdownOpen, isEditing, employee]);
+
+  useEffect(() => {
+    if (isEditing) {
+      if (selectedSecondaryManager && !isSecondaryManagerDropdownOpen) {
+        setSecondaryManagerSearch(selectedSecondaryManager.full_name);
+      } else if (!editForm.secondary_manager_id && !isSecondaryManagerDropdownOpen) {
+        setSecondaryManagerSearch("");
+      }
+    } else {
+      // Find the secondary manager's name from activeEmployees if available
+      const secMgr = activeEmployees.find((emp) => emp.id === employee?.secondary_manager_id);
+      setSecondaryManagerSearch(secMgr?.full_name || "");
+    }
+  }, [selectedSecondaryManager, editForm.secondary_manager_id, isSecondaryManagerDropdownOpen, isEditing, employee, activeEmployees]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (managerDropdownRef.current && !managerDropdownRef.current.contains(event.target as Node)) {
+        setIsManagerDropdownOpen(false);
+      }
+      if (secondaryManagerDropdownRef.current && !secondaryManagerDropdownRef.current.contains(event.target as Node)) {
+        setIsSecondaryManagerDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredManagers = useMemo(() => {
+    const q = managerSearch.toLowerCase().trim();
+    if (!q) return activeEmployees;
+    return activeEmployees.filter(emp => emp.full_name.toLowerCase().includes(q));
+  }, [activeEmployees, managerSearch]);
+
+  const departmentOptions = useMemo(() => {
+    const legacy = [
+      { value: "sales", label: "Sales", legacyValue: "sales" },
+      { value: "dev", label: "Development", legacyValue: "dev" },
+      { value: "marketing", label: "Marketing", legacyValue: "marketing" },
+      { value: "operations", label: "Operations", legacyValue: "operations" },
+      { value: "design", label: "Design", legacyValue: "design" },
+      { value: "other", label: "Other", legacyValue: "other" },
+    ];
+    const legacyValues = new Set(legacy.map((option) => option.value));
+    const mapped = orgUnits
+      .filter((unit) => unit.unit_type === "department")
+      .map((unit) => {
+        const normalized = unit.name.trim().toLowerCase().replace(/\s+/g, "_");
+        return { value: unit.id, label: unit.name, legacyValue: legacyValues.has(normalized) ? normalized : "other" };
+      });
+    return mapped.length > 0 ? mapped : legacy;
+  }, [orgUnits]);
+
+  const employmentTypeOptions = useMemo(() => {
+    const legacy = [
+      { value: "full_time", label: "Full Time", legacyValue: "full_time" },
+      { value: "part_time", label: "Part Time", legacyValue: "part_time" },
+      { value: "contract", label: "Contract", legacyValue: "contract" },
+      { value: "intern", label: "Intern", legacyValue: "intern" },
+    ];
+    const mapped = employmentTypes.map((type) => ({ value: type.id, label: type.name, legacyValue: type.code }));
+    return mapped.length > 0 ? mapped : legacy;
+  }, [employmentTypes]);
+
+  const locationOptions = useMemo(() => {
+    const legacy = [
+      { value: "Head Office", label: "Head Office", legacyValue: "Head Office" },
+      { value: "Branch Office", label: "Branch Office", legacyValue: "Branch Office" },
+      { value: "Remote", label: "Remote", legacyValue: "Remote" },
+      { value: "Work From Home", label: "Work From Home", legacyValue: "Work From Home" },
+      { value: "Other", label: "Other", legacyValue: "Other" },
+    ];
+    const mapped = locations.map((location) => ({ value: location.id, label: location.name, legacyValue: location.name }));
+    return mapped.length > 0 ? mapped : legacy;
+  }, [locations]);
+
+  // ── Effective-dated org-unit membership (06-organisation-management.md §3.5) ──
+  const [unitAssignments, setUnitAssignments] = useState<EmployeeUnitAssignment[]>([]);
+  // Every unit of the tenant, active or not: history is largely about units people were moved OUT of,
+  // and `useOrgStructure` only carries the active ones.
+  const [unitNames, setUnitNames] = useState<Record<string, string>>({});
+  const [grades, setGrades] = useState<EmployeeGrade[]>([]);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferUnitId, setTransferUnitId] = useState("");
+  const [transferFrom, setTransferFrom] = useState(formatLocalDate(new Date()));
+  const [transferReason, setTransferReason] = useState<"transfer" | "restructure">("transfer");
+  const [transferring, setTransferring] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+
+  const currentAssignment = useMemo(
+    () => unitAssignments.find((row) => row.effective_to === null) ?? null,
+    [unitAssignments],
+  );
+
+  // Open row first, then newest start date. Not relying on the query order alone, so the list stays
+  // correct even if a row is ever written outside this screen.
+  const assignmentHistory = useMemo(() => {
+    return [...unitAssignments].sort((a, b) => {
+      if (!a.effective_to && b.effective_to) return -1;
+      if (a.effective_to && !b.effective_to) return 1;
+      return b.effective_from.localeCompare(a.effective_from);
+    });
+  }, [unitAssignments]);
+
+  const gradeOptions = useMemo(
+    () => grades.filter((grade) => grade.is_active || grade.id === employee?.grade_id),
+    [grades, employee],
+  );
+
+  // Read from the pointer the transfer trigger maintains, falling back to the legacy `department`
+  // text for employees who have no unit FK yet.
+  const currentUnitName = useMemo(() => {
+    if (!employee) return null;
+    return (employee.org_unit_id ? unitNames[employee.org_unit_id] : null) ?? employee.department ?? null;
+  }, [employee, unitNames]);
+
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [leaves, setLeaves] = useState<Leave[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [documents, setDocuments] = useState<StorageDoc[]>([]);
   const [uploadingDoc, setUploadingDoc] = useState(false);
+
+  // ID Card and Visiting Card states
+  const [idSide, setIdSide] = useState<"front" | "back">("front");
+  const [visitingSide, setVisitingSide] = useState<"front" | "back">("front");
+  const idCardRef = useRef<HTMLDivElement>(null);
+  const visitingCardRef = useRef<HTMLDivElement>(null);
+
+  const printCard = (cardRef: React.RefObject<HTMLDivElement | null>, filename: string) => {
+    const card = cardRef.current;
+    if (!card) return;
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("Please allow popups to print/download your card.");
+      return;
+    }
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${filename}</title>
+          <style>
+            @page {
+              size: 85.6mm 53.98mm;
+              margin: 0;
+            }
+            body {
+              margin: 0;
+              padding: 0;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              background: white;
+            }
+            .card-wrapper {
+              width: 85.6mm;
+              height: 53.98mm;
+              overflow: hidden;
+              border-radius: 3mm;
+            }
+            * {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+          </style>
+          <link rel="stylesheet" href="${window.location.origin}/index.css">
+        </head>
+        <body>
+          <div class="card-wrapper">
+            ${card.outerHTML}
+          </div>
+          <script>
+            window.onload = function() {
+              window.print();
+              window.onafterprint = function() { window.close(); };
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
 
   // Remote Exceptions states
   const [exceptions, setExceptions] = useState<any[]>([]);
@@ -137,28 +389,50 @@ export default function EmployeeDetail() {
     }
   };
 
-  const handleViewDocument = async (fileKey: string) => {
+  const handleViewDocument = async (fileKey: string, fileName: string) => {
     if (!employee) return;
     try {
       const { data, error } = await storage.from("employee-documents").download(fileKey);
       if (error || !data) throw error;
       
       // Log audit action
-      void logAction("employee.document_viewed", "employee", employee.id, { document: fileKey });
+      void logAction("employee.document_viewed", "employees", employee.id, { document: fileKey });
       
-      const blobUrl = URL.createObjectURL(data);
-      const win = window.open(blobUrl, "_blank");
-      if (!win) {
-        URL.revokeObjectURL(blobUrl);
-        toastError("Please allow popups to view this document.");
-        return;
-      }
-      const interval = setInterval(() => {
-        if (win.closed) {
+      // Determine MIME type from fileName
+      const ext = fileName.split(".").pop()?.toLowerCase();
+      let mimeType = data.type;
+      if (ext === "pdf") mimeType = "application/pdf";
+      else if (ext === "png") mimeType = "image/png";
+      else if (ext === "jpg" || ext === "jpeg") mimeType = "image/jpeg";
+      else if (ext === "gif") mimeType = "image/gif";
+      else if (ext === "svg") mimeType = "image/svg+xml";
+
+      const typedBlob = new Blob([data], { type: mimeType });
+      const blobUrl = URL.createObjectURL(typedBlob);
+      
+      // Open inline if viewable, otherwise download
+      if (["pdf", "png", "jpg", "jpeg", "gif", "svg"].includes(ext || "")) {
+        const win = window.open(blobUrl, "_blank");
+        if (!win) {
           URL.revokeObjectURL(blobUrl);
-          clearInterval(interval);
+          toastError("Please allow popups to view this document.");
+          return;
         }
-      }, 1000);
+        const interval = setInterval(() => {
+          if (win.closed) {
+            URL.revokeObjectURL(blobUrl);
+            clearInterval(interval);
+          }
+        }, 1000);
+      } else {
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(blobUrl);
+      }
     } catch (e) {
       toastError("Failed to fetch secure document.");
       console.error(e);
@@ -166,7 +440,6 @@ export default function EmployeeDetail() {
   };
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
   const [showSensitive, setShowSensitive] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -222,7 +495,7 @@ export default function EmployeeDetail() {
 
       if (updateError) throw updateError;
 
-      void logAction("employee.avatar_updated", "employee", employee.id);
+      void logAction("employee.avatar_updated", "employees", employee.id);
 
       success("Profile picture updated successfully.");
       await loadData();
@@ -334,6 +607,149 @@ export default function EmployeeDetail() {
     }
   };
 
+  const shiftDate = (isoDate: string, days: number) => {
+    const day = new Date(`${isoDate}T00:00:00`);
+    day.setDate(day.getDate() + days);
+    return formatLocalDate(day);
+  };
+
+  const formatDay = (isoDate: string) => new Date(`${isoDate}T00:00:00`).toLocaleDateString();
+
+  const openTransfer = () => {
+    setTransferUnitId("");
+    setTransferFrom(formatLocalDate(new Date()));
+    setTransferReason("transfer");
+    setTransferError(null);
+    setTransferOpen(true);
+  };
+
+  /**
+   * Move the employee into another org unit by appending to `employee_unit_assignments`.
+   *
+   * `employees.org_unit_id` is NOT written here: the `employee_unit_assignment_sync` trigger sets it
+   * from whichever row has `effective_to IS NULL`. Client-managed sync of a duplicated fact is the
+   * defect this module exists to remove (06-organisation-management.md §2.1).
+   *
+   * The partial unique index `employee_unit_current_uniq (employee_id) WHERE effective_to IS NULL`
+   * permits only one open row, so the current row must be closed BEFORE the new one is inserted.
+   * Closing it does not move the pointer — the trigger only writes `employees` when the row it sees
+   * has `effective_to IS NULL`.
+   */
+  const submitTransfer = async () => {
+    if (!employee || !tenantId) return;
+
+    const today = formatLocalDate(new Date());
+
+    if (!transferUnitId) {
+      setTransferError("Choose the unit to move this employee into.");
+      return;
+    }
+    // Compared against the assignment, not `employees.org_unit_id`: an employee whose pointer was set
+    // through the legacy Department select has no assignment row yet, and recording their current unit
+    // as an opening assignment is exactly what they need.
+    if (currentAssignment && transferUnitId === currentAssignment.org_unit_id) {
+      setTransferError("That is already this employee's unit.");
+      return;
+    }
+    if (!transferFrom) {
+      setTransferError("Choose the date the move takes effect.");
+      return;
+    }
+    if (transferFrom > today) {
+      // The trigger keys on `effective_to IS NULL`, not on the date, so a future-dated row would move
+      // the employee immediately. Scheduling a transfer needs a job that does not exist yet.
+      setTransferError("Transfers cannot be dated in the future — record the move on or after the day it happens.");
+      return;
+    }
+    if (currentAssignment && transferFrom <= currentAssignment.effective_from) {
+      setTransferError(
+        `The effective date must be after ${formatDay(currentAssignment.effective_from)}, when the current assignment started.`,
+      );
+      return;
+    }
+
+    setTransferring(true);
+    setTransferError(null);
+
+    // Step 1 — close the open assignment the day before the new one starts.
+    // .select() matters: RLS refuses a write by matching zero rows, which PostgREST reports as a
+    // SUCCESSFUL empty response rather than an error. Without checking the returned rows, a refused
+    // transfer would tell HR the employee moved while the database is unchanged.
+    let closedAssignmentId: string | null = null;
+    if (currentAssignment) {
+      const { data: closed, error: closeError } = await db
+        .from("employee_unit_assignments")
+        .update({ effective_to: shiftDate(transferFrom, -1) })
+        .eq("tenant_id", tenantId)
+        .eq("id", currentAssignment.id)
+        .select();
+
+      if (closeError || !closed || (closed as unknown[]).length === 0) {
+        setTransferError(
+          closeError?.message ?? "The transfer was rejected. Only HR administrators can move an employee between units.",
+        );
+        setTransferring(false);
+        return;
+      }
+      closedAssignmentId = currentAssignment.id;
+    }
+
+    // Step 2 — append the new assignment. This is the row the trigger reads.
+    const { data: inserted, error: insertError } = await db
+      .from("employee_unit_assignments")
+      .insert({
+        tenant_id: tenantId,
+        employee_id: employee.id,
+        org_unit_id: transferUnitId,
+        effective_from: transferFrom,
+        reason: transferReason,
+        created_by: currentHrEmployee?.id ?? null,
+      })
+      .select();
+
+    if (insertError || !inserted || (inserted as unknown[]).length === 0) {
+      // Reopen what step 1 closed, or the employee is left with no current assignment. The reopen
+      // re-fires the trigger with `effective_to IS NULL`, restoring the pointer to the old unit too.
+      if (closedAssignmentId) {
+        const { data: reopened, error: reopenError } = await db
+          .from("employee_unit_assignments")
+          .update({ effective_to: null })
+          .eq("tenant_id", tenantId)
+          .eq("id", closedAssignmentId)
+          .select();
+
+        if (reopenError || !reopened || (reopened as unknown[]).length === 0) {
+          setTransferError(
+            "The transfer failed AND the previous assignment could not be reopened — this employee now has no current unit. Retry the transfer to restore it.",
+          );
+          toastError("Transfer failed and could not be rolled back.");
+          setTransferring(false);
+          await loadData();
+          return;
+        }
+      }
+
+      setTransferError(
+        insertError?.message ?? "The transfer was rejected. Only HR administrators can move an employee between units.",
+      );
+      setTransferring(false);
+      return;
+    }
+
+    void logAction("employee.unit_transferred", "employee_unit_assignments", (inserted as { id: string }[])[0]?.id, {
+      employee_id: employee.id,
+      from_org_unit_id: currentAssignment?.org_unit_id ?? null,
+      to_org_unit_id: transferUnitId,
+      effective_from: transferFrom,
+      reason: transferReason,
+    });
+
+    success("Employee transferred. The previous assignment is kept with its date range.");
+    setTransferOpen(false);
+    setTransferring(false);
+    await loadData();
+  };
+
   const loadData = async () => {
     if (!employeeId) return;
 
@@ -342,7 +758,7 @@ export default function EmployeeDetail() {
 
     const employeeRes = await db
       .from("employees")
-      .select("*")
+      .select("*, manager:employees!manager_id(full_name)")
       .eq("tenant_id", tenantId)
       .eq("id", employeeId)
       .maybeSingle();
@@ -352,14 +768,29 @@ export default function EmployeeDetail() {
       return;
     }
 
-    const currentEmployee = employeeRes.data as Employee;
+    const currentEmployee = {
+      ...(employeeRes.data as any),
+      manager_name: (employeeRes.data as any).manager?.full_name || null,
+    } as Employee;
     setEmployee(currentEmployee);
     setEditForm(currentEmployee);
+
+    if (tenantId) {
+      db.from("employees")
+        .select("id, full_name, designation, profile_photo_url")
+        .eq("tenant_id", tenantId)
+        .eq("status", "active")
+        .neq("id", employeeId)
+        .order("full_name")
+        .then(({ data }) => {
+          if (data) setActiveEmployees(data as Employee[]);
+        });
+    }
 
     const fromDate = new Date();
     fromDate.setDate(fromDate.getDate() - 29);
 
-    const [attendanceRes, leavesRes, tasksRes, docsRes, exceptionsRes] = await Promise.all([
+    const [attendanceRes, leavesRes, tasksRes, docsRes, exceptionsRes, reportsRes, onboardingSelfRes, unitAssignmentsRes, allUnitsRes, gradesRes] = await Promise.all([
       db
         .from("attendance")
         .select("*")
@@ -375,12 +806,36 @@ export default function EmployeeDetail() {
         .eq("tenant_id", tenantId)
         .eq("employee_id", currentEmployee.id)
         .order("start_date", { ascending: false }),
+      db.from("employees")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("manager_id", currentEmployee.id),
+      db.from("employee_onboarding_self")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("employee_id", currentEmployee.id)
+        .maybeSingle(),
+      db.from("employee_unit_assignments")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("employee_id", currentEmployee.id)
+        .order("effective_from", { ascending: false }),
+      // Deliberately unfiltered by is_active — history mostly names units people were moved out of.
+      db.from("org_units").select("id, name").eq("tenant_id", tenantId),
+      db.from("employee_grades").select("*").eq("tenant_id", tenantId).order("level", { ascending: true }),
     ]);
 
     setAttendance((attendanceRes.data as Attendance[]) ?? []);
     setLeaves((leavesRes.data as Leave[]) ?? []);
     setTasks((tasksRes.data as Task[]) ?? []);
     setExceptions((exceptionsRes.data ?? []) as any[]);
+    setDirectReportsCount(reportsRes.count ?? 0);
+    setOnboardingSelf(onboardingSelfRes.data || null);
+    setUnitAssignments((unitAssignmentsRes.data as EmployeeUnitAssignment[]) ?? []);
+    setUnitNames(
+      Object.fromEntries(((allUnitsRes.data ?? []) as { id: string; name: string }[]).map((unit) => [unit.id, unit.name])),
+    );
+    setGrades((gradesRes.data as EmployeeGrade[]) ?? []);
 
     if (docsRes.error) {
       console.error("Database query error for employee documents:", docsRes.error);
@@ -392,6 +847,7 @@ export default function EmployeeDetail() {
           url: item.file_url,
           uploadedAt: item.uploaded_at,
           size: item.size,
+          name: item.file_name || item.file_key.split("/").pop() || "document",
         })),
       );
     }
@@ -422,6 +878,42 @@ export default function EmployeeDetail() {
     setEditForm((current) => ({ ...current, [field]: value }));
   };
 
+  const updateDepartment = (value: string) => {
+    const selected = departmentOptions.find((option) => option.value === value);
+    setEditForm((current) => ({
+      ...current,
+      org_unit_id: orgUnits.some((unit) => unit.id === value) ? value : null,
+      department: selected?.legacyValue ?? value,
+    }));
+  };
+
+  const updateDesignation = (value: string) => {
+    const selected = jobTitles.find((jobTitle) => jobTitle.title.toLowerCase() === value.trim().toLowerCase());
+    setEditForm((current) => ({
+      ...current,
+      designation: value,
+      job_title_id: selected?.id ?? null,
+    }));
+  };
+
+  const updateEmploymentType = (value: string) => {
+    const selected = employmentTypeOptions.find((option) => option.value === value);
+    setEditForm((current) => ({
+      ...current,
+      employment_type_id: employmentTypes.some((type) => type.id === value) ? value : null,
+      employment_type: selected?.legacyValue ?? value,
+    }));
+  };
+
+  const updateWorkLocation = (value: string) => {
+    const selected = locationOptions.find((option) => option.value === value);
+    setEditForm((current) => ({
+      ...current,
+      location_id: locations.some((location) => location.id === value) ? value : null,
+      work_location: selected?.legacyValue ?? value,
+    }));
+  };
+
   const statusBadgeClass = (status: string) => {
     if (["active", "approved", "present", "in_progress"].includes(status)) return "bg-emerald-100 text-emerald-700";
     if (["inactive", "pending", "assigned", "submitted", "half_day", "on_leave"].includes(status)) return "bg-amber-100 text-amber-700";
@@ -434,6 +926,34 @@ export default function EmployeeDetail() {
     setSaving(true);
     setError(null);
 
+    if (editForm.manager_id && editForm.secondary_manager_id && editForm.manager_id === editForm.secondary_manager_id) {
+      const message = "Primary and secondary managers cannot be the same person.";
+      setError(message);
+      toastError(message);
+      setSaving(false);
+      return;
+    }
+
+    if (editForm.manager_id) {
+      const mgrValidation = await validateManagerAssignment(employee.id, editForm.manager_id, tenantId);
+      if (!mgrValidation.isValid) {
+        setError(mgrValidation.message || "Invalid manager assignment.");
+        toastError(mgrValidation.message || "Invalid manager assignment.");
+        setSaving(false);
+        return;
+      }
+    }
+
+    if (editForm.secondary_manager_id) {
+      const secMgrValidation = await validateManagerAssignment(employee.id, editForm.secondary_manager_id, tenantId);
+      if (!secMgrValidation.isValid) {
+        setError(secMgrValidation.message || "Invalid secondary manager assignment.");
+        toastError(secMgrValidation.message || "Invalid secondary manager assignment.");
+        setSaving(false);
+        return;
+      }
+    }
+
     const payload = {
       full_name: editForm.full_name,
       email: editForm.email,
@@ -445,10 +965,13 @@ export default function EmployeeDetail() {
       state: editForm.state,
       pincode: editForm.pincode,
       department: editForm.department,
+      org_unit_id: editForm.org_unit_id || null,
       designation: editForm.designation,
+      job_title_id: editForm.job_title_id || null,
       employee_code: editForm.employee_code,
       date_of_joining: editForm.date_of_joining,
       employment_type: editForm.employment_type,
+      employment_type_id: editForm.employment_type_id || null,
       aadhaar_number: editForm.aadhaar_number,
       pan_number: editForm.pan_number,
       bank_name: editForm.bank_name,
@@ -458,17 +981,59 @@ export default function EmployeeDetail() {
       emergency_contact_phone: editForm.emergency_contact_phone,
       emergency_contact_relation: editForm.emergency_contact_relation,
       work_mode: editForm.work_mode || "office",
+      grade: editForm.grade?.trim() || null,
+      grade_id: editForm.grade_id || null,
+      work_location: editForm.work_location || null,
+      location_id: editForm.location_id || null,
+      probation_status: editForm.probation_status || 'on_probation',
+      probation_end_date: editForm.probation_end_date || null,
+      employment_confirmed_at: editForm.employment_confirmed_at || null,
     };
 
-    const { error: updateError } = await db.from("employees").update(payload).eq("tenant_id", tenantId).eq("id", employee.id);
+    // .select() matters: RLS refuses a write by matching zero rows, which comes back as a SUCCESSFUL
+    // empty response rather than an error. Without checking the returned rows a refused save would
+    // look like it worked and the form would drift from the database.
+    const { data: updated, error: updateError } = await db
+      .from("employees")
+      .update(payload)
+      .eq("tenant_id", tenantId)
+      .eq("id", employee.id)
+      .select();
 
-    if (updateError) {
-      setError(updateError.message);
+    if (updateError || !updated || (updated as unknown[]).length === 0) {
+      const message = updateError?.message ?? "The change was rejected — you may not have permission to edit this employee.";
+      setError(message);
+      toastError(message);
       setSaving(false);
       return;
     }
 
-    void logAction("employee.updated", "employee", employee.id, { fields_changed: Object.keys(payload) });
+    if (
+      editForm.manager_id !== employee.manager_id ||
+      editForm.secondary_manager_id !== employee.secondary_manager_id
+    ) {
+      const { error: rpcError } = await db.rpc("update_employee_reporting_relationship", {
+        p_employee_id: employee.id,
+        p_primary_manager_id: editForm.manager_id || null,
+        p_secondary_manager_id: editForm.secondary_manager_id || null,
+      });
+
+      if (rpcError) {
+        setError(rpcError.message);
+        toastError(rpcError.message || "Failed to update reporting relationships.");
+        setSaving(false);
+        return;
+      }
+    } else {
+      void logAction("employee.updated", "employees", employee.id, { fields_changed: Object.keys(payload) });
+    }
+
+    if (payload.org_unit_id !== employee.org_unit_id) {
+      void logAction("employee.department_changed", "employees", employee.id, {
+        from: employee.org_unit_id,
+        to: payload.org_unit_id,
+      });
+    }
 
     await loadData();
     setIsEditing(false);
@@ -486,12 +1051,156 @@ export default function EmployeeDetail() {
       return;
     }
 
+    void logAction("employee.status_changed", "employees", employee.id, {
+      from: employee.status,
+      to: status,
+    });
+
     if (status === "terminated") {
-      void logAction("employee.terminated", "employee", employee.id);
+      void logAction("employee.terminated", "employees", employee.id);
+    } else if (status === "active" && employee.status !== "active") {
+      void logAction("employee.activated", "employees", employee.id);
     }
 
     await loadData();
     setSaving(false);
+  };
+
+  const makePassword = () => {
+    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
+    return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  };
+
+  const handleDeleteDraft = async () => {
+    if (!employee || !tenantId) return;
+
+    setDeletingDraft(true);
+    try {
+      const { error: deleteErr } = await db
+        .from("employees")
+        .delete()
+        .eq("id", employee.id)
+        .eq("tenant_id", tenantId);
+
+      if (deleteErr) throw deleteErr;
+
+      success(`Successfully deleted draft employee ${employee.full_name}.`);
+      setShowDeleteDraftModal(false);
+      navigate("/hr/employees");
+    } catch (err: any) {
+      toastError(err.message || "Failed to delete draft profile.");
+      console.error(err);
+    } finally {
+      setDeletingDraft(false);
+    }
+  };
+
+  const handleActivate = async () => {
+    if (!employee || !tenantId) return;
+    if (!editForm.designation?.trim() || !editForm.department || !editForm.date_of_joining || !editForm.employee_code?.trim()) {
+      toastError("Please fill in designation, department, joining date, and employee code before activating.");
+      return;
+    }
+    
+    setActivating(true);
+    const generatedPassword = makePassword();
+
+    setNewPassword(generatedPassword);
+
+    try {
+      const fnRes = await insforge.functions.invoke("create-employee-user", {
+        body: {
+          email: employee.email,
+          password: generatedPassword,
+          name: employee.full_name,
+          tenant_id: tenantId,
+          employee_id: employee.id,
+        },
+      });
+
+      if (fnRes.error || !fnRes.data?.userId) {
+        throw new Error(fnRes.data?.message ?? fnRes.error?.message ?? "Failed to create user credentials.");
+      }
+
+      setCreatedUserId(fnRes.data.userId);
+      setActivationStep("verifying");
+      setOtpValue("");
+      setOtpError(null);
+    } catch (err: any) {
+      toastError(err.message || "Failed to initiate activation.");
+      console.error(err);
+    } finally {
+      setActivating(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!employee?.email || otpValue.length !== 6) return;
+    setOtpLoading(true);
+    setOtpError(null);
+    try {
+      const res = await insforge.functions.invoke("verify-employee-code", {
+        body: { email: employee.email, otp: otpValue },
+      });
+      if (res.error || !res.data?.success) {
+        throw new Error(res.data?.error ?? res.error?.message ?? "Invalid code. Please try again.");
+      }
+      setActivationStep("setting-password");
+    } catch (err: any) {
+      setOtpError(err.message);
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleConfirmPassword = async () => {
+    if (!employee?.email || !createdUserId || newPassword.trim().length < 8) {
+      setNewPasswordError("Password must be at least 8 characters.");
+      return;
+    }
+    setOtpLoading(true);
+    setNewPasswordError(null);
+    try {
+      // 1. Set password in auth service
+      const fnRes = await insforge.functions.invoke("set-employee-password", {
+        body: { email: employee.email, password: newPassword.trim(), tenant_id: tenantId },
+      });
+      if (fnRes.error || !fnRes.data?.success) {
+        throw new Error(fnRes.data?.error ?? fnRes.error?.message ?? "Failed to update password.");
+      }
+
+      // 2. Perform direct update on employees table
+      const { error: updateErr } = await db
+        .from("employees")
+        .update({
+          status: "active",
+          user_id: createdUserId,
+          designation: editForm.designation.trim(),
+          job_title_id: editForm.job_title_id || null,
+          department: editForm.department,
+          org_unit_id: editForm.org_unit_id || null,
+          date_of_joining: editForm.date_of_joining,
+          employee_code: editForm.employee_code.trim(),
+          employment_type: editForm.employment_type || "full_time",
+          employment_type_id: editForm.employment_type_id || null,
+          grade: editForm.grade?.trim() || null,
+          work_location: editForm.work_location || null,
+          location_id: editForm.location_id || null,
+          work_mode: editForm.work_mode || "office",
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", employee.id)
+        .eq("tenant_id", tenantId);
+      if (updateErr) throw updateErr;
+
+      success("Employee activated successfully.");
+      setActivationStep("done");
+    } catch (err: any) {
+      setNewPasswordError(err.message || "Failed to complete password setup.");
+      console.error(err);
+    } finally {
+      setOtpLoading(false);
+    }
   };
 
   // ── Reset Password handlers ──
@@ -562,6 +1271,39 @@ export default function EmployeeDetail() {
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      {(employee.status === "draft" || employee.status === "pending_hr_review" || (employee.status === "inactive" && !employee.user_id)) && (
+        <div className="mb-6 rounded-2xl border border-orange-200 bg-orange-50 p-5 shadow-sm">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-orange-500 text-xs font-bold text-white leading-none">!</span>
+              <div>
+                <h4 className="font-semibold text-orange-950">Employee Pending Activation</h4>
+                <p className="mt-0.5 text-sm text-orange-700">
+                  This employee profile was added by their manager as a draft. Please verify and fill in all mandatory job information (designation, department, code, and joining date), then click Activate below.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button
+                type="button"
+                disabled={activating || deletingDraft}
+                onClick={() => setShowDeleteDraftModal(true)}
+                className="rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-60 shadow-sm"
+              >
+                {deletingDraft ? "Deleting..." : "Delete Draft"}
+              </button>
+              <button
+                type="button"
+                disabled={activating || deletingDraft}
+                onClick={handleActivate}
+                className="rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-700 disabled:opacity-60 shadow-sm"
+              >
+                {activating ? "Activating..." : "Activate Employee"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <div 
@@ -608,6 +1350,18 @@ export default function EmployeeDetail() {
                 <span className={`h-1 w-1 rounded-full ${employee.status === 'active' ? 'bg-emerald-500' : employee.status === 'inactive' ? 'bg-amber-500' : 'bg-rose-500'}`}></span>
                 {employee.status}
               </span>
+            </div>
+            <div className="mt-2.5 flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500">Profile Completeness:</span>
+              <div className="w-24 bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200/50 shadow-inner">
+                <div 
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    profileCompleteness < 50 ? "bg-amber-500" : profileCompleteness < 80 ? "bg-blue-500" : "bg-emerald-500"
+                  }`} 
+                  style={{ width: `${profileCompleteness}%` }}
+                />
+              </div>
+              <span className="text-xs font-bold text-slate-700">{profileCompleteness}%</span>
             </div>
           </div>
         </div>
@@ -691,6 +1445,18 @@ export default function EmployeeDetail() {
                 className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 transition"
               >
                 Reactivate
+              </button>
+            )}
+            {employee.status === "active" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setInitiateExitOpen(true);
+                  setShowActionsMenu(false);
+                }}
+                className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 transition"
+              >
+                Initiate Exit Process
               </button>
             )}
             <button
@@ -880,20 +1646,42 @@ export default function EmployeeDetail() {
           </label>
           <label className="text-sm">
             <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Department</span>
-            <input
-              value={editForm.department ?? ""}
-              onChange={(event) => updateField("department", event.target.value)}
-              disabled={!isEditing}
-              className="w-full capitalize rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
-            />
+            {isEditing ? (
+              <select
+                value={editForm.org_unit_id || editForm.department || ""}
+                onChange={(event) => updateDepartment(event.target.value)}
+                className="w-full capitalize rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 bg-white"
+              >
+                {departmentOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="capitalize font-semibold text-slate-900 block mt-2">{currentUnitName || "No Department"}</span>
+            )}
           </label>
           <label className="text-sm">
             <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Designation</span>
             <input
+              list="employee-detail-job-title-options"
               value={editForm.designation ?? ""}
-              onChange={(event) => updateField("designation", event.target.value)}
+              onChange={(event) => updateDesignation(event.target.value)}
               disabled={!isEditing}
               className="w-full capitalize rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
+            />
+            <datalist id="employee-detail-job-title-options">
+              {jobTitles.map((jobTitle) => (
+                <option key={jobTitle.id} value={jobTitle.title} />
+              ))}
+            </datalist>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Employee Code</span>
+            <input
+              value={editForm.employee_code ?? ""}
+              onChange={(event) => updateField("employee_code", event.target.value)}
+              disabled={!isEditing}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
             />
           </label>
           <label className="text-sm md:col-span-2">
@@ -925,6 +1713,24 @@ export default function EmployeeDetail() {
             />
           </label>
           <label className="text-sm">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Employment Type</span>
+            {isEditing ? (
+              <select
+                value={editForm.employment_type_id || editForm.employment_type || "full_time"}
+                onChange={(event) => updateEmploymentType(event.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 bg-white"
+              >
+                {employmentTypeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="capitalize font-semibold text-slate-900 block mt-2">
+                {(employee.employment_type ?? "full_time").replace("_", " ")}
+              </span>
+            )}
+          </label>
+          <label className="text-sm">
             <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Work Mode</span>
             {isEditing ? (
               <select
@@ -942,6 +1748,433 @@ export default function EmployeeDetail() {
               </span>
             )}
           </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Grade</span>
+            {isEditing ? (
+              <input
+                value={editForm.grade ?? ""}
+                onChange={(event) => updateField("grade", event.target.value)}
+                placeholder="e.g. M3, Senior"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              />
+            ) : (
+              <span className="font-semibold text-slate-900 block mt-2">
+                {employee.grade || "—"}
+              </span>
+            )}
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Grade Band</span>
+            {isEditing ? (
+              gradeOptions.length === 0 ? (
+                <p className="mt-2 text-xs italic text-slate-500">
+                  No grade bands configured yet — add them under Organisation Structure.
+                </p>
+              ) : (
+                <select
+                  value={editForm.grade_id ?? ""}
+                  onChange={(event) => updateField("grade_id", event.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 bg-white"
+                >
+                  <option value="">No grade band</option>
+                  {gradeOptions.map((grade) => (
+                    <option key={grade.id} value={grade.id}>{grade.name} — Level {grade.level}</option>
+                  ))}
+                </select>
+              )
+            ) : (
+              <span className="font-semibold text-slate-900 block mt-2">
+                {grades.find((grade) => grade.id === employee.grade_id)?.name ?? "—"}
+              </span>
+            )}
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Work Location</span>
+            {isEditing ? (
+              <select
+                value={editForm.location_id || editForm.work_location || ""}
+                onChange={(event) => updateWorkLocation(event.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 bg-white"
+              >
+                <option value="">Select Work Location</option>
+                {locationOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="font-semibold text-slate-900 block mt-2">
+                {employee.work_location || "—"}
+              </span>
+            )}
+          </label>
+          <div className="text-sm md:col-span-2 relative" ref={managerDropdownRef}>
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Reporting Manager</span>
+            {isEditing ? (
+              <>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search reporting manager..."
+                    value={managerSearch}
+                    onFocus={() => {
+                      setIsManagerDropdownOpen(true);
+                      if (selectedManager) {
+                        setManagerSearch("");
+                      }
+                    }}
+                    onChange={(e) => {
+                      setManagerSearch(e.target.value);
+                      setIsManagerDropdownOpen(true);
+                    }}
+                    className="w-full rounded-lg border border-slate-300 pl-3 pr-10 py-2 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 text-slate-900 font-normal"
+                  />
+                  {editForm.manager_id ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateField("manager_id", "");
+                        setManagerSearch("");
+                      }}
+                      className="absolute right-8 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-semibold"
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <ChevronDown className="h-4 w-4" />
+                  </div>
+                </div>
+
+                {selectedManager && !isManagerDropdownOpen && (
+                  <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-200 px-3 py-1.5 text-xs text-slate-700 font-normal">
+                    {selectedManager.profile_photo_url ? (
+                      <img src={selectedManager.profile_photo_url} alt="" className="h-5 w-5 rounded-full object-cover" />
+                    ) : (
+                      <div className="grid h-5 w-5 place-items-center rounded-full bg-slate-200 font-bold text-slate-600">
+                        {selectedManager.full_name.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <div>
+                      <span className="font-semibold text-slate-900">{selectedManager.full_name}</span>
+                      <span className="text-slate-500"> — {selectedManager.designation || "No designation"}</span>
+                    </div>
+                  </div>
+                )}
+
+                {isManagerDropdownOpen && (
+                  <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5">
+                    {filteredManagers.length === 0 ? (
+                      <div className="px-4 py-2 text-slate-500 text-xs font-normal">No active employees found</div>
+                    ) : (
+                      filteredManagers.map((emp) => (
+                        <button
+                          key={emp.id}
+                          type="button"
+                          onClick={() => {
+                            updateField("manager_id", emp.id);
+                            setManagerSearch(emp.full_name);
+                            setIsManagerDropdownOpen(false);
+                          }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 transition-colors font-normal ${
+                            editForm.manager_id === emp.id ? "bg-slate-50 font-semibold" : ""
+                          }`}
+                        >
+                          {emp.profile_photo_url ? (
+                            <img src={emp.profile_photo_url} alt="" className="h-6 w-6 rounded-full object-cover" />
+                          ) : (
+                            <div className="grid h-6 w-6 place-items-center rounded-full bg-slate-100 font-bold text-slate-600 text-[10px]">
+                              {emp.full_name.slice(0, 2).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-xs text-slate-900 truncate font-semibold">{emp.full_name}</p>
+                            <p className="text-[10px] text-slate-500 truncate">{emp.designation || "—"}</p>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <span className="font-semibold text-slate-900 block mt-2">
+                {employee.manager_name || "—"}
+              </span>
+            )}
+          </div>
+
+          {/* Secondary Manager Selection */}
+          <div className="text-sm md:col-span-2 relative" ref={secondaryManagerDropdownRef}>
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Secondary / Functional Manager</span>
+            {isEditing ? (
+              <>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search functional manager..."
+                    value={secondaryManagerSearch}
+                    onFocus={() => {
+                      setIsSecondaryManagerDropdownOpen(true);
+                      if (selectedSecondaryManager) {
+                        setSecondaryManagerSearch("");
+                      }
+                    }}
+                    onChange={(e) => {
+                      setSecondaryManagerSearch(e.target.value);
+                      setIsSecondaryManagerDropdownOpen(true);
+                    }}
+                    className="w-full rounded-lg border border-slate-300 pl-3 pr-10 py-2 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 text-slate-900 font-normal"
+                  />
+                  {editForm.secondary_manager_id ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateField("secondary_manager_id", "");
+                        setSecondaryManagerSearch("");
+                      }}
+                      className="absolute right-8 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-semibold"
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <ChevronDown className="h-4 w-4" />
+                  </div>
+                </div>
+
+                {selectedSecondaryManager && !isSecondaryManagerDropdownOpen && (
+                  <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-200 px-3 py-1.5 text-xs text-slate-700 font-normal">
+                    {selectedSecondaryManager.profile_photo_url ? (
+                      <img src={selectedSecondaryManager.profile_photo_url} alt="" className="h-5 w-5 rounded-full object-cover" />
+                    ) : (
+                      <div className="grid h-5 w-5 place-items-center rounded-full bg-slate-200 font-bold text-slate-600">
+                        {selectedSecondaryManager.full_name.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <div>
+                      <span className="font-semibold text-slate-900">{selectedSecondaryManager.full_name}</span>
+                      <span className="text-slate-500"> — {selectedSecondaryManager.designation || "No designation"}</span>
+                    </div>
+                  </div>
+                )}
+
+                {isSecondaryManagerDropdownOpen && (
+                  <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5">
+                    {filteredSecondaryManagers.length === 0 ? (
+                      <div className="px-4 py-2 text-slate-500 text-xs font-normal">No active employees found</div>
+                    ) : (
+                      filteredSecondaryManagers.map((emp) => (
+                        <button
+                          key={emp.id}
+                          type="button"
+                          onClick={() => {
+                            updateField("secondary_manager_id", emp.id);
+                            setSecondaryManagerSearch(emp.full_name);
+                            setIsSecondaryManagerDropdownOpen(false);
+                          }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 transition-colors font-normal ${
+                            editForm.secondary_manager_id === emp.id ? "bg-slate-50 font-semibold" : ""
+                          }`}
+                        >
+                          {emp.profile_photo_url ? (
+                            <img src={emp.profile_photo_url} alt="" className="h-6 w-6 rounded-full object-cover" />
+                          ) : (
+                            <div className="grid h-6 w-6 place-items-center rounded-full bg-slate-100 font-bold text-slate-600 text-[10px]">
+                              {emp.full_name.slice(0, 2).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-xs text-slate-900 truncate font-semibold">{emp.full_name}</p>
+                            <p className="text-[10px] text-slate-500 truncate">{emp.designation || "—"}</p>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <span className="font-semibold text-slate-900 block mt-2">
+                {activeEmployees.find(e => e.id === employee.secondary_manager_id)?.full_name || "—"}
+              </span>
+            )}
+          </div>
+
+          {/* Probation Status Selection */}
+          <div className="text-sm">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Probation Status</span>
+            {isEditing ? (
+              <select
+                value={editForm.probation_status ?? "on_probation"}
+                onChange={(event) => {
+                  updateField("probation_status", event.target.value);
+                  if (event.target.value === "confirmed") {
+                    updateField("employment_confirmed_at", new Date().toISOString());
+                  }
+                }}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 bg-white"
+              >
+                <option value="on_probation">On Probation</option>
+                <option value="confirmed">Confirmed / Permanent</option>
+                <option value="extended">Extended</option>
+                <option value="not_applicable">Not Applicable</option>
+              </select>
+            ) : (
+              <span className="capitalize font-semibold text-slate-900 block mt-2">
+                {(employee.probation_status ?? "on_probation").replace("_", " ")}
+              </span>
+            )}
+          </div>
+
+          {/* Probation End Date Selection */}
+          {(editForm.probation_status === "on_probation" || editForm.probation_status === "extended" || (!isEditing && (employee.probation_status === "on_probation" || employee.probation_status === "extended"))) && (
+            <div className="text-sm">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Probation End Date</span>
+              {isEditing ? (
+                <input
+                  type="date"
+                  value={editForm.probation_end_date ?? ""}
+                  onChange={(event) => updateField("probation_end_date", event.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                />
+              ) : (
+                <span className="font-semibold text-slate-900 block mt-2">
+                  {employee.probation_end_date ? new Date(employee.probation_end_date).toLocaleDateString() : "—"}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Organisational Position Section */}
+          <div className="md:col-span-2 mt-6 border-t border-slate-100 pt-6">
+            <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <Network className="h-5 w-5 text-brand-600" />
+              Organisational Position
+            </h3>
+            <div className="grid gap-4 sm:grid-cols-2 bg-slate-50/50 rounded-2xl border border-slate-200 p-5">
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Reports To</span>
+                <p className="text-sm font-semibold mt-1">
+                  {employee.manager_id ? (
+                    <Link
+                      to={`/hr/org-chart?focus=${employee.manager_id}`}
+                      className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-700 hover:underline font-semibold"
+                    >
+                      {employee.manager_name}
+                    </Link>
+                  ) : (
+                    <span className="text-slate-500 italic">None (Top Level)</span>
+                  )}
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Direct Reports</span>
+                <p className="text-sm text-slate-900 font-semibold mt-1">
+                  {directReportsCount} {directReportsCount === 1 ? "person reports" : "people report"} to this employee
+                </p>
+              </div>
+
+              <div className="sm:col-span-2 space-y-1 border-t border-slate-200/60 pt-4">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Department Hierarchy</span>
+                <div className="flex flex-wrap items-center gap-1.5 mt-2 text-sm text-slate-700 font-medium">
+                  <span className="font-semibold text-slate-900">{tenant?.company_name || "Company"}</span>
+                  <span className="text-slate-400">→</span>
+                  <span className="capitalize font-semibold text-slate-900">{currentUnitName || "No Department"}</span>
+                  <span className="text-slate-400">→</span>
+                  <span className="font-semibold text-brand-600">{employee.full_name}</span>
+                </div>
+              </div>
+
+              {/* Effective-dated unit membership (06-organisation-management.md §3.5) */}
+              <div className="sm:col-span-2 space-y-3 border-t border-slate-200/60 pt-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Unit Assignment History</span>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      Moves are appended, never overwritten, so past months still report against the unit this
+                      employee was actually in at the time.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openTransfer}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Transfer unit
+                  </button>
+                </div>
+
+                {assignmentHistory.length === 0 ? (
+                  <p className="text-xs italic text-slate-500">
+                    No unit assignment recorded yet — a transfer creates the first one.
+                  </p>
+                ) : (
+                  <ol className="space-y-2">
+                    {assignmentHistory.map((assignment) => {
+                      const isCurrent = assignment.effective_to === null;
+                      return (
+                        <li
+                          key={assignment.id}
+                          className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border px-3 py-2 ${
+                            isCurrent ? "border-emerald-200 bg-emerald-50/70" : "border-slate-200 bg-white"
+                          }`}
+                        >
+                          <span className="text-sm font-semibold text-slate-900">
+                            {unitNames[assignment.org_unit_id] ?? "Unknown unit"}
+                          </span>
+                          {isCurrent && (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                              Current
+                            </span>
+                          )}
+                          <span className="text-xs text-slate-600">
+                            {isCurrent
+                              ? `Since ${formatDay(assignment.effective_from)}`
+                              : `${formatDay(assignment.effective_from)} — ${formatDay(assignment.effective_to as string)}`}
+                          </span>
+                          {assignment.reason && (
+                            <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold capitalize text-slate-600">
+                              {assignment.reason}
+                            </span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Self-Onboarding Progress Section */}
+          {onboardingSelf && (
+            <div className="md:col-span-2 mt-6 border-t border-slate-100 pt-6">
+              <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+                <ClipboardList className="h-5 w-5 text-brand-600" />
+                Employee Self-Onboarding Progress
+              </h3>
+              <div className="grid gap-4 grid-cols-2 sm:grid-cols-4 bg-slate-50/50 rounded-2xl border border-slate-200 p-5">
+                {[
+                  { checked: onboardingSelf.personal_details_completed, label: "Personal Details" },
+                  { checked: onboardingSelf.bank_details_completed, label: "Bank & KYC Details" },
+                  { checked: onboardingSelf.documents_completed, label: "Uploaded Documents" },
+                  { checked: onboardingSelf.emergency_contact_completed, label: "Emergency Contact" }
+                ].map((item, idx) => (
+                  <div key={idx} className={`flex flex-col p-3 rounded-xl border text-center transition ${
+                    item.checked ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-slate-150/40 border-slate-200 text-slate-450"
+                  }`}>
+                    <span className="text-xs font-bold">{item.label}</span>
+                    <span className={`text-[10px] font-semibold mt-1 px-2 py-0.5 rounded-full inline-block self-center ${
+                      item.checked ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-650"
+                    }`}>
+                      {item.checked ? "Completed" : "Pending"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -961,71 +2194,60 @@ export default function EmployeeDetail() {
             <div>
               <label className="block text-sm">
                 <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Aadhaar Number</span>
-                {isEditing ? (
-                  <input
-                    value={editForm.aadhaar_number ?? ""}
-                    onChange={(event) => updateField("aadhaar_number", event.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-                  />
-                ) : (
-                  <p className="font-semibold text-slate-900">{maskValue(employee.aadhaar_number, showSensitive)}</p>
-                )}
+                <input
+                  type={showSensitive || isEditing ? "text" : "password"}
+                  value={editForm.aadhaar_number ?? ""}
+                  onChange={(event) => updateField("aadhaar_number", event.target.value)}
+                  disabled={!isEditing}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
+                />
               </label>
             </div>
             <div>
               <label className="block text-sm">
                 <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">PAN Number</span>
-                {isEditing ? (
-                  <input
-                    value={editForm.pan_number ?? ""}
-                    onChange={(event) => updateField("pan_number", event.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-                  />
-                ) : (
-                  <p className="font-semibold text-slate-900">{maskValue(employee.pan_number, showSensitive)}</p>
-                )}
+                <input
+                  type={showSensitive || isEditing ? "text" : "password"}
+                  value={editForm.pan_number ?? ""}
+                  onChange={(event) => updateField("pan_number", event.target.value)}
+                  disabled={!isEditing}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
+                />
               </label>
             </div>
             <div>
               <label className="block text-sm">
                 <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Bank Name</span>
-                {isEditing ? (
-                  <input
-                    value={editForm.bank_name ?? ""}
-                    onChange={(event) => updateField("bank_name", event.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-                  />
-                ) : (
-                  <p className="font-semibold text-slate-900">{employee.bank_name ?? "—"}</p>
-                )}
+                <input
+                  value={editForm.bank_name ?? ""}
+                  onChange={(event) => updateField("bank_name", event.target.value)}
+                  disabled={!isEditing}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
+                />
               </label>
             </div>
             <div>
               <label className="block text-sm">
                 <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Account Number</span>
-                {isEditing ? (
-                  <input
-                    value={editForm.account_number ?? ""}
-                    onChange={(event) => updateField("account_number", event.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-                  />
-                ) : (
-                  <p className="font-semibold text-slate-900">{maskValue(employee.account_number, showSensitive)}</p>
-                )}
+                <input
+                  type={showSensitive || isEditing ? "text" : "password"}
+                  value={editForm.account_number ?? ""}
+                  onChange={(event) => updateField("account_number", event.target.value)}
+                  disabled={!isEditing}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
+                />
               </label>
             </div>
             <div className="md:col-span-2">
               <label className="block text-sm">
                 <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">IFSC Code</span>
-                {isEditing ? (
-                  <input
-                    value={editForm.ifsc_code ?? ""}
-                    onChange={(event) => updateField("ifsc_code", event.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-                  />
-                ) : (
-                  <p className="font-semibold text-slate-900">{maskValue(employee.ifsc_code, showSensitive, 2)}</p>
-                )}
+                <input
+                  type={showSensitive || isEditing ? "text" : "password"}
+                  value={editForm.ifsc_code ?? ""}
+                  onChange={(event) => updateField("ifsc_code", event.target.value)}
+                  disabled={!isEditing}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
+                />
               </label>
             </div>
           </div>
@@ -1043,14 +2265,14 @@ export default function EmployeeDetail() {
                        <File className="h-5 w-5" />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-slate-900">{doc.key.split("/").pop()}</p>
+                      <p className="text-sm font-semibold text-slate-900">{doc.name}</p>
                       <p className="text-xs font-medium text-slate-500 mt-0.5">{new Date(doc.uploadedAt).toLocaleString()} — {(doc.size / 1024).toFixed(1)} KB</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 mt-3 md:mt-0">
                     <button
                       type="button"
-                      onClick={() => handleViewDocument(doc.key)}
+                      onClick={() => handleViewDocument(doc.key, doc.name)}
                       className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-brand-600 transition-colors shadow-sm"
                     >
                       View / Download
@@ -1265,6 +2487,106 @@ export default function EmployeeDetail() {
         </div>
       ) : null}
 
+      {activeTab === "id_card" ? (
+        <div className="mt-4 space-y-6">
+          {!tenant ? (
+            <div className="text-sm text-slate-500">Loading tenant details...</div>
+          ) : (
+            <div className="grid gap-8 md:grid-cols-2">
+              {/* ID Card */}
+              <div className="flex flex-col items-center p-5 rounded-2xl border border-slate-100 bg-slate-50/50 shadow-sm">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Identity Card</h3>
+                <div className="h-[215px] flex items-center justify-center">
+                  <IDCard
+                    ref={idCardRef}
+                    employee={employee}
+                    tenant={tenant}
+                    side={idSide}
+                    type="id"
+                  />
+                </div>
+                <div className="mt-5 flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setIdSide("front")}
+                    className={`rounded-md px-3.5 py-1 text-xs font-semibold transition ${
+                      idSide === "front" ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Front Side
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIdSide("back")}
+                    className={`rounded-md px-3.5 py-1 text-xs font-semibold transition ${
+                      idSide === "back" ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Back Side
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => printCard(idCardRef, `${employee.full_name}_ID_Card_${idSide}`)}
+                  className="mt-5 w-full max-w-[200px] flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-xs font-bold text-white shadow hover:bg-brand-700 active:scale-[0.98] transition"
+                >
+                  <Printer className="h-4 w-4" />
+                  Print / PDF ({idSide === "front" ? "Front" : "Back"})
+                </button>
+              </div>
+
+              {/* Visiting Card */}
+              <div className="flex flex-col items-center p-5 rounded-2xl border border-slate-100 bg-slate-50/50 shadow-sm">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Visiting Card</h3>
+                <div className="h-[215px] flex items-center justify-center">
+                  <IDCard
+                    ref={visitingCardRef}
+                    employee={employee}
+                    tenant={tenant}
+                    side={visitingSide}
+                    type="visiting"
+                  />
+                </div>
+                <div className="mt-5 flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setVisitingSide("front")}
+                    className={`rounded-md px-3.5 py-1 text-xs font-semibold transition ${
+                      visitingSide === "front" ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Front Side
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVisitingSide("back")}
+                    className={`rounded-md px-3.5 py-1 text-xs font-semibold transition ${
+                      visitingSide === "back" ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Back Side
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => printCard(visitingCardRef, `${employee.full_name}_Visiting_Card_${visitingSide}`)}
+                  className="mt-5 w-full max-w-[200px] flex items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-xs font-bold text-white shadow hover:bg-slate-900 active:scale-[0.98] transition"
+                >
+                  <Printer className="h-4 w-4" />
+                  Print / PDF ({visitingSide === "front" ? "Front" : "Back"})
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {activeTab === "history" ? (
+        <div className="mt-4">
+          <EmployeeTimeline employeeId={employee.id} tenantId={employee.tenant_id} />
+        </div>
+      ) : null}
+
       <ConfirmModal
         isOpen={deleteConfirmDocKey !== null}
         onClose={() => setDeleteConfirmDocKey(null)}
@@ -1275,6 +2597,110 @@ export default function EmployeeDetail() {
         confirmColor="red"
         isSubmitting={deletingDoc}
       />
+
+      <ConfirmModal
+        isOpen={showDeleteDraftModal}
+        onClose={() => setShowDeleteDraftModal(false)}
+        onConfirm={() => { void handleDeleteDraft(); }}
+        title="Delete Onboarding Draft"
+        message={`Are you sure you want to reject and delete the draft profile for ${employee?.full_name}? This action is permanent and cannot be undone.`}
+        confirmText="Delete"
+        confirmColor="red"
+        isSubmitting={deletingDraft}
+      />
+
+      <InitiateExitModal
+        isOpen={initiateExitOpen}
+        onClose={() => setInitiateExitOpen(false)}
+        onSuccess={() => { void loadData(); }}
+        preselectedEmployeeId={employee?.id}
+      />
+
+      {transferOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+          onClick={() => !transferring && setTransferOpen(false)}
+        >
+          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h3 className="text-lg font-semibold text-slate-900">Transfer to another unit</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                {currentAssignment
+                  ? `Currently in ${unitNames[currentAssignment.org_unit_id] ?? "an unknown unit"} since ${formatDay(currentAssignment.effective_from)}. That assignment is closed the day before the new one starts — it stays on record.`
+                  : "This employee has no recorded assignment yet. This becomes their first one."}
+              </p>
+            </div>
+
+            <div className="space-y-4 px-5 py-5 text-sm">
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">Move to</span>
+                <select
+                  value={transferUnitId}
+                  onChange={(event) => setTransferUnitId(event.target.value)}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none"
+                >
+                  <option value="">Select a unit</option>
+                  {orgUnits
+                    .filter((unit) => unit.id !== currentAssignment?.org_unit_id)
+                    .map((unit) => (
+                      <option key={unit.id} value={unit.id}>{unit.name}</option>
+                    ))}
+                </select>
+              </label>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block space-y-1">
+                  <span className="font-medium text-slate-700">Effective from</span>
+                  <input
+                    type="date"
+                    value={transferFrom}
+                    min={currentAssignment ? shiftDate(currentAssignment.effective_from, 1) : undefined}
+                    max={formatLocalDate(new Date())}
+                    onChange={(event) => setTransferFrom(event.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="font-medium text-slate-700">Reason</span>
+                  <select
+                    value={transferReason}
+                    onChange={(event) => setTransferReason(event.target.value as "transfer" | "restructure")}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none"
+                  >
+                    <option value="transfer">Transfer — this person moved</option>
+                    <option value="restructure">Restructure — the org changed around them</option>
+                  </select>
+                </label>
+              </div>
+
+              {transferError && (
+                <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+                  {transferError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setTransferOpen(false)}
+                disabled={transferring}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitTransfer()}
+                disabled={transferring}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
+              >
+                {transferring ? "Transferring..." : "Record transfer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {exceptionModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={() => setExceptionModalOpen(false)}>
@@ -1350,6 +2776,111 @@ export default function EmployeeDetail() {
                 {submittingException ? "Saving..." : "Allow Remote Work"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Onboarding Activation Modal */}
+      {activationStep !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="relative w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-950">Activate Employee Login</h3>
+                <p className="text-xs text-slate-500">Completing credential creation for {employee.full_name}</p>
+              </div>
+              {activationStep !== "done" && (
+                <button
+                  type="button"
+                  onClick={() => setActivationStep(null)}
+                  className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              )}
+            </div>
+
+            {activationStep === "verifying" && (
+              <div className="space-y-4">
+                <p className="text-sm text-slate-600">
+                  A 6-digit OTP code has been sent to the email <strong className="text-slate-900">{employee.email}</strong>. Please enter the code below to verify their identity.
+                </p>
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide">6-Digit Verification Code</label>
+                  <input
+                    maxLength={6}
+                    value={otpValue}
+                    onChange={(e) => setOtpValue(e.target.value.replace(/\D/g, ""))}
+                    placeholder="123456"
+                    className="w-full text-center tracking-widest text-lg font-bold rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                  />
+                  {otpError && <p className="text-xs text-rose-600 font-medium">{otpError}</p>}
+                </div>
+                <button
+                  type="button"
+                  disabled={otpLoading || otpValue.length !== 6}
+                  onClick={handleVerifyOtp}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
+                >
+                  {otpLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Verify Code
+                </button>
+              </div>
+            )}
+
+            {activationStep === "setting-password" && (
+              <div className="space-y-4">
+                <p className="text-sm text-slate-600">
+                  Email verified successfully! Now configure a password for their account.
+                </p>
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide">Login Password</label>
+                  <input
+                    type="text"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter password (min 8 chars)"
+                    className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                  />
+                  {newPasswordError && <p className="text-xs text-rose-600 font-medium">{newPasswordError}</p>}
+                </div>
+                <button
+                  type="button"
+                  disabled={otpLoading || newPassword.trim().length < 8}
+                  onClick={handleConfirmPassword}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
+                >
+                  {otpLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Confirm & Activate Profile
+                </button>
+              </div>
+            )}
+
+            {activationStep === "done" && (
+              <div className="space-y-4 text-center">
+                <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-emerald-100 text-emerald-600">
+                  <CheckCircle2 className="h-6 w-6" />
+                </div>
+                <h4 className="font-bold text-slate-900 text-base">Account Activated!</h4>
+                <p className="text-sm text-slate-500">
+                  {employee.full_name} is now fully active in the system. They can log in using these credentials:
+                </p>
+                <div className="rounded-2xl bg-slate-50 p-4 text-left border border-slate-100 space-y-2">
+                  <p className="text-xs text-slate-500 font-semibold">Email: <span className="text-slate-900 select-all font-mono font-bold">{employee.email}</span></p>
+                  <p className="text-xs text-slate-500 font-semibold">Password: <span className="text-slate-900 select-all font-mono font-bold">{newPassword}</span></p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActivationStep(null);
+                    void loadData(); // Reload the whole page data
+                  }}
+                  className="w-full rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white transition hover:bg-brand-700"
+                >
+                  Back to profile
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

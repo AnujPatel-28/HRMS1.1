@@ -8,20 +8,26 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:hrms-workflows": "node scratch/test-exceptions.js && node scratch/test-leave-approval.js"
+    "test:hrms-workflows": "node scratch/test-exceptions.js && node scratch/test-leave-approval.js",
+    "check:policy-drift": "node scripts/check-policy-drift.mjs"
   },
   "dependencies": {
     "@insforge/sdk": "^1.2.5",
     "@types/html2pdf.js": "^0.10.0",
     "@types/leaflet": "^1.9.21",
     "@types/papaparse": "^5.5.2",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.41.0",
     "html2pdf.js": "^0.14.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.8.0",
     "papaparse": "^5.5.3",
+    "pg": "^8.22.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "react-router-dom": "^6.30.3"
+    "react-router-dom": "^6.30.3",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

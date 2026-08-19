@@ -9,7 +9,7 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "files": [],
+  "files": [], // Trigger reload
   "references": [
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" }

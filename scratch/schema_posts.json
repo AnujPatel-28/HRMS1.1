@@ -1,0 +1,12 @@
+Schema retrieved completed successfully:
+{
+  "posts": {
+    "schema": [],
+    "indexes": [],
+    "foreignKeys": [],
+    "rlsEnabled": false,
+    "policies": [],
+    "triggers": [],
+    "rows": []
+  }
+}

@@ -8,7 +8,7 @@ import { useToast } from "../../shared/ToastContext";
 import { Skeleton } from "../../shared/Skeleton";
 import type { Employee } from "../../types";
 import type { SalaryStructure } from "./SalaryStructures";
-import { MONTH_NAMES, formatCurrency, roundCurrency, calcPayslip, getWorkingDays, type PayslipCalc, type SalaryPolicySnapshot } from "./payroll-calc";
+import { MONTH_NAMES, formatCurrency, roundCurrency, calcPayslip, getWorkingDays, getEsiContributionPeriod, type PayslipCalc, type SalaryPolicySnapshot } from "./payroll-calc";
 import { PayrollError } from "../../utils/errors";
 import { uploadPayslipPdf } from "./payslip-pdf";
 
@@ -39,6 +39,8 @@ interface RowCalc extends PayslipCalc {
   overtimeHours?: number;
   overtimeBreakdown?: { id: string; amount: number }[];
   hasMidMonthRevision?: boolean;
+  expensesReimbursement?: number;
+  expenseItems?: any[];
 }
 
 const now = new Date();
@@ -143,7 +145,7 @@ export default function RunPayroll() {
       const startDate = `${monthStr}-01`;
       const endDate = `${monthStr}-${new Date(year, month, 0).getDate().toString().padStart(2, "0")}`;
 
-      const [empRes, structRes, attRes, holRes, overtimeRes, settingsRes, leavesRes, existingPayslipsRes] = await Promise.all([
+      const [empRes, structRes, attRes, holRes, overtimeRes, settingsRes, leavesRes, existingPayslipsRes, approvedExpensesRes, esiHistoryRes] = await Promise.all([
         db.from("employees").select("*").eq("tenant_id", tenantId).eq("status", "active").order("full_name"),
         db.from("salary_structures").select("*").eq("tenant_id", tenantId).order("effective_from", { ascending: false }),
         db.from("attendance").select("employee_id,status,date").eq("tenant_id", tenantId).gte("date", startDate).lte("date", endDate),
@@ -160,6 +162,13 @@ export default function RunPayroll() {
         existingRun
           ? db.from("payslips").select("employee_id,net_payable,policy_snapshot").eq("tenant_id", tenantId).eq("payroll_run_id", existingRun.id)
           : Promise.resolve({ data: [], error: null }),
+        db.from("expenses").select("*").eq("tenant_id", tenantId).eq("status", "approved").is("payroll_run_id", null),
+        // Earlier payslips in this ESI contribution period, to detect existing coverage.
+        db
+          .from("payslips")
+          .select("employee_id,esi_employee,month,year")
+          .eq("tenant_id", tenantId)
+          .gt("esi_employee", 0),
       ]);
 
       if (empRes.error) throw empRes.error;
@@ -170,6 +179,21 @@ export default function RunPayroll() {
       if (settingsRes.error) throw settingsRes.error;
       if (leavesRes.error) throw leavesRes.error;
       if (existingPayslipsRes.error) throw existingPayslipsRes.error;
+      if (approvedExpensesRes.error) throw approvedExpensesRes.error;
+      if (esiHistoryRes.error) throw esiHistoryRes.error;
+
+      // Employees already covered by ESI earlier in the current contribution period keep their
+      // coverage for the rest of it, even if their wages have since crossed the ceiling.
+      const esiPeriod = getEsiContributionPeriod(year, month);
+      const periodStartOrdinal = esiPeriod.startYear * 12 + esiPeriod.startMonth;
+      const currentOrdinal = year * 12 + month;
+      const esiCoveredInPeriod = new Set<string>();
+      ((esiHistoryRes.data ?? []) as { employee_id: string; month: number; year: number }[]).forEach((slip) => {
+        const ordinal = slip.year * 12 + slip.month;
+        if (ordinal >= periodStartOrdinal && ordinal < currentOrdinal) {
+          esiCoveredInPeriod.add(slip.employee_id);
+        }
+      });
       const employees = (empRes.data ?? []) as Employee[];
       const allStructures = (structRes.data ?? []) as SalaryStructure[];
       const attendances = (attRes.data ?? []) as { employee_id: string; status: string; date: string }[];
@@ -183,7 +207,14 @@ export default function RunPayroll() {
         approved: boolean;
         date: string;
       }[];
-      
+      const approvedExpenses = (approvedExpensesRes.data ?? []) as any[];
+      const expensesMap = new Map<string, { total: number; items: any[] }>();
+      approvedExpenses.forEach((exp) => {
+        const cur = expensesMap.get(exp.employee_id) ?? { total: 0, items: [] };
+        cur.total += exp.amount;
+        cur.items.push(exp);
+        expensesMap.set(exp.employee_id, cur);
+      });
       const settingsRows = (settingsRes.data ?? []) as { key: string; value: string }[];
       const settings = settingsRows.reduce<Record<string, string>>((acc, row) => {
         acc[row.key] = row.value;
@@ -200,12 +231,14 @@ export default function RunPayroll() {
       }
 
       const policy: SalaryPolicySnapshot = {
-        snapshot_version: 2,
+        snapshot_version: 3,
         lopCalculationMethod: (settings.lop_calculation_method as any) || "working_days",
         pfWageCeiling: settings.pf_wage_ceiling ? Number(settings.pf_wage_ceiling) : 15000,
         esiGrossCeiling: settings.esi_gross_ceiling ? Number(settings.esi_gross_ceiling) : 21000,
         professionalTaxState: settings.professional_tax_state || "",
         professionalTaxManualAmount: settings.professional_tax_manual_amount ? Number(settings.professional_tax_manual_amount) : null,
+        professionalTaxSlabsApplied: true,
+        esiContributionPeriodLockIn: true,
       };
 
       // Latest structure per employee (effective_from ≤ last day of month)
@@ -321,7 +354,9 @@ export default function RunPayroll() {
         
         // No attendance records: treat as zero presence (do not default to full pay)
         const att = attMap.get(emp.id) ?? { daysPresent: 0, daysAbsent: workingDays, paidLeaveDays: 0, unpaidLeaveDays: 0, halfDays: 0 };
-        const calc = calcPayslip(struct, att, overtimeAmount, year, month, holidayDates, policy);
+        const calc = calcPayslip(struct, att, overtimeAmount, year, month, holidayDates, policy, {
+          esiCoveredEarlierInPeriod: esiCoveredInPeriod.has(emp.id),
+        });
         
         const lateSummary = lateSummaryMap.get(emp.id) ?? {};
         const workHoursPerDay = Number(tenant?.work_hours_per_day ?? 8);
@@ -332,7 +367,9 @@ export default function RunPayroll() {
         const lateDeductionAmount = roundCurrency((lateSummary.deduction_hours ?? 0) * hourlyRate);
         const otherDeductions = roundCurrency(calc.otherDeductions + lateDeductionAmount);
         const totalDeductions = roundCurrency(calc.totalDeductions + lateDeductionAmount);
-        const netPayable = Math.max(roundCurrency(calc.grossSalary - totalDeductions), 0);
+        const expData = expensesMap.get(emp.id) ?? { total: 0, items: [] };
+        const totalExpenses = expData.total;
+        const netPayable = Math.max(roundCurrency(calc.grossSalary - totalDeductions), 0) + totalExpenses;
 
         // Check for mid-month revisions
         const empStructures = allStructures.filter((s) => s.employee_id === emp.id);
@@ -362,6 +399,8 @@ export default function RunPayroll() {
           overtimeAmount,
           overtimeBreakdown: overtimeSummary?.breakdown ?? [],
           hasMidMonthRevision: hasRevision,
+          expensesReimbursement: totalExpenses,
+          expenseItems: expData.items,
         });
       }
 
@@ -475,6 +514,7 @@ export default function RunPayroll() {
           total_deductions: r.totalDeductions,
           net_payable: r.finalNet,
           pdf_url: pdfUrl,
+          expenses_reimbursement: r.expensesReimbursement || 0,
           policy_snapshot: {
             ...r.policySnapshot,
             paid_leave_days: r.paidLeaveDays,
@@ -489,10 +529,35 @@ export default function RunPayroll() {
             pf_base: r.pfBase,
             calculated_net: r.calculatedNet,
             override_net: overrides[r.employeeId] !== undefined ? r.finalNet : null,
+            expense_items: r.expenseItems || [],
           },
         };
         const { error: slipErr } = await db.from("payslips").upsert([payload], { onConflict: "tenant_id,payroll_run_id,employee_id" });
         if (slipErr) throw slipErr;
+      }
+
+      if (approve) {
+        // Collect all expense IDs included in this payroll run
+        const allExpenseIds: string[] = [];
+        rowsWithFinal.forEach((r) => {
+          if (r.expenseItems) {
+            r.expenseItems.forEach((exp: any) => {
+              allExpenseIds.push(exp.id);
+            });
+          }
+        });
+
+        if (allExpenseIds.length > 0) {
+          const { error: expUpdateErr } = await db
+            .from("expenses")
+            .update({
+              status: "reimbursed",
+              payroll_run_id: runId,
+              reimbursed_at: new Date().toISOString(),
+            })
+            .in("id", allExpenseIds);
+          if (expUpdateErr) throw expUpdateErr;
+        }
       }
 
       success(approve ? "Payroll approved and payslips saved!" : "Payroll saved as draft.");

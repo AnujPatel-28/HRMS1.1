@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Lock, LogIn, LogOut, Clock, CheckCircle } from "lucide-react";
+import { useManagerView } from "../hooks/useManagerView";
 import type { Attendance, Task } from "../types";
 import { db, functions, storage } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
@@ -112,6 +113,7 @@ function toTimeInputValue(value: string | null | undefined) {
 export default function PunchInOut() {
   const { employee } = useEmployee();
   const { tenant, tenantId } = useTenant();
+  const { isManagerMode } = useManagerView();
   const { shift, isLoading: shiftLoading } = useEmployeeShift();
   const { logAction } = useAuditLog();
   const [attendance, setAttendance] = useState<AttendanceWithLocation | null>(null);
@@ -277,7 +279,7 @@ export default function PunchInOut() {
           .gte("attendance_date", recentStartDate)
           .lte("attendance_date", TODAY),
       ]);
-      
+
       let activeAttendance = null;
       if (attRes.data) {
         activeAttendance = attRes.data;
@@ -356,17 +358,17 @@ export default function PunchInOut() {
 
   useEffect(() => {
     if (attendance?.current_break_start) {
-      const limit = activeBreakType === "lunch" 
-        ? (tenant.lunch_break_minutes || 60) 
+      const limit = activeBreakType === "lunch"
+        ? (tenant.lunch_break_minutes || 60)
         : parseInt(tenantSettings["short_break_limit_minutes"] || "15", 10);
 
       const tickBreak = () => {
         const diff = Date.now() - new Date(attendance.current_break_start!).getTime();
         const m = Math.floor(diff / 60000);
         const s = Math.floor((diff % 60000) / 1000);
-        
+
         setBreakElapsed(`${m}m ${s}s`);
-        
+
         if (m >= limit) {
           setBreakOvertime(m - limit);
         } else {
@@ -432,11 +434,11 @@ export default function PunchInOut() {
   const determinePunchPolicy = async (direction: "punch_in" | "punch_out"): Promise<PunchRequirements> => {
     const remoteWorkHandling = tenantSettings["remote_work_handling"] || "hr_approved_exceptions";
     const selfieModeSetting = tenantSettings["attendance_selfie_mode"] || "disabled";
-    
+
     let geofenceRequired = true;
     let remoteExceptionId: string | null = null;
     let remoteExceptionType: string | null = null;
-    
+
     if (remoteWorkHandling === "always_allowed") {
       geofenceRequired = false;
     } else if (remoteWorkHandling === "hr_approved_exceptions") {
@@ -454,7 +456,7 @@ export default function PunchInOut() {
           .gte("end_date", TODAY)
           .limit(1)
           .maybeSingle();
-        
+
         if (activeExceptions) {
           geofenceRequired = false;
           remoteExceptionId = activeExceptions.id;
@@ -464,7 +466,7 @@ export default function PunchInOut() {
     } else {
       geofenceRequired = true;
     }
-    
+
     let selfieRequired = false;
     if (selfieModeSetting === "both") {
       selfieRequired = true;
@@ -473,9 +475,9 @@ export default function PunchInOut() {
     } else if (selfieModeSetting === "punch_out" && direction === "punch_out") {
       selfieRequired = true;
     }
-    
+
     const gpsRequired = geofenceRequired || (tenantSettings["gps_verification_mode"] || "warn") !== "disabled";
-    
+
     return {
       geofenceRequired,
       selfieRequired,
@@ -487,18 +489,18 @@ export default function PunchInOut() {
 
   const handlePunchClick = async (direction: "punch_in" | "punch_out") => {
     if (!employee?.id || !tenantId || !tenant || acting) return;
-    
+
     setActing(true);
     setActionText("Checking punch policy...");
-    
+
     try {
       const policy = await determinePunchPolicy(direction);
-      
+
       setPendingPunchContext({
         direction,
         policy,
       });
-      
+
       if (policy.selfieRequired) {
         setSelfieModalOpen(true);
         setActionText("");
@@ -519,11 +521,11 @@ export default function PunchInOut() {
     selfieBlob: Blob
   ) => {
     const filePath = `${tenantId}/${employee.id}/${attendanceId}/${type}.jpg`;
-    
+
     const { data: uploadData, error: uploadError } = await storage
       .from("attendance-selfies")
       .upload(filePath, selfieBlob);
-      
+
     if (uploadError) {
       console.error("Selfie upload failed:", uploadError);
       await db
@@ -534,7 +536,7 @@ export default function PunchInOut() {
       void logAction("attendance.selfie_missing", "attendance", attendanceId, { error: uploadError.message });
       return;
     }
-    
+
     const { error: selfieDbErr } = await db
       .from("attendance_selfies")
       .insert([{
@@ -544,13 +546,13 @@ export default function PunchInOut() {
         type,
         storage_path: uploadData.key,
       }]);
-      
+
     if (selfieDbErr) {
       console.error("Selfie DB link failed:", selfieDbErr);
       await storage.from("attendance-selfies").remove(uploadData.key);
       return;
     }
-    
+
     void logAction("attendance.selfie_uploaded", "attendance", attendanceId, { type });
   };
 
@@ -560,27 +562,27 @@ export default function PunchInOut() {
     selfieBlob: Blob | null
   ) => {
     setActionText("Getting location...");
-    
+
     const gpsMode = tenantSettings["gps_verification_mode"] || "warn";
     const highConfMax = Number(tenantSettings["high_confidence_max"] || 50);
     const medConfMax = Number(tenantSettings["medium_confidence_max"] || 150);
     const lowConfMax = Number(tenantSettings["low_confidence_max"] || 300);
-    
+
     const officeLat = parseFloat(tenantSettings["office_lat"] || "0");
     const officeLng = parseFloat(tenantSettings["office_lng"] || "0");
     const radiusMeters = parseInt(tenantSettings["geofence_radius_meters"] || "500", 10);
-    
+
     let lat: number | null = null;
     let lng: number | null = null;
     let accuracy: number | null = null;
     let confidence: "high" | "medium" | "low" | "very_low" | null = null;
     let status: "office_verified" | "remote_approved" | "outside_geofence" | "gps_low_confidence" | "gps_denied" | "gps_unavailable" | "manual_override" | "selfie_missing" | null = null;
-    
+
     let gpsCaptured = false;
     let gpsErrorReason: string | null = null;
-    
+
     const shouldPromptGps = policy.geofenceRequired || gpsMode !== "disabled";
-    
+
     if (shouldPromptGps) {
       try {
         const position = await getCurrentPosition();
@@ -588,12 +590,12 @@ export default function PunchInOut() {
         lng = position.lng;
         accuracy = position.accuracy;
         gpsCaptured = true;
-        
+
         if (accuracy <= highConfMax) confidence = "high";
         else if (accuracy <= medConfMax) confidence = "medium";
         else if (accuracy <= lowConfMax) confidence = "low";
         else confidence = "very_low";
-        
+
         if (confidence === "low" || confidence === "very_low") {
           void logAction("attendance.gps_low_confidence", "attendance", null, {
             accuracy,
@@ -613,7 +615,7 @@ export default function PunchInOut() {
         }
       }
     }
-    
+
     if (!policy.geofenceRequired) {
       status = "remote_approved";
     } else {
@@ -652,12 +654,12 @@ export default function PunchInOut() {
         }
       }
     }
-    
+
     const isSelfieMissing = policy.selfieRequired && !selfieBlob;
     if (isSelfieMissing) {
       status = "selfie_missing";
     }
-    
+
     const verificationSnapshot = {
       accuracy,
       confidence,
@@ -674,7 +676,7 @@ export default function PunchInOut() {
       gps_captured: gpsCaptured,
       gps_error_reason: gpsErrorReason,
     };
-    
+
     setActionText(direction === "punch_in" ? "Clocking In..." : "Clocking Out...");
     try {
       if (direction === "punch_in") {
@@ -713,7 +715,7 @@ export default function PunchInOut() {
 
     const ip = await getIp();
     const now = new Date();
-    
+
     const shiftStartDate = new Date();
     shiftStartDate.setHours(Math.floor(shiftStartTime / 60), shiftStartTime % 60, 0, 0);
     if (isNightShift && now.getHours() < 12) {
@@ -725,10 +727,10 @@ export default function PunchInOut() {
       halfDayCutoffDate.setDate(halfDayCutoffDate.getDate() + 1);
     }
     const isHalfDay = now.getTime() > halfDayCutoffDate.getTime();
-    
+
     const unapprovedTasks = todayTasks.filter((task) => BLOCKING_TASK_STATUSES.includes(task.status as any));
     const allowed = tenant.punch_out_gate_enabled ? unapprovedTasks.length === 0 : true;
-    
+
     const gracePeriodMinutes =
       shift?.late_mark_grace_override != null
         ? shift.late_mark_grace_override
@@ -736,7 +738,7 @@ export default function PunchInOut() {
     const elapsedSinceShiftStartMinutes = (now.getTime() - shiftStartDate.getTime()) / 60000;
     const lateMarkFeatureEnabled = tenantSettings["late_mark_enabled"] === "true";
     const isLate = lateMarkFeatureEnabled && elapsedSinceShiftStartMinutes > gracePeriodMinutes;
-    
+
     const { data: inserted, error: dbErr } = await db.from("attendance").insert([{
       employee_id: employee.id,
       tenant_id: tenantId,
@@ -755,9 +757,9 @@ export default function PunchInOut() {
       remote_exception_id: remoteExceptionId,
       verification_snapshot: verificationSnapshot,
     }]).select("id").single();
-    
+
     if (dbErr) throw dbErr;
-    
+
     if (isLate && inserted?.id) {
       const { error: lateErr } = await db
         .from("attendance")
@@ -766,15 +768,15 @@ export default function PunchInOut() {
         .eq("id", inserted.id);
       if (lateErr) throw lateErr;
     }
-    
+
     const attendanceId = inserted?.id;
-    
+
     if (selfieBlob && attendanceId) {
       await handleSelfieUpload(attendanceId, "punch_in", selfieBlob);
     } else if (!selfieBlob && verificationSnapshot.selfie_required) {
       void logAction("attendance.selfie_missing", "attendance", attendanceId);
     }
-    
+
     void logAction("punch_in", "attendance", attendanceId);
     success("Punched in successfully!");
     void fetchData();
@@ -793,7 +795,7 @@ export default function PunchInOut() {
     const overtimeEnabled = tenantSettings["overtime_enabled"] === "true";
     const overtimeRate = parseFloat(tenantSettings["overtime_rate"] || "1.5");
     let expectedShiftHours = Number(tenant.work_hours_per_day || 8);
-    
+
     if (shift) {
       const shiftStartMin = parseTime(shift.start_time);
       const shiftEndMin = parseTime(shift.end_time);
@@ -803,7 +805,7 @@ export default function PunchInOut() {
         : (24 * 60 - shiftStartMin) + shiftEndMin;
       expectedShiftHours = (shiftDurationMinutes - lunchMinutes) / 60;
     }
-    
+
     const { data, error: dbErr } = await db.rpc("punch_out_attendance", {
       p_attendance_id: attendance!.id,
       p_tenant_id: tenantId,
@@ -816,12 +818,12 @@ export default function PunchInOut() {
       p_overtime_rate: overtimeRate,
       p_expected_shift_hours: parseFloat(expectedShiftHours.toFixed(2))
     });
-    
+
     if (dbErr) throw dbErr;
     if (data && data.success === false) {
       throw data;
     }
-    
+
     const { error: updateErr } = await db
       .from("attendance")
       .update({
@@ -833,19 +835,19 @@ export default function PunchInOut() {
       })
       .eq("tenant_id", tenantId)
       .eq("id", attendance!.id);
-      
+
     if (updateErr) {
       console.error("Failed to update punch-out verification columns", updateErr);
     }
-    
+
     const workHoursReturned = data?.work_hours ?? 0;
-    
+
     if (selfieBlob) {
       await handleSelfieUpload(attendance!.id, "punch_out", selfieBlob);
     } else if (!selfieBlob && verificationSnapshot.selfie_required) {
       void logAction("attendance.selfie_missing", "attendance", attendance!.id);
     }
-    
+
     void logAction("punch_out", "attendance", attendance!.id, {
       work_hours: workHoursReturned,
       expected_hours: Number(expectedHours.toFixed(2)),
@@ -1043,12 +1045,11 @@ export default function PunchInOut() {
                   </>
                 ) : null}
                 {record ? (
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${
-                    record.status === "present" ? "bg-emerald-100 text-emerald-700" :
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${record.status === "present" ? "bg-emerald-100 text-emerald-700" :
                     record.status === "half_day" ? "bg-amber-100 text-amber-700" :
-                    record.status === "on_leave" ? "bg-blue-100 text-blue-700" :
-                    "bg-rose-100 text-rose-700"
-                  }`}>
+                      record.status === "on_leave" ? "bg-blue-100 text-blue-700" :
+                        "bg-rose-100 text-rose-700"
+                    }`}>
                     {record.status.replace("_", " ")}
                   </span>
                 ) : null}
@@ -1080,9 +1081,17 @@ export default function PunchInOut() {
         <Skeleton className="mx-auto h-64 w-full max-w-sm rounded-2xl" />
       </section>
     );
-  }  let mainContent: React.ReactNode;
+  } let mainContent: React.ReactNode;
 
-  if (attendance?.status === "on_leave") {
+  if (isManagerMode) {
+    mainContent = (
+      <div className="mx-auto max-w-sm rounded-2xl border border-amber-200 bg-amber-50 p-8 text-center shadow-sm">
+        <Clock className="mx-auto mb-3 h-14 w-14 text-amber-500" />
+        <h3 className="mb-1 text-xl font-bold text-amber-700">Manager Mode Active</h3>
+        <p className="text-slate-600">Switch to My View to manage your own attendance.</p>
+      </div>
+    );
+  } else if (attendance?.status === "on_leave") {
     mainContent = (
       <div className="mx-auto max-w-sm rounded-2xl border border-emerald-200 bg-emerald-50 p-8 text-center shadow-sm">
         <CheckCircle className="mx-auto mb-3 h-14 w-14 text-emerald-500" />
@@ -1273,11 +1282,10 @@ export default function PunchInOut() {
               }
             }}
             disabled={acting}
-            className={`w-full rounded-xl py-4 text-lg font-bold text-white shadow-md transition ${
-              locked
-                ? "cursor-not-allowed bg-slate-300 hover:bg-slate-400"
-                : "bg-brand-600 hover:bg-brand-700 active:scale-95"
-            } disabled:opacity-80`}
+            className={`w-full rounded-xl py-4 text-lg font-bold text-white shadow-md transition ${locked
+              ? "cursor-not-allowed bg-slate-300 hover:bg-slate-400"
+              : "bg-brand-600 hover:bg-brand-700 active:scale-95"
+              } disabled:opacity-80`}
           >
             <span className="flex items-center justify-center gap-2">
               {locked ? <Lock className="h-5 w-5" /> : <LogOut className="h-5 w-5" />}
@@ -1312,13 +1320,12 @@ export default function PunchInOut() {
               {todayTasks.map((task) => (
                 <div key={task.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
                   <p className="text-sm font-medium text-slate-800">{task.title}</p>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${
-                    task.status === "approved" ? "bg-emerald-100 text-emerald-700" :
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${task.status === "approved" ? "bg-emerald-100 text-emerald-700" :
                     task.status === "submitted" ? "bg-purple-100 text-purple-700" :
-                    task.status === "overdue" ? "bg-red-100 text-red-700" :
-                    task.status === "rejected" ? "bg-rose-100 text-rose-700" :
-                    "bg-amber-100 text-amber-700"
-                  }`}>{task.status.replace("_", " ")}</span>
+                      task.status === "overdue" ? "bg-red-100 text-red-700" :
+                        task.status === "rejected" ? "bg-rose-100 text-rose-700" :
+                          "bg-amber-100 text-amber-700"
+                    }`}>{task.status.replace("_", " ")}</span>
                 </div>
               ))}
             </div>
@@ -1445,7 +1452,7 @@ export default function PunchInOut() {
             <h3 className="text-lg font-semibold text-slate-900 text-center">
               Selfie Verification Required
             </h3>
-            
+
             {cameraError ? (
               <div className="rounded-xl bg-rose-50 border border-rose-200 p-4 text-center">
                 <p className="text-sm font-medium text-rose-800">{cameraError}</p>
@@ -1472,7 +1479,7 @@ export default function PunchInOut() {
                 <div className="absolute inset-0 border-2 border-dashed border-white/30 rounded-xl pointer-events-none m-4" />
               </div>
             )}
-            
+
             <div className="space-y-2">
               {!selfiePreviewUrl && !cameraError && (
                 <button
@@ -1482,7 +1489,7 @@ export default function PunchInOut() {
                   Capture Photo
                 </button>
               )}
-              
+
               {selfiePreviewUrl && (
                 <div className="flex gap-2">
                   <button
@@ -1511,7 +1518,7 @@ export default function PunchInOut() {
                   </button>
                 </div>
               )}
-              
+
               <div className="flex gap-2 pt-2 border-t border-slate-100">
                 <button
                   onClick={() => {
@@ -1551,3 +1558,4 @@ export default function PunchInOut() {
     </section>
   );
 }
+// Trigger refresh
