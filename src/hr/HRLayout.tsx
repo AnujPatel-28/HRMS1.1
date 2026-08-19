@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, Clock, Palmtree, Calendar, MessageSquare, Contact, GitBranch, ClipboardList, Gift, FileText, Wallet, Settings, Rss, FolderKanban, Receipt, Shield, Briefcase, ChevronDown, Menu, Columns, Layers, LayoutGrid, Network } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
+import { useTenant } from "../contexts/TenantContext";
+import { RequireModule } from "../shared/RequireModule";
+import type { ModuleKey } from "../modules";
 import { db, realtime } from "../insforge/client";
 
 import { NotificationBell } from "../shared/NotificationBell";
@@ -14,6 +17,8 @@ type NavLinkItem = {
   label: string;
   href: string;
   icon: React.ElementType;
+  /** Hidden when this module is disabled for the tenant. Omit for always-visible items. */
+  module?: ModuleKey;
 };
 
 type NavSection = {
@@ -22,7 +27,7 @@ type NavSection = {
   items: readonly NavLinkItem[];
 };
 
-const sections: readonly NavSection[] = [
+const allSections: readonly NavSection[] = [
   {
     title: "People",
     icon: Users,
@@ -31,27 +36,27 @@ const sections: readonly NavSection[] = [
       { label: "Directory", href: "/hr/directory", icon: Contact },
       { label: "Org Chart", href: "/hr/org-chart", icon: GitBranch },
       { label: "Org Setup", href: "/hr/org-structure", icon: Network },
-      { label: "Offboarding", href: "/hr/offboarding", icon: LogOut },
-      { label: "Insurance", href: "/hr/insurance", icon: Shield },
+      { label: "Offboarding", href: "/hr/offboarding", icon: LogOut, module: "offboarding" },
+      { label: "Insurance", href: "/hr/insurance", icon: Shield, module: "insurance" },
     ],
   },
   {
     title: "Attendance",
     icon: CalendarCheck,
     items: [
-      { label: "Attendance", href: "/hr/attendance", icon: CalendarCheck },
-      { label: "Shifts", href: "/hr/shifts", icon: Clock },
+      { label: "Attendance", href: "/hr/attendance", icon: CalendarCheck, module: "attendance" },
+      { label: "Shifts", href: "/hr/shifts", icon: Clock, module: "attendance" },
     ],
   },
   {
     title: "HR Management",
     icon: Briefcase,
     items: [
-      { label: "Leaves", href: "/hr/leaves", icon: Palmtree },
-      { label: "Tasks", href: "/hr/tasks", icon: ClipboardList },
-      { label: "Projects", href: "/hr/pms", icon: FolderKanban },
-      { label: "Expenses", href: "/hr/expenses", icon: Receipt },
-      { label: "Holidays", href: "/hr/holidays", icon: Gift },
+      { label: "Leaves", href: "/hr/leaves", icon: Palmtree, module: "leave" },
+      { label: "Tasks", href: "/hr/tasks", icon: ClipboardList, module: "tasks" },
+      { label: "Projects", href: "/hr/pms", icon: FolderKanban, module: "tasks" },
+      { label: "Expenses", href: "/hr/expenses", icon: Receipt, module: "expenses" },
+      { label: "Holidays", href: "/hr/holidays", icon: Gift, module: "leave" },
       { label: "Calendar", href: "/hr/calendar", icon: Calendar },
     ],
   },
@@ -59,18 +64,18 @@ const sections: readonly NavSection[] = [
     title: "Communication",
     icon: MessageSquare,
     items: [
-      { label: "Chat", href: "/hr/chat", icon: MessageSquare },
-      { label: "Connect", href: "/hr/connect", icon: Rss },
+      { label: "Chat", href: "/hr/chat", icon: MessageSquare, module: "chat" },
+      { label: "Connect", href: "/hr/connect", icon: Rss, module: "connect" },
     ],
   },
   {
     title: "Admin",
     icon: Settings,
     items: [
-      { label: "Policies", href: "/hr/policies", icon: FileText },
-      { label: "Payroll", href: "/payroll/hr/salaries", icon: Wallet },
-      { label: "IT Declarations", href: "/hr/declarations", icon: ClipboardList },
-      { label: "Policy Center", href: "/hr/policy-center", icon: Settings },
+      { label: "Policies", href: "/hr/policies", icon: FileText, module: "policy_center" },
+      { label: "Payroll", href: "/payroll/hr/salaries", icon: Wallet, module: "payroll" },
+      { label: "IT Declarations", href: "/hr/declarations", icon: ClipboardList, module: "payroll" },
+      { label: "Policy Center", href: "/hr/policy-center", icon: Settings, module: "policy_center" },
     ],
   },
 ];
@@ -349,16 +354,32 @@ function HRSidebarContent({
   );
 }
 
-const flatLinks = [
-  { label: "Dashboard", href: "/hr/dashboard", icon: Home },
-  ...sections.flatMap((s) => s.items),
-];
+const dashboardLink: NavLinkItem = { label: "Dashboard", href: "/hr/dashboard", icon: Home };
 
 export default function HRLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { logout, tenantId } = useAuth();
   const { employee } = useEmployee();
+  const { hasModule } = useTenant();
+
+  // Hide nav entries whose module this tenant does not have. Sections that end up empty are
+  // dropped entirely, so a disabled module leaves no empty heading behind.
+  const sections = useMemo(
+    () =>
+      allSections
+        .map((section) => ({
+          ...section,
+          items: section.items.filter((item) => !item.module || hasModule(item.module)),
+        }))
+        .filter((section) => section.items.length > 0),
+    [hasModule],
+  );
+
+  const flatLinks = useMemo(
+    () => [dashboardLink, ...sections.flatMap((s) => s.items)],
+    [sections],
+  );
   const [mobileOpen, setMobileOpen] = useState(false);
   const [unreadConnectCount, setUnreadConnectCount] = useState(0);
   const [pendingExpensesCount, setPendingExpensesCount] = useState(0);
@@ -600,7 +621,7 @@ export default function HRLayout() {
 
             {/* Main content (Desktop Classic) */}
             <main className="min-w-0 flex-1">
-              <Outlet context={{ layoutStyle }} />
+              <RequireModule to="/hr/dashboard"><Outlet context={{ layoutStyle }} /></RequireModule>
             </main>
           </div>
         ) : (
@@ -848,7 +869,7 @@ export default function HRLayout() {
                 </div>
               </div>
               <div className="flex-1 p-6 overflow-y-auto bg-[url('/bg1.1.1.svg')] bg-cover bg-center bg-no-repeat bg-fixed">
-                <Outlet context={{ layoutStyle }} />
+                <RequireModule to="/hr/dashboard"><Outlet context={{ layoutStyle }} /></RequireModule>
               </div>
             </main>
           </div>
@@ -856,7 +877,7 @@ export default function HRLayout() {
 
         {/* ── Mobile: just the outlet ── */}
         <main className="md:hidden min-w-0 flex-1">
-          <Outlet context={{ layoutStyle }} />
+          <RequireModule to="/hr/dashboard"><Outlet context={{ layoutStyle }} /></RequireModule>
         </main>
 
         {/* Mobile Slide-over Drawer */}

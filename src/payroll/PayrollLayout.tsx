@@ -5,6 +5,7 @@ import { useTenant } from "../contexts/TenantContext";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
 import { NotificationBell } from "../shared/NotificationBell";
+import { RequireModule } from "../shared/RequireModule";
 import { Sidebar, DesktopSidebar, SidebarLink } from "../components/ui/sidebar";
 
 const links: { label: string; href: string; icon: React.ElementType; disabled?: boolean; note?: string }[] = [
@@ -175,7 +176,9 @@ export default function PayrollLayout() {
         </aside>
 
         <main className="min-w-0 flex-1">
-          <Outlet />
+          <RequireModule to="/select">
+            <Outlet />
+          </RequireModule>
         </main>
       </div>
     </div>

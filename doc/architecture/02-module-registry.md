@@ -31,10 +31,50 @@
 >
 > Live policy count went 210 → 247. Drift guard green.
 >
-> **Not yet built:** the frontend half — `TenantContext` loading `tenant_modules`, `hasModule(key)`,
-> nav filtering, route guards, and the superadmin toggle UI. The API boundary is enforced; the UI
-> still shows every module. A disabled module currently renders as empty screens rather than a hidden
-> nav entry.
+> ### Frontend — shipped 2026-08-17
+>
+> | File | Role |
+> |---|---|
+> | `src/modules.ts` | `ModuleKey` union, `CORE_MODULES`, and `moduleForPath()` (longest-prefix route → module) |
+> | `src/contexts/TenantContext.tsx` | Loads `tenant_modules` once per session; exposes `hasModule(key)` |
+> | `src/shared/RequireModule.tsx` | Route guard — silently redirects away from a disabled module |
+> | `src/hr/HRLayout.tsx`, `src/employee/EmployeeLayout.tsx` | Nav entries tagged with `module`; filtered, and empty sections dropped |
+> | `src/payroll/PayrollLayout.tsx` | Guarded on `payroll` |
+>
+> Verified: the exact query `TenantContext` runs returns 12 modules for both HR and employee roles;
+> HR attempting to grant itself a module is refused (`403`, RLS); the catalogue is readable and
+> `directory` is the only core module; `moduleForPath()` 22/22 on a route table including the
+> longest-prefix case (`/hr/policy-center` is not shadowed by `/hr/policies`). Typecheck and build pass.
+>
+> **Fails open by design.** If the entitlement query errors, `hasModule()` returns true for everything
+> and logs a warning. The database is the real boundary, so a failed lookup must not black out the
+> product — the worst case is a screen that comes back empty, which is what happened before this
+> existed. A guard that fails *closed* on a network blip would hide modules the tenant has paid for.
+>
+> ### Superadmin toggle UI — shipped 2026-08-18
+>
+> `src/admin/TenantModulesPanel.tsx`, embedded in the tenant detail modal in `AllCompanies.tsx`.
+> Per-module switches; core modules render locked with a tooltip explaining why.
+>
+> **A refused write returns `200` with zero rows, not an error.** RLS enforces
+> `tenant_modules_platform_all` by matching no rows, so PostgREST replies `200 []`. The panel therefore
+> chains `.select()` on every write and treats an empty result as a failure — without that, a
+> non-platform user's toggle would appear to succeed while the database was unchanged, and the UI would
+> silently drift. This is the single most important detail in the component.
+>
+> Verified by temporarily granting a QA user `support_admin`, then revoking it:
+>
+> ```
+> non-platform user  -> 200, rowsChanged 0, applied false   (correctly refused)
+> platform admin     -> 200, rowsChanged 1, applied true    (disable, then re-enable)
+> grant revoked      -> 200, rowsChanged 0, applied false   (correctly refused again)
+>
+> final: 12/12 modules enabled, platform_admins back to 1 row
+> ```
+>
+> Note `platform_admins.role` is constrained to `owner | support_admin | billing_admin`.
+>
+> **Phase 0b is complete** — registry, RLS enforcement, tenant-side UI, and the superadmin control.
 
 **Decision:** entitlement is **RLS-enforced**, not UI-gated. A module disabled for a tenant returns zero
 rows to a direct API call, not just a hidden nav item.

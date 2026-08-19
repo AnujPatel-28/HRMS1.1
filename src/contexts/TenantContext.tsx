@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { db, setCurrentTenantId } from "../insforge/client";
 import { useAuth } from "../hooks/useAuth";
 import { BASE_DOMAIN } from "../utils/domain";
+import { CORE_MODULES, type ModuleKey } from "../modules";
 
 export type Tenant = {
   id: string;
@@ -24,6 +25,8 @@ type TenantContextValue = {
   tenantId: string;
   isLoading: boolean;
   refreshTenant: () => Promise<void>;
+  /** True when the module is enabled for this tenant. Core modules are always true. */
+  hasModule: (key: ModuleKey) => boolean;
 };
 
 export const TenantContext = createContext<TenantContextValue | undefined>(undefined);
@@ -115,6 +118,7 @@ export const isTenantSubdomain = (hostname: string = window.location.hostname): 
 
 export function TenantProvider({ children }: { children: ReactNode }) {
   const [tenant, setTenant] = useState<Tenant | null>(null);
+  const [enabledModules, setEnabledModules] = useState<Set<ModuleKey> | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -171,6 +175,23 @@ export function TenantProvider({ children }: { children: ReactNode }) {
 
     setTenant(nextTenant);
     setCurrentTenantId(nextTenant.id);
+
+    // Entitlements, fetched once per session alongside the tenant. RLS already scopes this to the
+    // caller's own tenant (tenant_modules_self_read), so no tenant filter is needed here.
+    const { data: moduleRows, error: moduleError } = await db
+      .from("tenant_modules")
+      .select("module_key")
+      .eq("enabled", true);
+
+    if (moduleError) {
+      // Fail OPEN, deliberately: the database is the real boundary, so a failed lookup must not
+      // black out the whole app. A disabled module's screens will simply come back empty.
+      console.warn("Could not load module entitlements; showing all modules.", moduleError);
+      setEnabledModules(null);
+    } else {
+      setEnabledModules(new Set((moduleRows ?? []).map((r) => (r as { module_key: ModuleKey }).module_key)));
+    }
+
     setIsLoading(false);
   }, [authTenantId, role]);
 
@@ -178,14 +199,25 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     void refreshTenant();
   }, [refreshTenant]);
 
+  const hasModule = useCallback(
+    (key: ModuleKey) => {
+      if (CORE_MODULES.includes(key)) return true;
+      // null = entitlements unavailable; show everything rather than hiding the product.
+      if (enabledModules === null) return true;
+      return enabledModules.has(key);
+    },
+    [enabledModules],
+  );
+
   const value = useMemo(
     () => ({
       tenant,
       tenantId: tenant?.id ?? "",
       isLoading,
       refreshTenant,
+      hasModule,
     }),
-    [tenant, isLoading, refreshTenant],
+    [tenant, isLoading, refreshTenant, hasModule],
   );
 
   if (isLoading) {

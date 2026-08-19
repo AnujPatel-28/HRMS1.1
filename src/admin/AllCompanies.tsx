@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { Search, Filter, Eye, ChevronDown, AlertTriangle, CheckCircle, RefreshCw, X, Building2, Users, Calendar, Globe, CreditCard, Activity, Trash2, Copy, Check, Server, Cloud } from "lucide-react";
 import { db } from "../insforge/client";
 import { ConfirmModal } from "../shared/ConfirmModal";
+import { TenantModulesPanel } from "./TenantModulesPanel";
 import { BASE_DOMAIN, VERCEL_CNAME_TARGET, dnsRecordName, rootDomain, tenantHost } from "../utils/domain";
 
 interface Tenant {
@@ -161,6 +162,10 @@ function DetailModal({ tenant, onClose }: DetailModalProps) {
               <div className="text-sm font-medium text-slate-900">{value}</div>
             </div>
           ))}
+        </div>
+
+        <div className="mb-6">
+          <TenantModulesPanel tenantId={tenant.id} />
         </div>
 
         {tenant.domain_status !== "live" && <DnsInstructions subdomain={tenant.subdomain} />}

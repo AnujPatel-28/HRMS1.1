@@ -10,6 +10,9 @@ import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
 import { useManagerView } from "../hooks/useManagerView";
 import { NotificationBell } from "../shared/NotificationBell";
+import { useTenant } from "../contexts/TenantContext";
+import { RequireModule } from "../shared/RequireModule";
+import type { ModuleKey } from "../modules";
 import { db, realtime } from "../insforge/client";
 import { Sidebar, DesktopSidebar, SidebarLink, useSidebar } from "../components/ui/sidebar";
 import { AnimatePresence, motion } from "framer-motion";
@@ -19,6 +22,8 @@ type NavLinkItem = {
   label: string;
   href: string;
   icon: React.ElementType;
+  /** Hidden when this module is disabled for the tenant. Omit for always-visible items. */
+  module?: ModuleKey;
 };
 
 type NavSection = {
@@ -36,34 +41,34 @@ const BASE_SECTIONS: NavSection[] = [
       { label: "My ID Card", href: "/employee/id-card", icon: CreditCard },
       { label: "Directory", href: "/employee/directory", icon: Contact },
       { label: "Org Chart", href: "/employee/org-chart", icon: GitBranch },
-      { label: "Resignation", href: "/employee/exit", icon: LogOut },
+      { label: "Resignation", href: "/employee/exit", icon: LogOut, module: "offboarding" },
     ],
   },
   {
     title: "Time & Tasks",
     icon: Clock,
     items: [
-      { label: "Punch In/Out", href: "/employee/punch", icon: Clock },
-      { label: "My Leaves", href: "/employee/leaves", icon: Calendar },
-      { label: "My Tasks", href: "/employee/tasks", icon: ClipboardList },
+      { label: "Punch In/Out", href: "/employee/punch", icon: Clock, module: "attendance" },
+      { label: "My Leaves", href: "/employee/leaves", icon: Calendar, module: "leave" },
+      { label: "My Tasks", href: "/employee/tasks", icon: ClipboardList, module: "tasks" },
     ],
   },
   {
     title: "Finance",
     icon: Wallet,
     items: [
-      { label: "Payslips", href: "/payroll/employee/payslips", icon: Wallet },
-      { label: "Expenses", href: "/employee/expenses", icon: Receipt },
-      { label: "Insurance", href: "/employee/insurance", icon: Shield },
+      { label: "Payslips", href: "/payroll/employee/payslips", icon: Wallet, module: "payroll" },
+      { label: "Expenses", href: "/employee/expenses", icon: Receipt, module: "expenses" },
+      { label: "Insurance", href: "/employee/insurance", icon: Shield, module: "insurance" },
     ],
   },
   {
     title: "Communication",
     icon: MessageSquare,
     items: [
-      { label: "Chat", href: "/employee/chat", icon: MessageSquare },
-      { label: "Connect", href: "/employee/connect", icon: Rss },
-      { label: "Policies", href: "/employee/policies", icon: FileText },
+      { label: "Chat", href: "/employee/chat", icon: MessageSquare, module: "chat" },
+      { label: "Connect", href: "/employee/connect", icon: Rss, module: "connect" },
+      { label: "Policies", href: "/employee/policies", icon: FileText, module: "policy_center" },
     ],
   },
 ];
@@ -350,6 +355,7 @@ export default function EmployeeLayout() {
   const navigate = useNavigate();
   const { logout, tenantId } = useAuth();
   const { employee } = useEmployee();
+  const { hasModule } = useTenant();
   const { isManager, isManagerMode, toggleManagerMode, directReportIds } = useManagerView();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showBanner, setShowBanner] = useState(true);
@@ -404,7 +410,11 @@ export default function EmployeeLayout() {
   }, [topbarCardOpen]);
 
   const sections = useMemo(() => {
-    const result = BASE_SECTIONS.map((s) => ({ ...s, items: [...s.items] }));
+    // Drop entries whose module this tenant does not have, then drop any section left empty.
+    const result = BASE_SECTIONS.map((s) => ({
+      ...s,
+      items: s.items.filter((item) => !item.module || hasModule(item.module)),
+    })).filter((s) => s.items.length > 0);
     const timeSection = result.find((s) => s.title === "Time & Tasks");
     if (timeSection && hasProjects) {
       const idx = timeSection.items.findIndex((i) => i.href === "/employee/tasks");
@@ -423,7 +433,7 @@ export default function EmployeeLayout() {
       }
     }
     return result;
-  }, [isManager, hasProjects]);
+  }, [isManager, hasProjects, hasModule]);
 
   const flatLinks = useMemo(() => {
     return [
@@ -689,7 +699,7 @@ export default function EmployeeLayout() {
                   </Link>
                 </div>
               )}
-              <Outlet />
+              <RequireModule to="/employee/dashboard"><Outlet /></RequireModule>
             </main>
           </div>
         ) : (
@@ -953,7 +963,7 @@ export default function EmployeeLayout() {
                     </Link>
                   </div>
                 )}
-                <Outlet />
+                <RequireModule to="/employee/dashboard"><Outlet /></RequireModule>
               </div>
             </main>
           </div>
@@ -975,7 +985,7 @@ export default function EmployeeLayout() {
               </Link>
             </div>
           )}
-          <Outlet />
+          <RequireModule to="/employee/dashboard"><Outlet /></RequireModule>
         </main>
 
         {/* Mobile Slide-over Drawer */}

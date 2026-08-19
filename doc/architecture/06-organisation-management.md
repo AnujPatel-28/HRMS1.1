@@ -116,6 +116,20 @@ An exact string match. A policy targeted at `Hr` is **invisible** to an employee
 `HR`. The same pattern appears in `projects_employee_read` and three `chat_messages` policies —
 **five access-control decisions keyed on a column that is provably inconsistent.**
 
+> ⚠️ **Correction (2026-08-18).** An earlier revision of this document said document visibility "is
+> silently mis-scoped in production right now". That overstated it. Checked against live data:
+>
+> | | rows | department-scoped |
+> |---|---|---|
+> | `hr_policies` | 1 | **0** (the one policy is `visible_to = 'all'`) |
+> | `projects` | 1 | **0** |
+> | `chat_channels` | 7 | **0** (no `target_departments` set) |
+>
+> Nothing is scoped by department today, so **nothing is currently mis-scoped**. The defect is real but
+> **latent**: it activates the first time an HR admin scopes a policy, project, or channel to a
+> department. That is still worth fixing before it bites, and it makes the backfill in §5 completely
+> safe — no existing visibility decision depends on the current text values.
+
 ### 2.3 A department name is hardcoded in application logic
 
 ```ts
@@ -303,6 +317,53 @@ DB-level rule rather than a UI courtesy (**P5**):
 
 That last one matters: `structural_role` is what approval routing and policy scoping key off. Letting it
 change under live data is how you get a silent authorisation change.
+
+---
+
+## 4b. Build status (2026-08-18)
+
+**Slice A — schema and data, shipped.** All DB-only, no frontend dependency:
+
+| Migration | Effect |
+|---|---|
+| `20260818100000_align-org-text-columns-to-fk` | Backfilled the drifting text columns. **department 7 → 0, designation 1 → 0.** |
+| `20260818110000_org-unit-types-and-hierarchy` | `org_unit_types` (36 rows = 3 × 12 tenants), `org_units.type_id` / `head_employee_id` / `path`, cycle guard |
+| `20260818120000_org-units-resync-descendant-paths` | Fixes stale descendant paths on re-parent |
+| `20260818130000_employee-grades` | `employee_grades`, `employees.grade_id`, `job_titles.default_grade_id` |
+| `20260818140000_employee-unit-assignments-history` | Effective-dated membership + trigger-maintained current pointer |
+
+Verified by exercising the real behaviour, not just applying DDL:
+
+```
+hierarchy   A>B>C paths built; descendant query returns 3
+cycle       A→B→C→A            BLOCKED ("cycle detected")
+self-parent B→B                BLOCKED
+re-parent   move B under D     child C AND grandchild E follow (see below)
+history     transfer employee  Engineering→Product, pointer auto-synced,
+                               both rows retained with date ranges, revert clean
+regression  7/7 dashboard · employee 1 / manager 5 / hr 6 · 0 cross-tenant
+```
+
+**A real defect was caught mid-build.** The first hierarchy migration recomputed `path` only for the
+row being moved, because a row trigger sees only its own row. Moving B from A to D left its child
+holding `/A/B/C/` — a path claiming a parent it no longer had. Since `path` is what descendant queries
+use, and descendant queries are what `include_descendants` scopes visibility with (§9.2), that would
+have silently mis-scoped documents: the old division still matching a moved sub-team, the new one
+missing it. Fixed in `20260818120000`.
+
+**Two analysis corrections from live data:**
+
+- **`employment_type` was a false positive.** It looked like 6 more contradictions, but the text column
+  is a CHECK-constrained enum (`full_time`) and `employment_types.name` is a display label
+  (`Full Time`). Consistently paired — a code/label convention, not drift. Backfilling it violates the
+  constraint, so it is excluded and the text column stays.
+- **`org_units` has no duplicates.** `Dev`, `Hr`, `Sales` each appearing twice is one per *tenant* —
+  correct multi-tenancy. The only genuine within-tenant duplicate is `job_titles` in tenant `97da3641`,
+  which has both `iNTERN` (2 employees) and an unused `intern` (0).
+
+**Slice B — blocked on a frontend deploy.** Steps 3, 5 and 6 below (RLS repoint, removing the
+dual-write, dropping the text columns) all break the currently-deployed SPA, which still writes
+`department` / `designation` text. Not started.
 
 ---
 
