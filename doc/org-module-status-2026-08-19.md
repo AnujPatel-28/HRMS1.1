@@ -1,5 +1,34 @@
 # Organisation module — status and next moves (2026-08-19)
 
+> **RESOLVED SAME DAY — the deploy gate is gone.** `main` was merged and pushed
+> (`d0beb81..e26a2f0`) and Vercel deployed in ~100s. Verified on the live bundle
+> `/assets/index-B1JvTIBb.js`: `functionsUrl` present, `function2.insforge.app` present, baseUrl
+> `https://rq3qmu8y.ap-southeast.insforge.app`. Bundle grew 1,726,525 → 2,443,702 bytes — six weeks of
+> unshipped work, including the org chart, went live.
+> Sections 2b/2c/3 below are kept as the diagnosis; read them as history, not current state.
+>
+> **Edge functions verified reachable by slug, not inferred from the bundle string.** A bundle grep only
+> proves the host is configured; it does not prove the functions were ever redeployed to it — which
+> matters because six of the 17 exist only on the backend with no source in `functions/`. Probed against
+> a control slug to separate "not deployed" from "reached":
+>
+> ```
+> definitely-not-a-real-function  404   ← control: routing IS per-slug
+> auth-session                    401   reached, needs auth
+> create-employee-user            405   reached, wants POST
+> admin-auth-login                405   reached          (no repo source)
+> on-task-assigned                500   reached, GET without a body
+> check-punch-out-gate            500   reached          (no repo source)
+> daily-incomplete-task-marker    200   reached and ran  (no repo source)
+> ```
+>
+> Every real slug answers; only the control 404s. **Edge functions are restored in production.**
+>
+> **Correction to the handoff doc:** `test-admin.html` is **not** served on production. It returns 200
+> only because `vercel.json` rewrites `/(.*)` → `/index.html`; the body is the SPA and contains no key.
+> Checking the status code alone is what produced the earlier claim. It **is** still real on the stray
+> InsForge host — see §2d, now a live item rather than a tidy-up.
+
 Answers two questions: **is the organisation module done?** (no — the schema is, the product isn't)
 and **what's next?**
 
@@ -163,9 +192,22 @@ rq3qmu8y.insforge.site        →  https://rq3qmu8y-jx7.ap-southeast.insforge.ap
 reachable, fully broken copy pointed at a backend that no longer exists**, and it serves
 `test-admin.html`.
 
-Recommendation: delete it (`npx @insforge/cli deployments ...`). It cannot be usefully synced — it was
-built against a backend that is gone — and deleting it removes one of the two `test-admin.html`
-exposures for free. Outward-facing, so it needs sign-off.
+**It is also the only place `test-admin.html` is still real.** Verified 2026-08-19 after the production
+deploy:
+
+```
+hrms.talentmeshsolutions.com/test-admin.html  →  SPA index.html (vercel rewrite), 0 secrets
+rq3qmu8y.insforge.site/test-admin.html        →  the real file, admin key + Password123! present
+```
+
+The admin key it carries was rotated 2026-08-17 and its grace period has expired, so that credential is
+inert. **The password is not** — `admin@talentmeshsolutions.com` / `Password123!` is published in
+plaintext on a public URL and is only inert if that account's password has since been changed.
+
+Recommendation, now a security item rather than a tidy-up: **delete the deployment**
+(`npx @insforge/cli deployments`), and change that account's password regardless. The deployment cannot
+be usefully synced — it was built against a backend that no longer exists. Outward-facing, so it needs
+sign-off; not done.
 
 ---
 
@@ -254,6 +296,42 @@ shipped before apply, not just the dual-write removal §5 step 5 names.
 still matches `e.department = ANY (target_departments)`. Left out because it was outside the enumerated
 five. Consequence of leaving it: channel visibility keys off drifting text while message visibility keys
 off `org_unit_id`, so a user can list a channel whose messages they cannot read, or the reverse.
+
+---
+
+## 3c. Known defects shipped in the 2026-08-19 deploy
+
+Both were caught and reported during the build, judged non-blocking, and shipped deliberately. Recording
+them so they are not rediscovered as mysteries.
+
+**(a) `EmployeeDetail` can contradict itself after a legacy save.** `saveChanges` still writes
+`employees.org_unit_id` straight from the Department select without creating an
+`employee_unit_assignments` row. After such a save the Department field shows the **new** unit while the
+assignment history's "Current" row shows the **old** one — same screen, same load. `handleConfirmPassword`
+has the same shape on draft activation. Closing this is 06 §5 step 5 (remove the dual-write), which is
+now unblocked by the deploy. **Do this early — it is user-visible today.**
+
+**(b) A Division or Team unit will vanish from department dropdowns.** The unit form writes the legacy
+`unit_type` text as the chosen type's `structural_role`. Four screens filter `unit_type === "department"`
+— `Directory.tsx:111`, `EmployeeList.tsx:92`, `EmployeeCreate.tsx:356`, `EmployeeDetail.tsx:171` — so the
+first Division- or Team-role unit an HR admin creates will not appear in them. This is semantically
+correct (a Division is not a Department) and the alternative was worse: writing a constant
+`'department'` would let a Division masquerade as one. But it is user-visible the moment someone uses
+the new Unit Types tab as intended.
+
+**(c) The `structural_role` guardrail is client-side only (P5).** An update simply omits the column once
+units reference the type, so it cannot be changed through the UI — but no DB constraint enforces it, and
+`usageCounts` is a load-time snapshot, so a unit created by another HR user after the tab loaded leaves
+the lock stale-false. A CHECK/trigger belongs in the Slice B migration set.
+
+**(d) `notifications` INSERT is refused for employee-role submitters — pre-existing, now visible.**
+`notifications_self_rw` permits inserting only where the row's `employee_id` is your own, so an employee
+can never notify their unit head, parent unit head, or HR. The new resolver picks the right recipient
+and the insert returns 200 + `[]`. This predates the change — the `manager_id` branch has always failed
+the same way and `submit_task_request` inserts no notification server-side — but the new `.select()`
+guard makes it loud instead of silent. Fix needs either a tenant-scoped INSERT policy on `notifications`
+or a SECURITY DEFINER fan-out RPC. **Not authored.** `src/employee/Expenses.tsx:172-177` is the identical
+twin and still unguarded.
 
 ---
 
