@@ -404,6 +404,36 @@ twin and still unguarded.
 
 ---
 
+## 3c-bis. Applied 2026-08-20
+
+| Migration | Effect | Verified |
+|---|---|---|
+| `20260820090000` notify-task-submission-server-side | Folds the notification fan-out into `submit_task_request` | signature unchanged (`p_task_id, p_notes, p_attachment_url, p_attachment_name`), still SECURITY DEFINER, ACL preserved by `CREATE OR REPLACE` |
+| `20260820100000` slice-b-part1-org-unit-target-columns | Adds `chat_channels.target_org_unit_ids`, `hr_policies.include_descendants`, backfills | both columns present live |
+
+**The backfills touched zero rows, and that is correct, not a failure.** Live counts at apply time:
+
+```
+hr_policies      1 row,  0 with department_filter
+chat_channels    7 rows, 0 with target_departments
+projects         1 row,  0 with visibility_config.type = 'departments'
+```
+
+Nothing is department-scoped, exactly as 06 §2.2's correction states. **Consequence worth carrying
+forward: the §9.2 `include_descendants` widening hazard is currently vacuous** — there are no
+department-scoped policies for a default of `true` to widen. The review pass gating Slice B part 2 is
+trivially clean *today*; it stops being trivial the moment an HR admin scopes the first policy.
+
+Frontend released the same day (`/assets/index-DJEWvrPu.js`): `target_org_unit_ids` and
+`org_unit_ids` write paths live, with `functionsUrl`/`function2` still present — no regression on the
+edge-function restore.
+
+**CLI gotcha found while applying:** a non-`.sql` file in `migrations/` aborts the whole run —
+`Invalid migration filename: ....FRONTEND-SPEC.md. Expected <migration_version>_<migration-name>.sql`.
+The CLI validates every file in the directory, not just SQL. Companion docs belong in `doc/`.
+
+---
+
 ## 3d. The policy drift guard was broken, and 34 policies are untracked
 
 **Correction to a claim made earlier in this session.** `npm run check:policy-drift` reported
