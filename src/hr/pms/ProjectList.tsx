@@ -11,6 +11,45 @@ import type { Project, Employee, Task } from "../../types";
 
 const DEPT_OPTIONS = ["sales", "dev", "marketing", "operations", "design", "other"] as const;
 
+// Org unit picker for the "departments" visibility branch (Slice B org_unit_ids write path). Same
+// depth/hierarchical-sort shape as src/hr/OrgStructureManagement.tsx, trimmed to the columns needed.
+type OrgUnitOption = { id: string; name: string; parent_id: string | null };
+
+function getOrgUnitDepth(unit: OrgUnitOption, all: OrgUnitOption[]): number {
+  let depth = 0;
+  let parentId = unit.parent_id;
+  const visited = new Set<string>();
+  while (parentId) {
+    if (visited.has(parentId)) break;
+    visited.add(parentId);
+    const parent = all.find(u => u.id === parentId);
+    if (!parent) break;
+    depth++;
+    parentId = parent.parent_id;
+  }
+  return depth;
+}
+
+function sortOrgUnitsHierarchically(units: OrgUnitOption[]): OrgUnitOption[] {
+  const roots = units.filter(u => !u.parent_id || !units.some(p => p.id === u.parent_id));
+  const childrenMap = new Map<string, OrgUnitOption[]>();
+  units.forEach(u => {
+    if (u.parent_id) {
+      const list = childrenMap.get(u.parent_id) || [];
+      list.push(u);
+      childrenMap.set(u.parent_id, list);
+    }
+  });
+  const result: OrgUnitOption[] = [];
+  const traverse = (node: OrgUnitOption) => {
+    result.push(node);
+    const children = (childrenMap.get(node.id) || []).sort((a, b) => a.name.localeCompare(b.name));
+    children.forEach(traverse);
+  };
+  roots.sort((a, b) => a.name.localeCompare(b.name)).forEach(traverse);
+  return result;
+}
+
 const STATUS_COLOR: Record<Project["status"], string> = {
   planning: "bg-blue-50 text-blue-700 border-blue-200",
   active: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -46,7 +85,9 @@ export default function ProjectList() {
   const [formEndDate, setFormEndDate] = useState("");
   const [formVisibilityType, setFormVisibilityType] = useState<"all" | "departments" | "people">("all");
   const [formSelectedDepts, setFormSelectedDepts] = useState<string[]>([]);
+  const [formSelectedOrgUnitIds, setFormSelectedOrgUnitIds] = useState<string[]>([]);
   const [formSelectedPeople, setFormSelectedPeople] = useState<string[]>([]);
+  const [orgUnits, setOrgUnits] = useState<OrgUnitOption[]>([]);
   
   // Searching/filtering managers in modal
   const [managerSearch, setManagerSearch] = useState("");
@@ -121,6 +162,17 @@ export default function ProjectList() {
     void fetchProjectsAndEmployees();
   }, [tenantId]);
 
+  // Org units for the "departments" visibility Org Unit picker (Slice B org_unit_ids write path).
+  useEffect(() => {
+    let active = true;
+    if (!tenantId) return;
+    db.from("org_units").select("id, name, parent_id").eq("tenant_id", tenantId).eq("is_active", true)
+      .order("name", { ascending: true }).then(({ data }) => {
+        if (active && data) setOrgUnits(data as OrgUnitOption[]);
+      });
+    return () => { active = false; };
+  }, [tenantId]);
+
   // Statistics
   const stats = useMemo(() => {
     let active = 0;
@@ -182,6 +234,9 @@ export default function ProjectList() {
       const visibility_config = {
         type: formVisibilityType,
         departments: formVisibilityType === "departments" ? formSelectedDepts : undefined,
+        // Slice B target-side key, written alongside `departments` — RLS still reads `departments`
+        // until Slice B is applied. visibility_config is jsonb, so this key is safe to write today.
+        org_unit_ids: formVisibilityType === "departments" ? formSelectedOrgUnitIds : undefined,
         employee_ids: formVisibilityType === "people" ? formSelectedPeople : undefined,
       };
 
@@ -226,6 +281,7 @@ export default function ProjectList() {
     setFormEndDate("");
     setFormVisibilityType("all");
     setFormSelectedDepts([]);
+    setFormSelectedOrgUnitIds([]);
     setFormSelectedPeople([]);
     setManagerSearch("");
     setPeopleSearch("");
@@ -672,6 +728,47 @@ export default function ProjectList() {
                         );
                       })}
                     </div>
+                  </div>
+                )}
+
+                {/* Org Unit Picker — Slice B org_unit_ids write path, alongside the legacy Departments
+                    picker above (which RLS still reads until Slice B is applied). */}
+                {formVisibilityType === "departments" && (
+                  <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Org Units (optional)</p>
+                    {orgUnits.length === 0 ? (
+                      <p className="text-xs text-slate-400">No org units configured for this tenant yet.</p>
+                    ) : (
+                      <div className="max-h-40 overflow-y-auto space-y-1">
+                        {sortOrgUnitsHierarchically(orgUnits).map((unit) => {
+                          const depth = getOrgUnitDepth(unit, orgUnits);
+                          const isChecked = formSelectedOrgUnitIds.includes(unit.id);
+                          return (
+                            <button
+                              key={unit.id}
+                              type="button"
+                              onClick={() => {
+                                if (isChecked) {
+                                  setFormSelectedOrgUnitIds(formSelectedOrgUnitIds.filter((id) => id !== unit.id));
+                                } else {
+                                  setFormSelectedOrgUnitIds([...formSelectedOrgUnitIds, unit.id]);
+                                }
+                              }}
+                              style={{ paddingLeft: `${0.625 + depth * 1.25}rem` }}
+                              className={`w-full flex items-center gap-1.5 rounded-lg py-1.5 pr-2.5 text-left text-xs font-medium transition ${
+                                isChecked
+                                  ? "bg-brand-50 border border-brand-200 text-brand-700"
+                                  : "hover:bg-slate-50 border border-transparent text-slate-600"
+                              }`}
+                            >
+                              {depth > 0 && <span className="text-slate-300">└─</span>}
+                              <span className="flex-1 truncate">{unit.name}</span>
+                              {isChecked && <span className="text-brand-600 text-xs font-bold">✓</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 

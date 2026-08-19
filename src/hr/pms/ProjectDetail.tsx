@@ -36,6 +36,45 @@ const STATUS_COLOR: Record<Project["status"], string> = {
 
 const DEPT_OPTIONS = ["sales", "dev", "marketing", "operations", "design", "other"] as const;
 
+// Org unit picker for the "departments" visibility branch (Slice B org_unit_ids write path). Same
+// depth/hierarchical-sort shape as src/hr/OrgStructureManagement.tsx, trimmed to the columns needed.
+type OrgUnitOption = { id: string; name: string; parent_id: string | null };
+
+function getOrgUnitDepth(unit: OrgUnitOption, all: OrgUnitOption[]): number {
+  let depth = 0;
+  let parentId = unit.parent_id;
+  const visited = new Set<string>();
+  while (parentId) {
+    if (visited.has(parentId)) break;
+    visited.add(parentId);
+    const parent = all.find(u => u.id === parentId);
+    if (!parent) break;
+    depth++;
+    parentId = parent.parent_id;
+  }
+  return depth;
+}
+
+function sortOrgUnitsHierarchically(units: OrgUnitOption[]): OrgUnitOption[] {
+  const roots = units.filter(u => !u.parent_id || !units.some(p => p.id === u.parent_id));
+  const childrenMap = new Map<string, OrgUnitOption[]>();
+  units.forEach(u => {
+    if (u.parent_id) {
+      const list = childrenMap.get(u.parent_id) || [];
+      list.push(u);
+      childrenMap.set(u.parent_id, list);
+    }
+  });
+  const result: OrgUnitOption[] = [];
+  const traverse = (node: OrgUnitOption) => {
+    result.push(node);
+    const children = (childrenMap.get(node.id) || []).sort((a, b) => a.name.localeCompare(b.name));
+    children.forEach(traverse);
+  };
+  roots.sort((a, b) => a.name.localeCompare(b.name)).forEach(traverse);
+  return result;
+}
+
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>();
   const { tenantId } = useTenant();
@@ -71,7 +110,9 @@ export default function ProjectDetail() {
   const [editEndDate, setEditEndDate] = useState("");
   const [editVisibilityType, setEditVisibilityType] = useState<"all" | "departments" | "people">("all");
   const [editSelectedDepts, setEditSelectedDepts] = useState<string[]>([]);
+  const [editSelectedOrgUnitIds, setEditSelectedOrgUnitIds] = useState<string[]>([]);
   const [editSelectedPeople, setEditSelectedPeople] = useState<string[]>([]);
+  const [orgUnits, setOrgUnits] = useState<OrgUnitOption[]>([]);
   const [managerSearch, setManagerSearch] = useState("");
   const [isManagerDropdownOpen, setIsManagerDropdownOpen] = useState(false);
   const [peopleSearch, setPeopleSearch] = useState("");
@@ -175,6 +216,17 @@ export default function ProjectDetail() {
     void fetchProjectData();
   }, [tenantId, projectId]);
 
+  // Org units for the "departments" visibility Org Unit picker (Slice B org_unit_ids write path).
+  useEffect(() => {
+    let active = true;
+    if (!tenantId) return;
+    db.from("org_units").select("id, name, parent_id").eq("tenant_id", tenantId).eq("is_active", true)
+      .order("name", { ascending: true }).then(({ data }) => {
+        if (active && data) setOrgUnits(data as OrgUnitOption[]);
+      });
+    return () => { active = false; };
+  }, [tenantId]);
+
   // Inline Title Save
   const handleSaveTitle = async () => {
     if (!titleInput.trim() || !project) return;
@@ -221,6 +273,7 @@ export default function ProjectDetail() {
     const vis = project.visibility_config || { type: "all" };
     setEditVisibilityType(vis.type || "all");
     setEditSelectedDepts(vis.departments || []);
+    setEditSelectedOrgUnitIds(vis.org_unit_ids || []);
     setEditSelectedPeople(vis.employee_ids || []);
     setManagerSearch("");
     setPeopleSearch("");
@@ -239,10 +292,13 @@ export default function ProjectDetail() {
       const visibility_config = {
         type: editVisibilityType,
         departments: editVisibilityType === "departments" ? editSelectedDepts : undefined,
+        // Slice B target-side key, written alongside `departments` — RLS still reads `departments`
+        // until Slice B is applied. visibility_config is jsonb, so this key is safe to write today.
+        org_unit_ids: editVisibilityType === "departments" ? editSelectedOrgUnitIds : undefined,
         employee_ids: editVisibilityType === "people" ? editSelectedPeople : undefined,
       };
 
-      const { error } = await db
+      const { data, error } = await db
         .from("projects")
         .update({
           name: editName.trim(),
@@ -254,9 +310,16 @@ export default function ProjectDetail() {
           visibility_config,
           updated_at: new Date().toISOString(),
         })
-        .eq("id", project.id);
+        .eq("id", project.id)
+        .select();
 
+      // RLS refuses a write by matching zero rows, which comes back as a SUCCESSFUL empty response
+      // rather than an error (src/admin/TenantModulesPanel.tsx:77-79). An empty array is truthy in
+      // JS, so this update must check length, not just presence.
       if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error("Project was not updated — the write was rejected.");
+      }
       success("Project details updated.");
       setIsEditModalOpen(false);
       void fetchProjectData();
@@ -1418,6 +1481,47 @@ export default function ProjectDetail() {
                         );
                       })}
                     </div>
+                  </div>
+                )}
+
+                {/* Org Unit Picker — Slice B org_unit_ids write path, alongside the legacy Departments
+                    picker above (which RLS still reads until Slice B is applied). */}
+                {editVisibilityType === "departments" && (
+                  <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Org Units (optional)</p>
+                    {orgUnits.length === 0 ? (
+                      <p className="text-xs text-slate-400">No org units configured for this tenant yet.</p>
+                    ) : (
+                      <div className="max-h-40 overflow-y-auto space-y-1">
+                        {sortOrgUnitsHierarchically(orgUnits).map((unit) => {
+                          const depth = getOrgUnitDepth(unit, orgUnits);
+                          const isChecked = editSelectedOrgUnitIds.includes(unit.id);
+                          return (
+                            <button
+                              key={unit.id}
+                              type="button"
+                              onClick={() => {
+                                if (isChecked) {
+                                  setEditSelectedOrgUnitIds(editSelectedOrgUnitIds.filter((id) => id !== unit.id));
+                                } else {
+                                  setEditSelectedOrgUnitIds([...editSelectedOrgUnitIds, unit.id]);
+                                }
+                              }}
+                              style={{ paddingLeft: `${0.625 + depth * 1.25}rem` }}
+                              className={`w-full flex items-center gap-1.5 rounded-lg py-1.5 pr-2.5 text-left text-xs font-medium transition ${
+                                isChecked
+                                  ? "bg-brand-50 border border-brand-200 text-brand-700"
+                                  : "hover:bg-slate-50 border border-transparent text-slate-600"
+                              }`}
+                            >
+                              {depth > 0 && <span className="text-slate-300">└─</span>}
+                              <span className="flex-1 truncate">{unit.name}</span>
+                              {isChecked && <span className="text-brand-600 text-xs font-bold">✓</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 

@@ -28,6 +28,46 @@ function sortMessages(msgs: ChatMessage[]) {
   return [...msgs].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 }
 
+// Org unit picker for department-channel creation (Slice B target_org_unit_ids write path).
+// Same depth/hierarchical-sort shape as src/hr/OrgStructureManagement.tsx, trimmed to the columns
+// this picker needs.
+type OrgUnitOption = { id: string; name: string; parent_id: string | null };
+
+function getOrgUnitDepth(unit: OrgUnitOption, all: OrgUnitOption[]): number {
+  let depth = 0;
+  let parentId = unit.parent_id;
+  const visited = new Set<string>();
+  while (parentId) {
+    if (visited.has(parentId)) break;
+    visited.add(parentId);
+    const parent = all.find(u => u.id === parentId);
+    if (!parent) break;
+    depth++;
+    parentId = parent.parent_id;
+  }
+  return depth;
+}
+
+function sortOrgUnitsHierarchically(units: OrgUnitOption[]): OrgUnitOption[] {
+  const roots = units.filter(u => !u.parent_id || !units.some(p => p.id === u.parent_id));
+  const childrenMap = new Map<string, OrgUnitOption[]>();
+  units.forEach(u => {
+    if (u.parent_id) {
+      const list = childrenMap.get(u.parent_id) || [];
+      list.push(u);
+      childrenMap.set(u.parent_id, list);
+    }
+  });
+  const result: OrgUnitOption[] = [];
+  const traverse = (node: OrgUnitOption) => {
+    result.push(node);
+    const children = (childrenMap.get(node.id) || []).sort((a, b) => a.name.localeCompare(b.name));
+    children.forEach(traverse);
+  };
+  roots.sort((a, b) => a.name.localeCompare(b.name)).forEach(traverse);
+  return result;
+}
+
 function messageReducer(state: Record<string, ChatMessage[]>, action: MessageAction): Record<string, ChatMessage[]> {
   switch (action.type) {
     case "INIT_CHANNEL": {
@@ -118,7 +158,9 @@ export default function Chat() {
   const [newChannelDesc, setNewChannelDesc] = useState("");
   const [newChannelType, setNewChannelType] = useState<"global" | "department" | "custom">("global");
   const [newChannelDepts, setNewChannelDepts] = useState<string[]>([]);
+  const [newChannelOrgUnitIds, setNewChannelOrgUnitIds] = useState<string[]>([]);
   const [newChannelMembers, setNewChannelMembers] = useState<string[]>([]);
+  const [orgUnits, setOrgUnits] = useState<OrgUnitOption[]>([]);
   
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -156,6 +198,17 @@ export default function Chat() {
     db.from("employees_public").select("*").eq("tenant_id", tenantId).then(({ data }) => {
       if (active && data) setEmployees(data as Employee[]);
     });
+    return () => { active = false; };
+  }, [tenantId]);
+
+  // Org units for the department-channel Org Unit picker (Slice B target_org_unit_ids write path).
+  useEffect(() => {
+    let active = true;
+    if (!tenantId) return;
+    db.from("org_units").select("id, name, parent_id").eq("tenant_id", tenantId).eq("is_active", true)
+      .order("name", { ascending: true }).then(({ data }) => {
+        if (active && data) setOrgUnits(data as OrgUnitOption[]);
+      });
     return () => { active = false; };
   }, [tenantId]);
 
@@ -397,11 +450,16 @@ export default function Chat() {
     setNewChannelDesc("");
     setNewChannelType("global");
     setNewChannelDepts([]);
+    setNewChannelOrgUnitIds([]);
     setNewChannelMembers([]);
   }
 
   function toggleDept(dept: string) {
     setNewChannelDepts(prev => prev.includes(dept) ? prev.filter(d => d !== dept) : [...prev, dept]);
+  }
+
+  function toggleOrgUnit(id: string) {
+    setNewChannelOrgUnitIds(prev => prev.includes(id) ? prev.filter(u => u !== id) : [...prev, id]);
   }
 
   function toggleMember(id: string) {
@@ -426,26 +484,37 @@ export default function Chat() {
         description: newChannelDesc.trim() || null,
         type: newChannelType,
         created_by: employee?.id,
+        // target_departments stays the field RLS reads until Slice B is applied — kept as-is.
         target_departments: newChannelType === "department" ? newChannelDepts : [],
+        // Slice B target-side write path. Only sent when there's something to write, so
+        // global/custom channels — and department channels created before any org units are picked —
+        // never touch this column.
+        ...(newChannelType === "department" && newChannelOrgUnitIds.length > 0
+          ? { target_org_unit_ids: newChannelOrgUnitIds }
+          : {}),
       }]).select();
 
+      // RLS refuses a write by matching zero rows, which comes back as a SUCCESSFUL empty response
+      // rather than an error (src/admin/TenantModulesPanel.tsx:77-79). An empty array is truthy in
+      // JS, so `if (data)` alone would treat a refused insert as success.
       if (error) throw error;
-      if (data) {
-        const created = data[0] as ChatChannel;
-
-        if (newChannelType === "custom" && newChannelMembers.length > 0) {
-          const memberRows = newChannelMembers.map(empId => ({ tenant_id: tenantId, channel_id: created.id, employee_id: empId }));
-          if (employee?.id && !newChannelMembers.includes(employee.id)) {
-            memberRows.push({ tenant_id: tenantId, channel_id: created.id, employee_id: employee.id });
-          }
-          await db.from("chat_channel_members").insert(memberRows);
-        }
-
-        setChannels(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
-        setSelectedChannel(created);
-        setShowCreateModal(false);
-        resetCreateModal();
+      if (!data || data.length === 0) {
+        throw new Error("Channel was not created — the write was rejected.");
       }
+      const created = data[0] as ChatChannel;
+
+      if (newChannelType === "custom" && newChannelMembers.length > 0) {
+        const memberRows = newChannelMembers.map(empId => ({ tenant_id: tenantId, channel_id: created.id, employee_id: empId }));
+        if (employee?.id && !newChannelMembers.includes(employee.id)) {
+          memberRows.push({ tenant_id: tenantId, channel_id: created.id, employee_id: employee.id });
+        }
+        await db.from("chat_channel_members").insert(memberRows);
+      }
+
+      setChannels(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setSelectedChannel(created);
+      setShowCreateModal(false);
+      resetCreateModal();
     } catch (err: any) {
       console.error("Failed to create channel", err);
       alert(`Failed to create channel: ${err?.message || err?.details || JSON.stringify(err)}`);
@@ -711,7 +780,7 @@ export default function Chat() {
                 <button
                   key={t}
                   type="button"
-                  onClick={() => { setNewChannelType(t); setNewChannelDepts([]); setNewChannelMembers([]); }}
+                  onClick={() => { setNewChannelType(t); setNewChannelDepts([]); setNewChannelOrgUnitIds([]); setNewChannelMembers([]); }}
                   className={`flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-3 text-xs font-semibold transition ${
                     newChannelType === t
                       ? "border-brand-500 bg-brand-50 text-brand-700"
@@ -752,6 +821,41 @@ export default function Chat() {
               </div>
               {newChannelDepts.length === 0 && (
                 <p className="mt-1.5 text-[11px] text-rose-400 font-medium">Please select at least one department.</p>
+              )}
+            </div>
+          )}
+
+          {/* Org Unit Picker — Slice B target_org_unit_ids write path, alongside the legacy Department
+              Picker above (which RLS still reads until Slice B is applied). */}
+          {newChannelType === "department" && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Select Org Units (optional)</label>
+              {orgUnits.length === 0 ? (
+                <p className="text-[11px] text-slate-400">No org units configured for this tenant yet.</p>
+              ) : (
+                <div className="max-h-40 overflow-y-auto space-y-1 rounded-lg border border-slate-200 p-2">
+                  {sortOrgUnitsHierarchically(orgUnits).map(unit => {
+                    const depth = getOrgUnitDepth(unit, orgUnits);
+                    const isChecked = newChannelOrgUnitIds.includes(unit.id);
+                    return (
+                      <button
+                        key={unit.id}
+                        type="button"
+                        onClick={() => toggleOrgUnit(unit.id)}
+                        style={{ paddingLeft: `${0.625 + depth * 1.25}rem` }}
+                        className={`w-full flex items-center gap-1.5 rounded-lg py-1.5 pr-2.5 text-left text-xs font-medium transition ${
+                          isChecked
+                            ? "bg-brand-50 border border-brand-200 text-brand-700"
+                            : "hover:bg-slate-50 border border-transparent text-slate-600"
+                        }`}
+                      >
+                        {depth > 0 && <span className="text-slate-300">└─</span>}
+                        <span className="flex-1 truncate">{unit.name}</span>
+                        {isChecked && <span className="text-brand-600 text-xs font-bold">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}

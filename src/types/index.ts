@@ -437,6 +437,10 @@ export interface ChatChannel {
   description: string | null;
   type: "global" | "department" | "custom";
   target_departments: string[];
+  // Slice B target-side column (doc/architecture/06-organisation-management.md §5 step 3). Nullable —
+  // the column has no default, and is only populated by department-type channels created after this
+  // write path shipped. target_departments remains the field RLS reads until Slice B is applied.
+  target_org_unit_ids?: string[] | null;
   created_by: string | null;
   created_at: string;
   is_announcement: boolean;
@@ -491,6 +495,9 @@ export interface Project {
   visibility_config: {
     type: "all" | "departments" | "people";
     departments?: string[];
+    // Slice B target-side key (doc/architecture/06-organisation-management.md §5 step 3), written
+    // alongside `departments` — RLS still reads `departments` until Slice B is applied.
+    org_unit_ids?: string[];
     employee_ids?: string[];
   };
   created_by: string | null;
