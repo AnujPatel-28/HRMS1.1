@@ -8,6 +8,7 @@ import { useToast } from "../../shared/ToastContext";
 import { Skeleton } from "../../shared/Skeleton";
 import { EmptyState } from "../../shared/EmptyState";
 import type { Project, Employee, Task, TaskSubmission } from "../../types";
+import { resolveTaskNotificationTargets } from "../../utils/notificationTargets";
 
 const PRIORITY_BADGE: Record<Task["priority"], string> = {
   low: "bg-slate-100 text-slate-600",
@@ -157,33 +158,29 @@ export default function EmployeeProjectView() {
       });
       if (rpcErr) throw rpcErr;
 
-      // Notify manager or HR
-      const targetNotifyId = employee.manager_id;
-      if (targetNotifyId) {
-        await db.from("notifications").insert([
-          {
-            employee_id: targetNotifyId,
+      // Notify the manager, else the unit head chain (06 §9.1: own unit head → parent unit head → HR)
+      const targetNotifyIds = employee.manager_id
+        ? [employee.manager_id]
+        : await resolveTaskNotificationTargets(tenantId, employee.id, employee.org_unit_id);
+
+      if (targetNotifyIds.length > 0) {
+        // .select() matters: RLS refuses a write by matching zero rows, which comes back as a
+        // SUCCESSFUL empty response rather than an error.
+        const { data: notified, error: notifyErr } = await db.from("notifications").insert(
+          targetNotifyIds.map((id) => ({
+            employee_id: id,
             tenant_id: tenantId,
             title: "Project Task Submitted",
             body: `${employee.full_name} submitted task: "${task.title}" in project "${project?.name}"`,
             type: "general",
             reference_id: task.id,
-          },
-        ]);
-      } else {
-        const { data: hrEmps } = await db.from("employees").select("id").eq("tenant_id", tenantId).eq("department", "operations");
-        if (hrEmps && hrEmps.length > 0) {
-          await db.from("notifications").insert(
-            hrEmps.map((h: { id: string }) => ({
-              employee_id: h.id,
-              tenant_id: tenantId,
-              title: "Project Task Submitted",
-              body: `${employee.full_name} submitted task: "${task.title}" in project "${project?.name}"`,
-              type: "general",
-              reference_id: task.id,
-            }))
-          );
+          }))
+        ).select();
+        if (notifyErr || !notified || (notified as unknown[]).length === 0) {
+          console.error("Task submitted, but the submission notification was refused.", notifyErr);
         }
+      } else {
+        console.error("Task submitted, but no notification recipient could be resolved.");
       }
 
       success("Task submitted successfully!");

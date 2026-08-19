@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import type { Attendance, Employee, Leave, Task } from "../types";
+import type { Attendance, Employee, EmployeeGrade, EmployeeUnitAssignment, Leave, Task } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db, storage, insforge } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
@@ -198,6 +198,46 @@ export default function EmployeeDetail() {
     const mapped = locations.map((location) => ({ value: location.id, label: location.name, legacyValue: location.name }));
     return mapped.length > 0 ? mapped : legacy;
   }, [locations]);
+
+  // ── Effective-dated org-unit membership (06-organisation-management.md §3.5) ──
+  const [unitAssignments, setUnitAssignments] = useState<EmployeeUnitAssignment[]>([]);
+  // Every unit of the tenant, active or not: history is largely about units people were moved OUT of,
+  // and `useOrgStructure` only carries the active ones.
+  const [unitNames, setUnitNames] = useState<Record<string, string>>({});
+  const [grades, setGrades] = useState<EmployeeGrade[]>([]);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferUnitId, setTransferUnitId] = useState("");
+  const [transferFrom, setTransferFrom] = useState(formatLocalDate(new Date()));
+  const [transferReason, setTransferReason] = useState<"transfer" | "restructure">("transfer");
+  const [transferring, setTransferring] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+
+  const currentAssignment = useMemo(
+    () => unitAssignments.find((row) => row.effective_to === null) ?? null,
+    [unitAssignments],
+  );
+
+  // Open row first, then newest start date. Not relying on the query order alone, so the list stays
+  // correct even if a row is ever written outside this screen.
+  const assignmentHistory = useMemo(() => {
+    return [...unitAssignments].sort((a, b) => {
+      if (!a.effective_to && b.effective_to) return -1;
+      if (a.effective_to && !b.effective_to) return 1;
+      return b.effective_from.localeCompare(a.effective_from);
+    });
+  }, [unitAssignments]);
+
+  const gradeOptions = useMemo(
+    () => grades.filter((grade) => grade.is_active || grade.id === employee?.grade_id),
+    [grades, employee],
+  );
+
+  // Read from the pointer the transfer trigger maintains, falling back to the legacy `department`
+  // text for employees who have no unit FK yet.
+  const currentUnitName = useMemo(() => {
+    if (!employee) return null;
+    return (employee.org_unit_id ? unitNames[employee.org_unit_id] : null) ?? employee.department ?? null;
+  }, [employee, unitNames]);
 
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [leaves, setLeaves] = useState<Leave[]>([]);
@@ -567,6 +607,149 @@ export default function EmployeeDetail() {
     }
   };
 
+  const shiftDate = (isoDate: string, days: number) => {
+    const day = new Date(`${isoDate}T00:00:00`);
+    day.setDate(day.getDate() + days);
+    return formatLocalDate(day);
+  };
+
+  const formatDay = (isoDate: string) => new Date(`${isoDate}T00:00:00`).toLocaleDateString();
+
+  const openTransfer = () => {
+    setTransferUnitId("");
+    setTransferFrom(formatLocalDate(new Date()));
+    setTransferReason("transfer");
+    setTransferError(null);
+    setTransferOpen(true);
+  };
+
+  /**
+   * Move the employee into another org unit by appending to `employee_unit_assignments`.
+   *
+   * `employees.org_unit_id` is NOT written here: the `employee_unit_assignment_sync` trigger sets it
+   * from whichever row has `effective_to IS NULL`. Client-managed sync of a duplicated fact is the
+   * defect this module exists to remove (06-organisation-management.md §2.1).
+   *
+   * The partial unique index `employee_unit_current_uniq (employee_id) WHERE effective_to IS NULL`
+   * permits only one open row, so the current row must be closed BEFORE the new one is inserted.
+   * Closing it does not move the pointer — the trigger only writes `employees` when the row it sees
+   * has `effective_to IS NULL`.
+   */
+  const submitTransfer = async () => {
+    if (!employee || !tenantId) return;
+
+    const today = formatLocalDate(new Date());
+
+    if (!transferUnitId) {
+      setTransferError("Choose the unit to move this employee into.");
+      return;
+    }
+    // Compared against the assignment, not `employees.org_unit_id`: an employee whose pointer was set
+    // through the legacy Department select has no assignment row yet, and recording their current unit
+    // as an opening assignment is exactly what they need.
+    if (currentAssignment && transferUnitId === currentAssignment.org_unit_id) {
+      setTransferError("That is already this employee's unit.");
+      return;
+    }
+    if (!transferFrom) {
+      setTransferError("Choose the date the move takes effect.");
+      return;
+    }
+    if (transferFrom > today) {
+      // The trigger keys on `effective_to IS NULL`, not on the date, so a future-dated row would move
+      // the employee immediately. Scheduling a transfer needs a job that does not exist yet.
+      setTransferError("Transfers cannot be dated in the future — record the move on or after the day it happens.");
+      return;
+    }
+    if (currentAssignment && transferFrom <= currentAssignment.effective_from) {
+      setTransferError(
+        `The effective date must be after ${formatDay(currentAssignment.effective_from)}, when the current assignment started.`,
+      );
+      return;
+    }
+
+    setTransferring(true);
+    setTransferError(null);
+
+    // Step 1 — close the open assignment the day before the new one starts.
+    // .select() matters: RLS refuses a write by matching zero rows, which PostgREST reports as a
+    // SUCCESSFUL empty response rather than an error. Without checking the returned rows, a refused
+    // transfer would tell HR the employee moved while the database is unchanged.
+    let closedAssignmentId: string | null = null;
+    if (currentAssignment) {
+      const { data: closed, error: closeError } = await db
+        .from("employee_unit_assignments")
+        .update({ effective_to: shiftDate(transferFrom, -1) })
+        .eq("tenant_id", tenantId)
+        .eq("id", currentAssignment.id)
+        .select();
+
+      if (closeError || !closed || (closed as unknown[]).length === 0) {
+        setTransferError(
+          closeError?.message ?? "The transfer was rejected. Only HR administrators can move an employee between units.",
+        );
+        setTransferring(false);
+        return;
+      }
+      closedAssignmentId = currentAssignment.id;
+    }
+
+    // Step 2 — append the new assignment. This is the row the trigger reads.
+    const { data: inserted, error: insertError } = await db
+      .from("employee_unit_assignments")
+      .insert({
+        tenant_id: tenantId,
+        employee_id: employee.id,
+        org_unit_id: transferUnitId,
+        effective_from: transferFrom,
+        reason: transferReason,
+        created_by: currentHrEmployee?.id ?? null,
+      })
+      .select();
+
+    if (insertError || !inserted || (inserted as unknown[]).length === 0) {
+      // Reopen what step 1 closed, or the employee is left with no current assignment. The reopen
+      // re-fires the trigger with `effective_to IS NULL`, restoring the pointer to the old unit too.
+      if (closedAssignmentId) {
+        const { data: reopened, error: reopenError } = await db
+          .from("employee_unit_assignments")
+          .update({ effective_to: null })
+          .eq("tenant_id", tenantId)
+          .eq("id", closedAssignmentId)
+          .select();
+
+        if (reopenError || !reopened || (reopened as unknown[]).length === 0) {
+          setTransferError(
+            "The transfer failed AND the previous assignment could not be reopened — this employee now has no current unit. Retry the transfer to restore it.",
+          );
+          toastError("Transfer failed and could not be rolled back.");
+          setTransferring(false);
+          await loadData();
+          return;
+        }
+      }
+
+      setTransferError(
+        insertError?.message ?? "The transfer was rejected. Only HR administrators can move an employee between units.",
+      );
+      setTransferring(false);
+      return;
+    }
+
+    void logAction("employee.unit_transferred", "employee_unit_assignments", (inserted as { id: string }[])[0]?.id, {
+      employee_id: employee.id,
+      from_org_unit_id: currentAssignment?.org_unit_id ?? null,
+      to_org_unit_id: transferUnitId,
+      effective_from: transferFrom,
+      reason: transferReason,
+    });
+
+    success("Employee transferred. The previous assignment is kept with its date range.");
+    setTransferOpen(false);
+    setTransferring(false);
+    await loadData();
+  };
+
   const loadData = async () => {
     if (!employeeId) return;
 
@@ -607,7 +790,7 @@ export default function EmployeeDetail() {
     const fromDate = new Date();
     fromDate.setDate(fromDate.getDate() - 29);
 
-    const [attendanceRes, leavesRes, tasksRes, docsRes, exceptionsRes, reportsRes, onboardingSelfRes] = await Promise.all([
+    const [attendanceRes, leavesRes, tasksRes, docsRes, exceptionsRes, reportsRes, onboardingSelfRes, unitAssignmentsRes, allUnitsRes, gradesRes] = await Promise.all([
       db
         .from("attendance")
         .select("*")
@@ -632,6 +815,14 @@ export default function EmployeeDetail() {
         .eq("tenant_id", tenantId)
         .eq("employee_id", currentEmployee.id)
         .maybeSingle(),
+      db.from("employee_unit_assignments")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("employee_id", currentEmployee.id)
+        .order("effective_from", { ascending: false }),
+      // Deliberately unfiltered by is_active — history mostly names units people were moved out of.
+      db.from("org_units").select("id, name").eq("tenant_id", tenantId),
+      db.from("employee_grades").select("*").eq("tenant_id", tenantId).order("level", { ascending: true }),
     ]);
 
     setAttendance((attendanceRes.data as Attendance[]) ?? []);
@@ -640,6 +831,11 @@ export default function EmployeeDetail() {
     setExceptions((exceptionsRes.data ?? []) as any[]);
     setDirectReportsCount(reportsRes.count ?? 0);
     setOnboardingSelf(onboardingSelfRes.data || null);
+    setUnitAssignments((unitAssignmentsRes.data as EmployeeUnitAssignment[]) ?? []);
+    setUnitNames(
+      Object.fromEntries(((allUnitsRes.data ?? []) as { id: string; name: string }[]).map((unit) => [unit.id, unit.name])),
+    );
+    setGrades((gradesRes.data as EmployeeGrade[]) ?? []);
 
     if (docsRes.error) {
       console.error("Database query error for employee documents:", docsRes.error);
@@ -786,6 +982,7 @@ export default function EmployeeDetail() {
       emergency_contact_relation: editForm.emergency_contact_relation,
       work_mode: editForm.work_mode || "office",
       grade: editForm.grade?.trim() || null,
+      grade_id: editForm.grade_id || null,
       work_location: editForm.work_location || null,
       location_id: editForm.location_id || null,
       probation_status: editForm.probation_status || 'on_probation',
@@ -793,10 +990,20 @@ export default function EmployeeDetail() {
       employment_confirmed_at: editForm.employment_confirmed_at || null,
     };
 
-    const { error: updateError } = await db.from("employees").update(payload).eq("tenant_id", tenantId).eq("id", employee.id);
+    // .select() matters: RLS refuses a write by matching zero rows, which comes back as a SUCCESSFUL
+    // empty response rather than an error. Without checking the returned rows a refused save would
+    // look like it worked and the form would drift from the database.
+    const { data: updated, error: updateError } = await db
+      .from("employees")
+      .update(payload)
+      .eq("tenant_id", tenantId)
+      .eq("id", employee.id)
+      .select();
 
-    if (updateError) {
-      setError(updateError.message);
+    if (updateError || !updated || (updated as unknown[]).length === 0) {
+      const message = updateError?.message ?? "The change was rejected — you may not have permission to edit this employee.";
+      setError(message);
+      toastError(message);
       setSaving(false);
       return;
     }
@@ -1450,7 +1657,7 @@ export default function EmployeeDetail() {
                 ))}
               </select>
             ) : (
-              <span className="capitalize font-semibold text-slate-900 block mt-2">{employee.department || "No Department"}</span>
+              <span className="capitalize font-semibold text-slate-900 block mt-2">{currentUnitName || "No Department"}</span>
             )}
           </label>
           <label className="text-sm">
@@ -1553,6 +1760,31 @@ export default function EmployeeDetail() {
             ) : (
               <span className="font-semibold text-slate-900 block mt-2">
                 {employee.grade || "—"}
+              </span>
+            )}
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Grade Band</span>
+            {isEditing ? (
+              gradeOptions.length === 0 ? (
+                <p className="mt-2 text-xs italic text-slate-500">
+                  No grade bands configured yet — add them under Organisation Structure.
+                </p>
+              ) : (
+                <select
+                  value={editForm.grade_id ?? ""}
+                  onChange={(event) => updateField("grade_id", event.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 bg-white"
+                >
+                  <option value="">No grade band</option>
+                  {gradeOptions.map((grade) => (
+                    <option key={grade.id} value={grade.id}>{grade.name} — Level {grade.level}</option>
+                  ))}
+                </select>
+              )
+            ) : (
+              <span className="font-semibold text-slate-900 block mt-2">
+                {grades.find((grade) => grade.id === employee.grade_id)?.name ?? "—"}
               </span>
             )}
           </label>
@@ -1848,10 +2080,69 @@ export default function EmployeeDetail() {
                 <div className="flex flex-wrap items-center gap-1.5 mt-2 text-sm text-slate-700 font-medium">
                   <span className="font-semibold text-slate-900">{tenant?.company_name || "Company"}</span>
                   <span className="text-slate-400">→</span>
-                  <span className="capitalize font-semibold text-slate-900">{employee.department || "No Department"}</span>
+                  <span className="capitalize font-semibold text-slate-900">{currentUnitName || "No Department"}</span>
                   <span className="text-slate-400">→</span>
                   <span className="font-semibold text-brand-600">{employee.full_name}</span>
                 </div>
+              </div>
+
+              {/* Effective-dated unit membership (06-organisation-management.md §3.5) */}
+              <div className="sm:col-span-2 space-y-3 border-t border-slate-200/60 pt-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Unit Assignment History</span>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      Moves are appended, never overwritten, so past months still report against the unit this
+                      employee was actually in at the time.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openTransfer}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Transfer unit
+                  </button>
+                </div>
+
+                {assignmentHistory.length === 0 ? (
+                  <p className="text-xs italic text-slate-500">
+                    No unit assignment recorded yet — a transfer creates the first one.
+                  </p>
+                ) : (
+                  <ol className="space-y-2">
+                    {assignmentHistory.map((assignment) => {
+                      const isCurrent = assignment.effective_to === null;
+                      return (
+                        <li
+                          key={assignment.id}
+                          className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border px-3 py-2 ${
+                            isCurrent ? "border-emerald-200 bg-emerald-50/70" : "border-slate-200 bg-white"
+                          }`}
+                        >
+                          <span className="text-sm font-semibold text-slate-900">
+                            {unitNames[assignment.org_unit_id] ?? "Unknown unit"}
+                          </span>
+                          {isCurrent && (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                              Current
+                            </span>
+                          )}
+                          <span className="text-xs text-slate-600">
+                            {isCurrent
+                              ? `Since ${formatDay(assignment.effective_from)}`
+                              : `${formatDay(assignment.effective_from)} — ${formatDay(assignment.effective_to as string)}`}
+                          </span>
+                          {assignment.reason && (
+                            <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold capitalize text-slate-600">
+                              {assignment.reason}
+                            </span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
               </div>
             </div>
           </div>
@@ -2324,6 +2615,92 @@ export default function EmployeeDetail() {
         onSuccess={() => { void loadData(); }}
         preselectedEmployeeId={employee?.id}
       />
+
+      {transferOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+          onClick={() => !transferring && setTransferOpen(false)}
+        >
+          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h3 className="text-lg font-semibold text-slate-900">Transfer to another unit</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                {currentAssignment
+                  ? `Currently in ${unitNames[currentAssignment.org_unit_id] ?? "an unknown unit"} since ${formatDay(currentAssignment.effective_from)}. That assignment is closed the day before the new one starts — it stays on record.`
+                  : "This employee has no recorded assignment yet. This becomes their first one."}
+              </p>
+            </div>
+
+            <div className="space-y-4 px-5 py-5 text-sm">
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">Move to</span>
+                <select
+                  value={transferUnitId}
+                  onChange={(event) => setTransferUnitId(event.target.value)}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none"
+                >
+                  <option value="">Select a unit</option>
+                  {orgUnits
+                    .filter((unit) => unit.id !== currentAssignment?.org_unit_id)
+                    .map((unit) => (
+                      <option key={unit.id} value={unit.id}>{unit.name}</option>
+                    ))}
+                </select>
+              </label>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block space-y-1">
+                  <span className="font-medium text-slate-700">Effective from</span>
+                  <input
+                    type="date"
+                    value={transferFrom}
+                    min={currentAssignment ? shiftDate(currentAssignment.effective_from, 1) : undefined}
+                    max={formatLocalDate(new Date())}
+                    onChange={(event) => setTransferFrom(event.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="font-medium text-slate-700">Reason</span>
+                  <select
+                    value={transferReason}
+                    onChange={(event) => setTransferReason(event.target.value as "transfer" | "restructure")}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none"
+                  >
+                    <option value="transfer">Transfer — this person moved</option>
+                    <option value="restructure">Restructure — the org changed around them</option>
+                  </select>
+                </label>
+              </div>
+
+              {transferError && (
+                <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+                  {transferError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setTransferOpen(false)}
+                disabled={transferring}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitTransfer()}
+                disabled={transferring}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
+              >
+                {transferring ? "Transferring..." : "Record transfer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {exceptionModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={() => setExceptionModalOpen(false)}>

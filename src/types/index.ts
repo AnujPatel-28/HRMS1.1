@@ -48,6 +48,38 @@ export interface Employee {
   job_title_id?: string | null;
   location_id?: string | null;
   employment_type_id?: string | null;
+  grade_id?: string | null;
+}
+
+/** Pay/seniority band. `employees.grade` (text) is the legacy form and is dropped once tenants populate these. */
+export interface EmployeeGrade {
+  id: string;
+  tenant_id: string;
+  name: string;
+  level: number;
+  default_notice_days: number | null;
+  default_probation_months: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Effective-dated org-unit membership. `employees.org_unit_id` is a denormalised pointer to the row
+ * with `effective_to IS NULL`, maintained by the `employee_unit_assignment_sync` trigger — never
+ * written from the client.
+ */
+export interface EmployeeUnitAssignment {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  org_unit_id: string;
+  effective_from: string;
+  /** NULL = the current assignment. */
+  effective_to: string | null;
+  reason: string | null;
+  created_by: string | null;
+  created_at: string;
 }
 
 export interface OrgUnit {
@@ -62,6 +94,22 @@ export interface OrgUnit {
   sort_order: number;
   created_at: string;
   updated_at: string;
+  // Slice A (06-organisation-management.md §3.2). `type_id` is the tenant-named type that supersedes
+  // the `unit_type` text; `path` is materialised ancestry maintained by a DB trigger — never written
+  // from the client.
+  type_id?: string | null;
+  head_employee_id?: string | null;
+  path?: string | null;
+}
+
+export interface OrgUnitType {
+  id: string;
+  tenant_id: string;
+  name: string;
+  structural_role: "division" | "department" | "team";
+  level_order: number;
+  is_active: boolean;
+  created_at: string;
 }
 
 export interface JobTitle {

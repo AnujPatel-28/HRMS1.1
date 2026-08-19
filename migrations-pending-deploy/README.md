@@ -33,3 +33,21 @@ as any employee. The surviving 4-arg form derives the submitter from `auth.uid()
 
 **Release check:** the live bundle must contain no `p_employee_id` next to `submit_task_request`.
 As of 2026-08-17 it still did, in both call sites.
+
+### `20260819120000_repoint-department-rls-to-org-units.sql`
+
+Phase 1 Slice B step 3 (`doc/architecture/06` §5) plus §9.2. Repoints the five RLS policies that
+exact-string-match `employees.department` onto `employees.org_unit_id`:
+`hr_policies.policies_visible_to_all`, `projects.projects_employee_read`, and three on
+`chat_messages`. Adds `hr_policies.include_descendants` and the uuid target columns the channel and
+project sides need.
+
+**Blocked on:** more than a deploy. `hr_policies.org_unit_id` is already written by
+`PolicyUpload.tsx`, but `chat_channels.target_org_unit_ids` and
+`projects.visibility_config.org_unit_ids` have **no write path in `src/` yet** — those frontend
+changes are unauthored.
+
+**Also gated on a human review pass.** `include_descendants` defaults to true, which widens who can
+read existing department-scoped policy documents. Read
+`20260819120000_repoint-department-rls-to-org-units.NOTES.md` and run its review query before
+applying.
