@@ -70,6 +70,27 @@ simultaneously make `employee_roles` the *writer* for HR promotion.
 
 ---
 
+## 2b. What was actually verified, and how
+
+Because PL/pgSQL plans each statement on first execution of *that statement*, "it applied" and
+"static scan is clean" are not proof. Be precise about which is which.
+
+| Function | Evidence |
+|---|---|
+| `employee_is_hr` / `tenant_hr_employee_ids` | **Runtime.** SQL-language, validated at creation; exercised via RPC as HR and as employee-role users in two tenants. Set-equality vs the old predicate: **0 disagreements across all 16 employees** |
+| `enforce_employee_update_restrictions` | **Runtime, both paths.** Employee self-update of an allowed field succeeds; a restricted field is still refused, with the corrected message |
+| `fn_check_insurance_expiries` | **Runtime, loop body forced.** A synthetic expiring policy made the loop iterate; notifications 17 → 19 (employee + HR), rolled back to 17 |
+| `employee_apply_leave_request` | **Runtime, fan-out confirmed.** Its HR notification INSERT is wrapped in `EXCEPTION WHEN OTHERS THEN NULL`, so a failure would be permanent and silent — the notification was confirmed to actually land, not merely that the call returned OK |
+| `get_hr_policy_library` | **Runtime.** Called as HR, returned without error |
+| `create_draft_employee` | **Runtime.** The highest-traffic write on `employees`; created a draft successfully after the drop, then removed |
+| `create_policy_notifications_transaction` | **STATIC ONLY.** Zero `role` tokens remain and the rewrite was a one-line swap to a proven function, but it was not executed. Exercise it the next time a policy is created |
+| `submit_task_request` | **STATIC ONLY.** Same reasoning, same caveat |
+
+All probe artifacts were removed and counts restored: employees 16, notifications 17,
+`employee_roles` 3.
+
+---
+
 ## 3. Traps learned this session
 
 **The audit regex from the last session has a hole, and it cost a real miss.**
