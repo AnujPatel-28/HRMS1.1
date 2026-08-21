@@ -369,6 +369,13 @@ dual-write, dropping the text columns) all break the currently-deployed SPA, whi
 
 ## 5. Migration path
 
+> **STATUS 2026-08-21: COMPLETE.** All ten steps are applied to production (head
+> `20260821130000`). Step 6 turned out to be TWO columns, not three — `employment_type` was
+> retracted by §4b as a code/label convention, not drift. Step 10 landed with a correction:
+> §9.6's sequence is not buildable as written and its "role now has ONE source" claim is
+> false. See the rewritten §9.6 below before acting on anything in it.
+
+
 Non-destructive and staged. **Sequencing is not optional** — the RLS repoint must precede the column
 drop, because five policies read the text columns and they subquery `employees`, the table that caused
 the 2026-08-14 outage (**P2**).
@@ -518,8 +525,11 @@ Deferred properly. When a real multi-company requirement appears, design it then
 
 ### 9.6 Tenant Owner — **yes, but activate `employee_roles` first**
 
-Owner cannot simply be added as an `employee_roles` row today: that table grants nothing in practice.
-Sequence:
+> ⚠️ **CORRECTED 2026-08-21, after attempting it.** The sequence below was the original plan.
+> Steps 1 and 2 are **not buildable**, and step 3's claim is **false**. What shipped is different.
+> Read the correction before the plan.
+
+~~Original plan:~~
 
 ```
 1. Backfill employee_roles from employees.role / auth metadata
@@ -529,24 +539,59 @@ Sequence:
 5. Seed one owner per tenant
 ```
 
-This folds the role-duplication cleanup (below) into the same piece of work rather than leaving three
-sources of truth in place.
+**Why steps 1–2 fail, and step 3's claim is false.** Two facts from the live backend:
+
+1. **Four auth users carry `metadata.role = 'hr'` and have NO `employees` row at all** —
+   `hr@skyinfo.com`, `hr@testcorp.com`, `hr@testcorps.com`, `nikavx28@gmail.com`. This is not stale
+   data. `create-hr-admin-user` provisions a tenant's first HR admin as an auth user only; it writes
+   no `employees` row. Remove the JWT branch from `is_hr()` and **every new tenant is dead on
+   arrival** — the admin who just signed up cannot even create the first employee.
+2. **`get_auth_tenant_id()` reads `metadata->>'tenant_id'`.** JWT is already session truth for
+   tenancy, and cannot stop being so without an auth-core rewrite. "One source" was never on offer.
+
+**What shipped instead — three sources to TWO, holding different jobs rather than duplicating:**
+
+| Source | Answers | Written by |
+|---|---|---|
+| `auth.users.metadata` | is this **session** HR, and which tenant | `set_hr_user_metadata` (superadmin) |
+| `employee_roles` | grants a JWT cannot carry: `owner`, scoped `manager` / `payroll_admin` | HR, via RLS |
+| ~~`employees.role`~~ | *(a redundant copy of the first — dropped `20260821130000`)* | — |
+
+`employee_is_hr(employee_id)` mirrors `is_hr()` but asks about an **employee** rather than the
+session, which is what the five notification fan-outs need — JWT describes one session and cannot
+answer "who in this tenant is HR". `tenant_hr_employee_ids()` is the frontend's RLS-safe equivalent.
+
+**There is deliberately NO `hr_admin` backfill.** Nothing writes `employee_roles` on HR promotion, so
+copying `'hr'` into it would create the exact drift this module exists to remove — precisely how
+`employees.department` came to contradict `org_units` on 7 of 16 rows. `employee_is_hr()`'s table
+branch is the forward path, not dead code: when an HR-grant UI writes those rows they compose through
+the existing `OR` with no migration and no drift window. **Do not "complete" this by backfilling
+`hr_admin` unless you are simultaneously making `employee_roles` the WRITER for HR promotion.**
+
+Owner is seeded for the **3 tenants that have an identifiable HR employee**, not 12. Eight tenants
+hold zero employees, and `employee_roles.employee_id` is NOT NULL with an FK to `employees` — so
+"exactly one owner per tenant" is unachievable as a database constraint, and unachievable at
+provisioning time for the same reason the JWT branch is load-bearing. The DB enforces the half that
+is true: a partial unique index giving **at most one active owner per tenant**. Tenants with
+employees but no HR are skipped deliberately — promoting an arbitrary employee to owner invents an
+authority nobody granted.
 
 Owner carries org-level rights — transfer ownership, close the account, manage billing when billing
 exists — distinct from `hr_admin`'s operational rights. Constraints: **exactly one owner per tenant**,
 and a transfer flow (today, an owner leaving would strand the account).
 
-**Open data call, not a design call:** who becomes owner for the 12 existing tenants? Most likely the
-earliest HR user per tenant, but it needs confirming before the seed runs.
+~~**Open data call:** who becomes owner for the 12 existing tenants?~~ **Resolved 2026-08-21.** All
+existing data is dummy, so there was nothing to confirm. Seeded as the earliest active HR employee per
+tenant (by `date_of_joining`, then `created_at`), for the 3 tenants where one exists.
 
 ### Cross-cutting duplications found while auditing this module
 
 Not org-management defects as such, but the same "two sources of truth" pattern, and worth folding into
 Phase 0a's cleanup rather than rediscovering later:
 
-- **Role is stored in three places** — `auth.users.metadata.role`, `employees.role`, and the
-  `employee_roles` table. They agree today (10 employee / 3 hr) but that is exactly the setup that let
-  `department` drift to 7 contradictions. Note that **`employee_roles` has zero rows**, so the
-  "roles as data" work from 2026-08-13 is currently inert — `is_hr()` still resolves via JWT metadata.
+- ~~**Role is stored in three places**~~ — **RESOLVED 2026-08-21.** `employees.role` was dropped
+  (`20260821130000`). Two sources remain by design, holding different facts rather than duplicating
+  one: see the corrected §9.6. `employee_roles` is no longer inert — it holds the seeded tenant
+  owners.
 - **`audit_log` and `audit_logs` both exist, 33 rows each.** A duplicate pair, like
   `locations`/`office_locations`. Determine which is live and drop the other.
