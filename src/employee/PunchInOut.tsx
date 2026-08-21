@@ -792,20 +792,10 @@ export default function PunchInOut() {
     verificationSnapshot: Record<string, any>,
     selfieBlob: Blob | null
   ) => {
-    const overtimeEnabled = tenantSettings["overtime_enabled"] === "true";
-    const overtimeRate = parseFloat(tenantSettings["overtime_rate"] || "1.5");
-    let expectedShiftHours = Number(tenant.work_hours_per_day || 8);
-
-    if (shift) {
-      const shiftStartMin = parseTime(shift.start_time);
-      const shiftEndMin = parseTime(shift.end_time);
-      const lunchMinutes = tenant.lunch_break_minutes || 0;
-      const shiftDurationMinutes = shiftEndMin >= shiftStartMin
-        ? shiftEndMin - shiftStartMin
-        : (24 * 60 - shiftStartMin) + shiftEndMin;
-      expectedShiftHours = (shiftDurationMinutes - lunchMinutes) / 60;
-    }
-
+    // The shift-hours / overtime derivation that used to sit here is gone: the server now
+    // computes it from the same tenants / tenant_settings / shifts rows. Keeping a copy here
+    // would recreate the two-sources-of-truth problem, and the copy is the one an attacker
+    // controls.
     const { data, error: dbErr } = await db.rpc("punch_out_attendance", {
       p_attendance_id: attendance!.id,
       p_tenant_id: tenantId,
@@ -813,10 +803,11 @@ export default function PunchInOut() {
       p_lng: lng,
       p_acc: accuracy,
       p_loc_status: status === "selfie_missing" ? "selfie_missing" : (status || "unavailable"),
-      p_lunch_minutes: tenant.lunch_break_minutes || 0,
-      p_overtime_enabled: overtimeEnabled,
-      p_overtime_rate: overtimeRate,
-      p_expected_shift_hours: parseFloat(expectedShiftHours.toFixed(2))
+      // Lunch minutes, overtime enablement, overtime rate and expected shift hours are NO
+      // LONGER SENT. The server derives all four from tenants / tenant_settings / shifts
+      // (migration 20260821200000). They were only ever computed from server data this
+      // client had just read — but as request parameters they could be replaced in transit,
+      // and a fabricated overtime amount landed in overtime_records (finding C1).
     });
 
     if (dbErr) throw dbErr;
