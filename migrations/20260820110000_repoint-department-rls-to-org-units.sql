@@ -1,6 +1,19 @@
--- ⚠️ DEPLOY-GATED. Do not apply until the frontend changes named below are live.
--- ⚠️ ACCESS-CONTROL WIDENING. Read 20260819120000_repoint-department-rls-to-org-units.NOTES.md
---    and run the review query in it BEFORE applying. `include_descendants` defaults to true.
+-- ⚠️ ACCESS-CONTROL WIDENING. Notes: doc/20260820110000_repoint-department-rls-to-org-units.NOTES.md
+--    `include_descendants` defaults to true. The §9.2 review query in that file MUST be re-run
+--    before any replay of this migration onto another project or branch.
+--
+-- GATE CLEARED 2026-08-20. Renumbered from 20260819120000 (applied head had moved past it; the CLI
+-- applies strictly in order and refuses to skip). At apply time:
+--   * both target-side write paths shipped (commit c7e2e29) and were verified present in the SERVED
+--     production bundle /assets/index-DJEWvrPu.js, not just in src/ — preconditions 2 and 3 below.
+--     Value shape checked, not just the identifier: both write string[] of org_units.id, which is
+--     what chat_channels.target_org_unit_ids (uuid[]) and the jsonb `?` test against
+--     (get_my_org_unit_id())::text both require, and matches the backfills' ou.id::text;
+--   * rq3qmu8y.insforge.site serves a "Decommissioned" page, so hrms.talentmeshsolutions.com is the
+--     only live host and the two-host check in the NOTES collapses to one;
+--   * the §9.2 review query returned ZERO ROWS. hr_policies: 1 row, visible_to='all'. chat_channels:
+--     7 rows, 0 of type 'department', 0 with target_departments. projects: 1 row, type='all'.
+--     All three backfills below were therefore no-ops and the widening granted nobody anything.
 --
 -- Phase 1 Slice B, step 3 of doc/architecture/06-organisation-management.md §5, plus §9.2.
 --
@@ -24,12 +37,9 @@
 --
 -- ── PRECONDITIONS — verify each before applying ──────────────────────────────
 --  1. hr_policies: already satisfied. src/hr/PolicyUpload.tsx:139 writes `org_unit_id` today.
---  2. chat_channels: NOT satisfied by any branch. The channel-creation UI writes `target_departments`
---     only; `target_org_unit_ids` has no write path anywhere in `src/`. Until one ships and deploys,
---     a NEW department channel grants access to nobody (fails CLOSED, not open).
---  3. projects: NOT satisfied by any branch. src/hr/pms/ProjectList.tsx:182 and ProjectDetail.tsx:239
---     write `visibility_config.departments` only; `org_unit_ids` has no write path. Same fail-closed
---     behaviour for new department-scoped projects.
+--  2. chat_channels: SATISFIED 2026-08-20. src/shared/Chat.tsx:493 writes `target_org_unit_ids`.
+--  3. projects: SATISFIED 2026-08-20. src/hr/pms/ProjectList.tsx:239 and ProjectDetail.tsx:297 write
+--     `visibility_config.org_unit_ids`.
 --  4. Run the §9.2 review query in the NOTES file and sign off on every row it returns.
 --
 -- ── Rollback ─────────────────────────────────────────────────────────────────

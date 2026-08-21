@@ -127,6 +127,45 @@ done
 # both hosts must show the new keys before applying.
 ```
 
+## 3b. APPLIED 2026-08-20 — and one expectation in §4 below is WRONG
+
+Applied as `20260820110000` (renumbered; the head had moved past `20260819120000`). Gate evidence:
+served bundle carried both write paths with the right value shape, `rq3qmu8y.insforge.site` now serves
+a "Decommissioned" page so only `hrms.talentmeshsolutions.com` counts, and the §9.2 review query
+returned **zero rows**. All three backfills were no-ops.
+
+**§4's anon check below is unreachable, and always was.** It says an anon
+`GET /chat_messages` must return `[]` rather than `permission denied`. It returns
+**`permission denied for table users`** — for anon *and* for every authenticated caller.
+
+The cause is not the function grants this migration adds. `chat_messages_select` contains two
+`EXISTS (SELECT 1 FROM auth.users u ...)` subqueries, reproduced byte-identical from the baseline, and
+**only `project_admin` holds SELECT on `auth.users`** — `anon` and `authenticated` hold nothing:
+
+```sql
+select grantee, privilege_type from information_schema.table_privileges
+where table_schema='auth' and table_name='users';   -- project_admin only
+```
+
+An inline table read inside a policy runs as the invoking role, so the privilege check fails before
+any grant on a helper function matters.
+
+**This migration did not cause it.** Proof: `chat_channels.channels_hr_all` and
+`chat_channel_members.members_hr_all` carry the same inline `auth.users` subquery, were **not touched
+by this migration**, and fail identically. Three policies, one cause:
+
+```sql
+select tablename, policyname from pg_policies
+where coalesce(qual,'') like '%auth.users%' or coalesce(with_check,'') like '%auth.users%';
+```
+
+**Consequence: the chat module is non-functional in production and has been.** `Chat.tsx` reads
+through `db.from("chat_channels")` and `db.from("chat_messages")` directly, so both error. The fix is
+the P2 pattern this migration already uses everywhere else — route the `auth.users` metadata check
+through a SECURITY DEFINER helper — applied to all three policies. Not done here: it is outside the
+five this file enumerates, and an unrequested policy rewrite does not belong in an authorisation
+migration.
+
 ## 4. After applying
 
 Re-run the regression baseline from `doc/session_context_2026-08-18.md` §1 — 7/7 HR dashboard
