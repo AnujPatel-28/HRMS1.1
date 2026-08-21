@@ -119,6 +119,7 @@ export default function RunPayroll() {
   const [rows, setRows] = useState<RowCalc[]>([]);
   const [skipped, setSkipped] = useState<Employee[]>([]);
   const [noAttendance, setNoAttendance] = useState<Employee[]>([]);
+  const [anomalies, setAnomalies] = useState<Employee[]>([]);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [midMonthEmployees, setMidMonthEmployees] = useState<string[]>([]);
   const [overrideChecked, setOverrideChecked] = useState(false);
@@ -398,6 +399,7 @@ export default function RunPayroll() {
       const newRows: RowCalc[] = [];
       const newSkipped: Employee[] = [];
       const newNoAttendance: Employee[] = [];
+      const newAnomalies: Employee[] = [];
       const midMonthRevisions: string[] = [];
 
       for (const emp of employees) {
@@ -418,6 +420,12 @@ export default function RunPayroll() {
           esiCoveredEarlierInPeriod: esiCoveredInPeriod.has(emp.id),
           workingDays: workingDaysFor(emp.id),
         });
+
+        // An impossible timesheet -- more tracked days than the employee had working days.
+        // calcPayslip normalises it and console.warns, then the flag was dropped before the
+        // payslip was written, so the record carried no trace of having been corrected.
+        // Collected here so HR sees it before approving the run.
+        if (calc.hasAttendanceAnomaly) newAnomalies.push(emp);
         
         const lateSummary = lateSummaryMap.get(emp.id) ?? {};
         const workHoursPerDay = Number(tenant?.work_hours_per_day ?? 8);
@@ -468,6 +476,7 @@ export default function RunPayroll() {
       setRows(newRows);
       setSkipped(newSkipped);
       setNoAttendance(newNoAttendance);
+      setAnomalies(newAnomalies);
       setMidMonthEmployees(midMonthRevisions);
       setOverrideChecked(false);
 
@@ -832,6 +841,23 @@ export default function RunPayroll() {
                 </div>
               )}
 
+              {anomalies.length > 0 && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+                    <p className="text-sm font-semibold text-rose-800">Attendance Anomaly — Review Before Approving</p>
+                  </div>
+                  <p className="text-xs text-rose-700 mb-2">
+                    These employees have more tracked days than working days in this period, which cannot be
+                    correct. The figures below were normalised to fit the period, so their pay is an estimate
+                    built on a corrected timesheet. Fix the attendance records and recalculate.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {anomalies.map(e => <span key={e.id} className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-medium text-rose-800">{e.full_name}</span>)}
+                  </div>
+                </div>
+              )}
+
               {noAttendance.length > 0 && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                   <div className="flex items-center gap-2 mb-2">
@@ -874,6 +900,7 @@ export default function RunPayroll() {
               {rowsWithFinal.length} employee payslips will be generated.
               {skipped.length > 0 && <span className="text-amber-700"> {skipped.length} employee(s) skipped (no salary structure).</span>}
               {noAttendance.length > 0 && <span className="text-amber-700"> {noAttendance.length} employee(s) skipped (no attendance data).</span>}
+              {anomalies.length > 0 && <span className="text-rose-700"> {anomalies.length} employee(s) have an attendance anomaly.</span>}
             </p>
           </div>
 
