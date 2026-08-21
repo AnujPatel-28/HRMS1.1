@@ -9,6 +9,7 @@ import { Skeleton } from "../../shared/Skeleton";
 import { EmptyState } from "../../shared/EmptyState";
 import type { Project, Employee, Task } from "../../types";
 import { useDepartmentLabel, useJobTitleLabel } from "../../contexts/OrgUnitsContext";
+import { useTenantHrIds } from "../../hooks/useTenantHrIds";
 
 const DEPT_OPTIONS = ["sales", "dev", "marketing", "operations", "design", "other"] as const;
 
@@ -67,6 +68,7 @@ interface ProjectCardData extends Project {
 export default function ProjectList() {
   const deptLabel = useDepartmentLabel();
   const titleLabel = useJobTitleLabel();
+  const hrIds = useTenantHrIds();
   const { tenantId } = useTenant();
   const { employee: currentHr } = useEmployee();
   const navigate = useNavigate();
@@ -206,8 +208,9 @@ export default function ProjectList() {
   // Manager List (HR + Managers)
   const eligibleManagers = useMemo(() => {
     const managerIds = new Set(employees.map((e) => e.manager_id).filter(Boolean));
-    return employees.filter((e) => e.role === "hr" || managerIds.has(e.id));
-  }, [employees]);
+    // HR comes from tenant_hr_employee_ids(), not employees.role, which no longer exists.
+    return employees.filter((e) => hrIds.has(e.id) || managerIds.has(e.id));
+  }, [employees, hrIds]);
 
   const filteredModalManagers = useMemo(() => {
     return eligibleManagers.filter((e) =>
@@ -637,7 +640,7 @@ export default function ProjectList() {
                             </span>
                             <div className="flex-1 truncate">
                               <p className="font-semibold">{m.full_name}</p>
-                              <p className="text-[10px] text-slate-400 capitalize">{titleLabel(m, m.role)}</p>
+                              <p className="text-[10px] text-slate-400 capitalize">{titleLabel(m, "Member")}</p>
                             </div>
                           </button>
                         ))}

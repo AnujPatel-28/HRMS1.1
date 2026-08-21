@@ -10,6 +10,7 @@ import { EmptyState } from "../../shared/EmptyState";
 import { useAuditLog } from "../../hooks/useAuditLog";
 import type { Project, Employee, Task, TaskSubmission } from "../../types";
 import { useDepartmentLabel, useJobTitleLabel } from "../../contexts/OrgUnitsContext";
+import { useTenantHrIds } from "../../hooks/useTenantHrIds";
 
 const PRIORITY_DOT: Record<Task["priority"], string> = {
   low: "bg-slate-400",
@@ -79,6 +80,7 @@ function sortOrgUnitsHierarchically(units: OrgUnitOption[]): OrgUnitOption[] {
 export default function ProjectDetail() {
   const deptLabel = useDepartmentLabel();
   const titleLabel = useJobTitleLabel();
+  const hrIds = useTenantHrIds();
   const { projectId } = useParams<{ projectId: string }>();
   const { tenantId } = useTenant();
   const { employee: currentHr } = useEmployee();
@@ -542,8 +544,9 @@ export default function ProjectDetail() {
   // Filters for dropdown searchable lists
   const eligibleManagers = useMemo(() => {
     const managerIds = new Set(employees.map((e) => e.manager_id).filter(Boolean));
-    return employees.filter((e) => e.role === "hr" || managerIds.has(e.id));
-  }, [employees]);
+    // HR comes from tenant_hr_employee_ids(), not employees.role, which no longer exists.
+    return employees.filter((e) => hrIds.has(e.id) || managerIds.has(e.id));
+  }, [employees, hrIds]);
 
   const filteredModalManagers = useMemo(() => {
     return eligibleManagers.filter((e) =>
@@ -1394,7 +1397,7 @@ export default function ProjectDetail() {
                             </span>
                             <div className="flex-1 truncate">
                               <p className="font-semibold">{m.full_name}</p>
-                              <p className="text-[10px] text-slate-400 capitalize">{titleLabel(m, m.role)}</p>
+                              <p className="text-[10px] text-slate-400 capitalize">{titleLabel(m, "Member")}</p>
                             </div>
                           </button>
                         ))}

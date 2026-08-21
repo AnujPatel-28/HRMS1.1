@@ -4,6 +4,7 @@ import { Search, Download, GitBranch, X, ChevronRight, Filter, Network, ZoomIn, 
 import type { Employee } from "../../types";
 import { useTenant } from "../../contexts/TenantContext";
 import { useOrgStructure } from "../../hooks/useOrgStructure";
+import { useTenantHrIds } from "../../hooks/useTenantHrIds";
 import { db } from "../../insforge/client";
 import { useToast } from "../ToastContext";
 import { Skeleton } from "../Skeleton";
@@ -37,6 +38,7 @@ const getDeptStyle = (dept: string) => {
 
 export default function OrgChart() {
   const { tenantId } = useTenant();
+  const hrIds = useTenantHrIds();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -249,7 +251,7 @@ export default function OrgChart() {
 
     Promise.all([
       db.from(employeesTable)
-        .select("id, full_name, org_unit_id, job_title_id, location_id, employment_type_id, profile_photo_url, grade, status, role, user_id")
+        .select("id, full_name, org_unit_id, job_title_id, location_id, employment_type_id, profile_photo_url, grade, status, user_id")
         .eq("tenant_id", tenantId)
         .in("status", ["active", "draft", "pending_hr_review", "inactive"]),
       db.from("employee_reporting_relationships")
@@ -308,14 +310,16 @@ export default function OrgChart() {
     }));
   }, [jobTitles, orgUnits, visibleEmployees]);
 
-  // Separate HR admins (no manager, role=hr) from the reporting tree
+  // Separate HR admins (no manager) from the reporting tree. HR now comes from
+  // tenant_hr_employee_ids(); employees.role is gone, and the directory view an
+  // employee-portal session reads no longer exposes it either.
   const hrAdmins = useMemo(
-    () => lookupDecoratedEmployees.filter(e => e.role === 'hr' && !e.manager_id),
-    [lookupDecoratedEmployees]
+    () => lookupDecoratedEmployees.filter(e => hrIds.has(e.id) && !e.manager_id),
+    [lookupDecoratedEmployees, hrIds]
   );
   const treeEmployees = useMemo(
-    () => lookupDecoratedEmployees.filter(e => !(e.role === 'hr' && !e.manager_id)),
-    [lookupDecoratedEmployees]
+    () => lookupDecoratedEmployees.filter(e => !(hrIds.has(e.id) && !e.manager_id)),
+    [lookupDecoratedEmployees, hrIds]
   );
 
   // Compute trees and lists, separating true roots from orphaned employees
@@ -886,7 +890,7 @@ export default function OrgChart() {
                           )}
                           <div>
                             <p className="font-semibold text-slate-900">{emp.full_name}</p>
-                            <p className="text-[10px] text-slate-400 capitalize">{emp.role}</p>
+                            <p className="text-[10px] text-slate-400 capitalize">{hrIds.has(emp.id) ? "HR" : emp.designation || ""}</p>
                           </div>
                         </td>
                         <td className="px-6 py-4 text-slate-700 font-medium capitalize">{emp.designation || "-"}</td>

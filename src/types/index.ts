@@ -37,7 +37,6 @@ export interface Employee {
   linkedin_url?: string | null;
   employee_bio?: string | null;
   manager_name?: string | null;
-  role?: EmployeeRole | null;
   probation_end_date?: string | null;
   employment_confirmed_at?: string | null;
   probation_status?: "on_probation" | "confirmed" | "extended" | "not_applicable" | null;

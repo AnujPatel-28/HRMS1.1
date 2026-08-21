@@ -27,6 +27,7 @@ import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import type { Expense } from "../types";
 import { MONTH_NAMES } from "../payroll/hr/payroll-calc";
+import { useTenantHrIds } from "../hooks/useTenantHrIds";
 
 const CATEGORIES = [
   { value: "travel", label: "Travel", icon: Car },
@@ -41,6 +42,7 @@ export default function Expenses() {
   const { employee, loading: empLoading } = useEmployee();
   const { tenantId } = useTenant();
   const { success, error } = useToast();
+  const hrIds = useTenantHrIds();
 
   const [activeTab, setActiveTab] = useState<"my" | "submit">("my");
   const [expenses, setExpenses] = useState<(Expense & { payroll_runs?: { month: number; year: number } | null })[]>([]);
@@ -168,18 +170,12 @@ export default function Expenses() {
 
       if (insertErr) throw insertErr;
 
-      // Create notification for HR
-      const { data: hrEmployees } = await db
-        .from("employees")
-        .select("id")
-        .eq("tenant_id", tenantId)
-        .eq("role", "hr")
-        .eq("status", "active");
-
-      if (hrEmployees && hrEmployees.length > 0) {
-        const notifications = hrEmployees.map((hr: any) => ({
+      // Create notification for HR. Resolved through tenant_hr_employee_ids() — employees.role
+      // is gone, and an employee cannot read other people's rows in employee_roles.
+      if (hrIds.size > 0) {
+        const notifications = Array.from(hrIds).map((hrId) => ({
           tenant_id: tenantId,
-          employee_id: hr.id,
+          employee_id: hrId,
           title: "New expense claim",
           body: `${employee.full_name} submitted a ₹${amount} expense for ${category}`,
           type: "general",
