@@ -23,8 +23,17 @@ export const MODULE_KEYS = [
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
 
-/** `directory` is core: it cannot be disabled, so nothing gated on it ever needs checking. */
-export const CORE_MODULES: readonly ModuleKey[] = ["directory"];
+/**
+ * Core modules cannot be disabled, so nothing gated on them ever needs checking.
+ *
+ * `policy_center` is core as of 20260821150000, and not because it is popular. PolicyCenter
+ * is the ONLY surface for the statutory settings other modules read — lop_calculation_method,
+ * pf_wage_ceiling, esi_gross_ceiling, professional_tax_state, late-mark and regularization
+ * rules. Gated off, payroll and attendance silently fall back to hardcoded defaults (PF 15000,
+ * ESI 21000, PT 0) with no UI anywhere to correct them. Settings that other modules depend on
+ * cannot themselves be sellable. Keep this list in step with `modules.is_core` in the database.
+ */
+export const CORE_MODULES: readonly ModuleKey[] = ["directory", "policy_center"];
 
 /**
  * Route prefix -> owning module. Longest prefix wins, so `/hr/policy-center` resolves to
