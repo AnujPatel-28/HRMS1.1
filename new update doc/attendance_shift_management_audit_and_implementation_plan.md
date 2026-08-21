@@ -1,10 +1,16 @@
 # Attendance and Shift Management Audit and Implementation Plan v1.0
 
 **Branch**: `updateSuggestion`  
-**Backend preview**: `https://rq3qmu8y-jx7.ap-southeast.insforge.app`  
+**Backend**: `https://rq3qmu8y.ap-southeast.insforge.app` (parent `rq3qmu8y` — the former `-jx7` branch preview is dead and retired)  
 **Document scope**: Attendance, Punch In/Out, Shift Management, Office Location geofencing, Attendance Corrections, Break Tracking, Overtime, Payroll lock, Task punch-out gate, and People Suite connections.  
 **Documentation source rule**: This document belongs to `new update doc`. Do not use the old `doc` folder as implementation authority.
 **Status**: Frozen architecture baseline v1.0. Future architecture changes should be documented through explicit ADRs instead of endlessly expanding this baseline.
+
+> **⚠️ SUPERSEDED AS AN IMPLEMENTATION PLAN — see [`attendance_shift_v2_decision_doc.md`](attendance_shift_v2_decision_doc.md).**
+> This file is retained for historical context and for §5 (findings) and §6 (design rules), which remain valid.
+> **Do not execute §7 Release Plan (A1–A8), §10, or §11 from this file.** A1 is complete; A2–A8 hardened the
+> single-session-row model that v2 decision **D2** replaces with an immutable event log plus a derived day row.
+> The live release plan is v2 §8 (B1–B9). The live QA matrix is v2 §7 (E1–E45).
 
 ---
 

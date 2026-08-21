@@ -3,7 +3,14 @@
 **Status**: Living architecture specification  
 **Baseline**: Extracted from `attendance_shift_management_audit_and_implementation_plan.md` v1.0  
 **Branch**: `updateSuggestion`  
-**Backend preview**: `https://rq3qmu8y-jx7.ap-southeast.insforge.app`
+**Backend**: `https://rq3qmu8y.ap-southeast.insforge.app` (parent `rq3qmu8y` — the former `-jx7` branch preview is dead and retired)
+
+> **Still current.** The transactional rules here (idempotency, `FOR UPDATE` locking, storage boundary,
+> snapshots, outbox, RLS §12.1) are assumed and extended by
+> [`attendance_shift_v2_decision_doc.md`](attendance_shift_v2_decision_doc.md), which is the
+> **implementation authority**. Where the two differ on the punch → attendance path, v2 wins:
+> §2–§4 here describe a single mutable session row, which v2 decision **D2** replaces with an
+> immutable event log plus a derived day row.
 
 ---
 

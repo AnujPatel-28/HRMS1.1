@@ -2,8 +2,12 @@
 
 **Status**: Immutable audit report  
 **Branch**: `updateSuggestion`  
-**Backend preview**: `https://rq3qmu8y-jx7.ap-southeast.insforge.app`  
+**Backend**: `https://rq3qmu8y.ap-southeast.insforge.app` (parent `rq3qmu8y` — the former `-jx7` branch preview is dead and retired)  
 **Source rule**: Use only `new update doc` for this audit context. Do not use the old `doc` folder as authority.
+
+> **Audit remains valid and immutable.** Findings F1–F8 stand. The implementation response has moved to
+> [`attendance_shift_v2_decision_doc.md`](attendance_shift_v2_decision_doc.md) §8 (releases B1–B9),
+> which also adds findings C1–C8 from the 2026-08-21 Frappe research pass.
 
 ---
 

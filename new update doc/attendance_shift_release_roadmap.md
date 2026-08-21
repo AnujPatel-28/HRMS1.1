@@ -4,7 +4,13 @@
 **Architecture baseline**: `attendance_shift_architecture_spec_v1.md`  
 **Audit baseline**: `attendance_shift_audit_report_v1.md`  
 **Branch**: `updateSuggestion`  
-**Backend preview**: `https://rq3qmu8y-jx7.ap-southeast.insforge.app`
+**Backend**: `https://rq3qmu8y.ap-southeast.insforge.app` (parent `rq3qmu8y` — the former `-jx7` branch preview is dead and retired)
+
+> **⚠️ SUPERSEDED FROM A2 ONWARD — see [`attendance_shift_v2_decision_doc.md`](attendance_shift_v2_decision_doc.md).**
+> A1 below is retained as complete and remains the RLS verification of record.
+> A2–A8 hardened the single-session-row model, which decision **D2** (two-layer immutable event log
+> + derived day) replaces. Their intent is carried forward as releases **B1–B9** in v2 §8.
+> Do not start an A2–A8 item. Use the v2 release plan.
 
 ---
 
@@ -13,13 +19,13 @@
 | Release | Name | Status | Purpose |
 |---|---|---|---|
 | A1 | Foundation Audit and Live RLS Verification | Complete | Verify live backend security and schema state |
-| A2 | Idempotent Transactional Punch-In RPC | Planned | Replace direct punch-in insert |
-| A3 | Tenant-Timezone Date Standardization | Planned | Make DB authoritative for attendance date |
-| A4 | Snapshot-Based Punch-Out and Overtime | Planned | Use immutable shift/policy/evidence snapshots |
-| A5 | Attendance Corrections Transaction | Planned | Replace direct correction upsert |
-| A6 | Attendance RLS and Direct Write Restriction | Planned | Make RPCs the only sensitive write path |
-| A7 | HR Attendance Scale and Reporting | Planned | Replace per-employee summary calculations |
-| A8 | Office Location and People Suite Alignment | Planned | Align geofence with normalized locations |
+| A2 | Idempotent Transactional Punch-In RPC | Superseded → v2 §8 | Replace direct punch-in insert |
+| A3 | Tenant-Timezone Date Standardization | Superseded → v2 §8 | Make DB authoritative for attendance date |
+| A4 | Snapshot-Based Punch-Out and Overtime | Superseded → v2 §8 | Use immutable shift/policy/evidence snapshots |
+| A5 | Attendance Corrections Transaction | Superseded → v2 §8 | Replace direct correction upsert |
+| A6 | Attendance RLS and Direct Write Restriction | Superseded → v2 §8 | Make RPCs the only sensitive write path |
+| A7 | HR Attendance Scale and Reporting | Superseded → v2 §8 | Replace per-employee summary calculations |
+| A8 | Office Location and People Suite Alignment | Superseded → v2 §8 | Align geofence with normalized locations |
 
 ---
 

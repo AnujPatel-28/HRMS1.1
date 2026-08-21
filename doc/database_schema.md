@@ -168,7 +168,7 @@ Custom timing shifts. **Verified live column names:**
 * `tenant_id` (uuid, Foreign Key -> `tenants.id`)
 * `name` (text) - Shift title (e.g., "Night Shift", "General").
 * `start_time` / `end_time` (time without timezone)
-* `working_days` (ARRAY) - Active days array (e.g., `['Monday', 'Tuesday']`).
+* `working_days` (`integer[]`) - Active weekday numbers, PostgreSQL `EXTRACT(DOW)` / JS `Date.getDay()` convention: `0`=Sunday, `1`=Monday … `6`=Saturday. Typical value `{1,2,3,4,5,6}` (Mon–Sat, Sunday off). — ⚠️ An **integer array, not day-name strings**. Matched in SQL as `EXTRACT(DOW FROM d)::integer = ANY(working_days)`. Not to be confused with `payslips.working_days`, which is an unrelated scalar count of expected working days in a month.
 * `punch_in_opens_minutes_before` (integer) — ⚠️ Not `early_punch_in_limit_mins`
 * `half_day_cutoff_override` (time without timezone) - Optional per-shift half-day cutoff.
 * `late_mark_grace_override` (integer) - Per-shift grace period in minutes.
