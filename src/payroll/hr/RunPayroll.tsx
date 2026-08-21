@@ -176,8 +176,17 @@ export default function RunPayroll() {
       const startDate = `${monthStr}-01`;
       const endDate = `${monthStr}-${new Date(year, month, 0).getDate().toString().padStart(2, "0")}`;
 
-      const [empRes, structRes, attRes, holRes, overtimeRes, settingsRes, leavesRes, existingPayslipsRes, approvedExpensesRes, esiHistoryRes] = await Promise.all([
+      const [empRes, periodInputRes, structRes, attRes, holRes, overtimeRes, settingsRes, leavesRes, existingPayslipsRes, approvedExpensesRes, esiHistoryRes] = await Promise.all([
         db.from("employees").select("*").eq("tenant_id", tenantId).eq("status", "active").order("full_name"),
+        // The inter-module contract. Read for working_days specifically: that figure is PER
+        // EMPLOYEE and honours each employee's shift week-off pattern, whereas the local
+        // getWorkingDays() hardcodes Sunday. Since working days divide gross pay, using the
+        // local one is a monetary error for any tenant not on a Sunday-only weekend.
+        db.rpc("payroll_period_input", {
+          p_tenant_id: tenantId,
+          p_period_start: `${monthStr}-01`,
+          p_period_end: `${monthStr}-${new Date(year, month, 0).getDate().toString().padStart(2, "0")}`,
+        }),
         db.from("salary_structures").select("*").eq("tenant_id", tenantId).order("effective_from", { ascending: false }),
         db.from("attendance").select("employee_id,status,date").eq("tenant_id", tenantId).gte("date", startDate).lte("date", endDate),
         db.from("holidays").select("date").eq("tenant_id", tenantId).gte("date", startDate).lte("date", endDate),
@@ -203,6 +212,7 @@ export default function RunPayroll() {
       ]);
 
       if (empRes.error) throw empRes.error;
+      if (periodInputRes.error) throw periodInputRes.error;
       if (structRes.error) throw structRes.error;
       if (attRes.error) throw attRes.error;
       if (holRes.error) throw holRes.error;
@@ -322,14 +332,27 @@ export default function RunPayroll() {
         attMap.set(employee_id, cur);
       });
 
-      const workingDays = getWorkingDays(year, month, holidayDates);
+      // Per-employee working days, authoritative. Falls back to the tenant-wide figure only
+      // for an employee the contract returned no row for -- which cannot reach a payslip
+      // anyway, since no contract row means no attendance data and the employee is skipped
+      // below.
+      const workingDaysByEmployee = new Map<string, number>();
+      ((periodInputRes.data ?? []) as { employee_id: string; working_days: number }[]).forEach((r) => {
+        workingDaysByEmployee.set(r.employee_id, Number(r.working_days));
+      });
+      const fallbackWorkingDays = getWorkingDays(year, month, holidayDates);
+      const workingDaysFor = (employeeId: string) =>
+        Math.max(workingDaysByEmployee.get(employeeId) ?? fallbackWorkingDays, 1);
+      const workingDays = fallbackWorkingDays;
 
       const overtimeByEmployee = new Map<string, { totalHours: number; totalAmount: number; breakdown: { id: string; amount: number }[] }>();
       overtimeRecords.forEach((record) => {
         const structure = structMap.get(record.employee_id);
         if (!structure || record.regular_hours <= 0 || workingDays <= 0) return;
         const grossMonthly = buildGrossMonthly(structure);
-        const hourlyRate = grossMonthly / (record.regular_hours * workingDays);
+        // Same per-employee divisor as the payslip, so the overtime rate and the LOP rate
+        // cannot disagree for the same person.
+        const hourlyRate = grossMonthly / (record.regular_hours * workingDaysFor(record.employee_id));
         const overtimeAmount = record.overtime_hours * record.overtime_rate * hourlyRate;
         const current = overtimeByEmployee.get(record.employee_id) ?? { totalHours: 0, totalAmount: 0, breakdown: [] };
         current.totalHours += record.overtime_hours;
@@ -393,6 +416,7 @@ export default function RunPayroll() {
         if (!att) { newNoAttendance.push(emp); continue; }
         const calc = calcPayslip(struct, att, overtimeAmount, year, month, holidayDates, policy, {
           esiCoveredEarlierInPeriod: esiCoveredInPeriod.has(emp.id),
+          workingDays: workingDaysFor(emp.id),
         });
         
         const lateSummary = lateSummaryMap.get(emp.id) ?? {};
@@ -400,7 +424,7 @@ export default function RunPayroll() {
         if (workHoursPerDay <= 0) {
           throw new Error("Invalid tenant payroll configuration: work hours per day must be greater than zero");
         }
-        const hourlyRate = calc.grossSalary / (workHoursPerDay * workingDays);
+        const hourlyRate = calc.grossSalary / (workHoursPerDay * workingDaysFor(emp.id));
         const lateDeductionAmount = roundCurrency((lateSummary.deduction_hours ?? 0) * hourlyRate);
         const otherDeductions = roundCurrency(calc.otherDeductions + lateDeductionAmount);
         const totalDeductions = roundCurrency(calc.totalDeductions + lateDeductionAmount);

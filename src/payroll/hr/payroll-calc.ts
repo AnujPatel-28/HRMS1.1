@@ -219,10 +219,20 @@ export function calcPayslip(
   month: number,
   holidayDates: string[],
   policy: SalaryPolicySnapshot,
-  opts: { esiCoveredEarlierInPeriod?: boolean } = {}
+  opts: { esiCoveredEarlierInPeriod?: boolean; workingDays?: number } = {}
 ): PayslipCalc {
   const daysInMonth = Math.max(new Date(year, month, 0).getDate(), 1);
-  const workingDays = Math.max(getWorkingDays(year, month, holidayDates), 1);
+  // Working days come from the caller, sourced from work_calendar_working_days() via the
+  // payroll_period_input contract. That figure is PER EMPLOYEE and honours the employee's
+  // shift week-off pattern; the local getWorkingDays() fallback below hardcodes Sunday as
+  // the only weekly off and is therefore wrong for any tenant on a Fri/Sat weekend or a
+  // five-day week. Since workingDays divides gross pay, that is a monetary error, which is
+  // why the authoritative value is passed in rather than recomputed here.
+  //
+  // The fallback is retained only so a caller that has not been migrated still produces the
+  // number it produced before. It is not a second source of truth for the pay path —
+  // RunPayroll always supplies opts.workingDays.
+  const workingDays = Math.max(opts.workingDays ?? getWorkingDays(year, month, holidayDates), 1);
 
   if (workingDays <= 0) {
     throw new Error("Invalid payroll period: working days cannot be zero");
