@@ -161,13 +161,14 @@ export default function RunPayroll() {
       // Blocking is the correct behaviour, not a limitation: "no data" and "zero days
       // present" must never be the same value. When CSV import lands, an imported period
       // summary satisfies this check in place of the module.
-      const missingInputs: string[] = [];
-      if (!hasModule("attendance")) missingInputs.push("Attendance");
-      if (!hasModule("leave")) missingInputs.push("Leave (holiday calendar)");
-      if (missingInputs.length > 0) {
+      // Leave is NO LONGER required here. The holiday calendar moved to the core
+      // work_calendar module in 20260821180000, so `attendance + payroll` without Leave is a
+      // supported combination and no longer produces holiday deductions. Attendance remains
+      // required: nothing else can say how many days a person actually worked.
+      if (!hasModule("attendance")) {
         throw new Error(
-          `Payroll cannot be calculated: ${missingInputs.join(" and ")} ${missingInputs.length > 1 ? "are" : "is"} not enabled for this company. ` +
-          `Payroll reads attendance and the holiday calendar to work out payable days, and cannot assume them. ` +
+          `Payroll cannot be calculated: Attendance is not enabled for this company. ` +
+          `Payroll reads attendance to work out payable days, and cannot assume them. ` +
           `Enable the module, or import the period's attendance summary.`
         );
       }
