@@ -15,6 +15,7 @@ import { functions } from "../insforge/client";
 import type { SalaryStructure } from "../payroll/hr/SalaryStructures";
 import { getWorkingDays, formatCurrency } from "../payroll/hr/payroll-calc";
 import { formatLocalDate } from "../utils/date";
+import { useDepartmentLabel, useUnitNames } from "../contexts/OrgUnitsContext";
 
 type ViewMode = "daily" | "employee" | "summary" | "overtime" | "corrections";
 type AttendanceStatus = "present" | "absent" | "half_day" | "on_leave";
@@ -178,6 +179,8 @@ export default function HRAttendance() {
   const { tenantId, tenant } = useTenant();
   const { employee: hrEmployee } = useEmployee();
   const { logAction } = useAuditLog();
+  const deptLabel = useDepartmentLabel();
+  const unitNames = useUnitNames();
 
   const [dailyDate, setDailyDate] = useState(fmt(new Date()));
   const [dailyRows, setDailyRows] = useState<AttendanceWithEmployee[]>([]);
@@ -782,7 +785,8 @@ export default function HRAttendance() {
 
   const filteredCorrectionRows = useMemo(() => correctionRows.filter((row) => {
     if (correctionStatusFilter !== "all" && row.status !== correctionStatusFilter) return false;
-    if (correctionDepartmentFilter !== "all" && (row.employee?.department || "") !== correctionDepartmentFilter) return false;
+    // Filter on the unit FK, not the dying department text — the dropdown carries org_unit_id values.
+    if (correctionDepartmentFilter !== "all" && (row.employee?.org_unit_id || "") !== correctionDepartmentFilter) return false;
     if (correctionDateFrom && row.attendance_date < correctionDateFrom) return false;
     if (correctionDateTo && row.attendance_date > correctionDateTo) return false;
     return true;
@@ -1089,7 +1093,7 @@ export default function HRAttendance() {
                         <div key={brk.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm flex flex-col justify-between">
                           <div>
                             <p className="font-semibold text-slate-800 text-sm">{emp?.full_name ?? "Employee"}</p>
-                            <p className="text-[10px] text-slate-500 capitalize">{emp?.department ?? "Operations"} • {brk.break_type.replace("_", " ")}</p>
+                            <p className="text-[10px] text-slate-500 capitalize">{deptLabel(emp, "Operations")} • {brk.break_type.replace("_", " ")}</p>
                           </div>
                           <div className="mt-3 flex items-center justify-between">
                             <span className="text-[10px] text-slate-400">Started {start.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
@@ -1811,7 +1815,11 @@ export default function HRAttendance() {
               onChange={setCorrectionDepartmentFilter}
               options={[
                 { value: "all", label: "All departments" },
-                ...Array.from(new Set(allEmployees.map((employee) => employee.department).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b)).map((department) => ({ value: department, label: department }))
+                // Options are the org units actually represented in the roster; value is the unit id
+                // so the filter above can match on org_unit_id, label is the resolved name.
+                ...Array.from(new Set(allEmployees.map((employee) => employee.org_unit_id).filter(Boolean) as string[]))
+                  .map((unitId) => ({ value: unitId, label: unitNames[unitId] ?? "—" }))
+                  .sort((a, b) => a.label.localeCompare(b.label))
               ]}
               containerClassName="w-full lg:col-span-1"
               triggerClassName="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm capitalize text-slate-700 outline-none transition-all hover:bg-slate-100 focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20"
@@ -1856,7 +1864,7 @@ export default function HRAttendance() {
                           <div>
                             <p className="font-bold text-slate-900 text-base">{row.employee?.full_name ?? row.employee_id}</p>
                             <div className="flex items-center gap-2 mt-1">
-                              <span className="text-xs capitalize text-slate-500">{row.employee?.department ?? "—"}</span>
+                              <span className="text-xs capitalize text-slate-500">{deptLabel(row.employee)}</span>
                               <span className="text-slate-300">•</span>
                               <span className="text-xs text-slate-500">{fmt(new Date(row.attendance_date))}</span>
                             </div>
@@ -1920,7 +1928,7 @@ export default function HRAttendance() {
                       {/* DESKTOP VIEW */}
                       <td className="hidden md:table-cell px-4 py-3">
                         <p className="font-medium text-slate-900">{row.employee?.full_name ?? row.employee_id}</p>
-                        <p className="text-xs capitalize text-slate-500">{row.employee?.department ?? "—"}</p>
+                        <p className="text-xs capitalize text-slate-500">{deptLabel(row.employee)}</p>
                       </td>
                       <td className="hidden md:table-cell px-4 py-3 text-slate-700">{fmt(new Date(row.attendance_date))}</td>
                       <td className="hidden md:table-cell px-4 py-3 text-slate-700">{fmtTime(row.attendance?.punch_in ?? null)}</td>

@@ -38,6 +38,7 @@ const tabs: { key: TabKey; label: string }[] = [
 
 import { formatLocalDate } from "../utils/date";
 import { IDCard } from "../shared/components/IDCard";
+import { useJobTitleLabel } from "../contexts/OrgUnitsContext";
 
 
 export default function EmployeeDetail() {
@@ -48,6 +49,7 @@ export default function EmployeeDetail() {
   const { success, error: toastError } = useToast();
   const { employee: currentHrEmployee } = useEmployee();
   const { orgUnits, jobTitles, locations, employmentTypes } = useOrgStructure();
+  const titleLabel = useJobTitleLabel();
 
   const [activeTab, setActiveTab] = useState<TabKey>("personal");
   const [employee, setEmployee] = useState<Employee | null>(null);
@@ -93,8 +95,8 @@ export default function EmployeeDetail() {
       employee.phone,
       employee.date_of_joining,
       employee.employee_code,
-      employee.org_unit_id || employee.department,
-      employee.job_title_id || employee.designation,
+      employee.org_unit_id,
+      employee.job_title_id,
       employee.employment_type_id || employee.employment_type,
       employee.aadhaar_number,
       employee.pan_number,
@@ -157,25 +159,6 @@ export default function EmployeeDetail() {
     return activeEmployees.filter(emp => emp.full_name.toLowerCase().includes(q));
   }, [activeEmployees, managerSearch]);
 
-  const departmentOptions = useMemo(() => {
-    const legacy = [
-      { value: "sales", label: "Sales", legacyValue: "sales" },
-      { value: "dev", label: "Development", legacyValue: "dev" },
-      { value: "marketing", label: "Marketing", legacyValue: "marketing" },
-      { value: "operations", label: "Operations", legacyValue: "operations" },
-      { value: "design", label: "Design", legacyValue: "design" },
-      { value: "other", label: "Other", legacyValue: "other" },
-    ];
-    const legacyValues = new Set(legacy.map((option) => option.value));
-    const mapped = orgUnits
-      .filter((unit) => unit.unit_type === "department")
-      .map((unit) => {
-        const normalized = unit.name.trim().toLowerCase().replace(/\s+/g, "_");
-        return { value: unit.id, label: unit.name, legacyValue: legacyValues.has(normalized) ? normalized : "other" };
-      });
-    return mapped.length > 0 ? mapped : legacy;
-  }, [orgUnits]);
-
   const employmentTypeOptions = useMemo(() => {
     const legacy = [
       { value: "full_time", label: "Full Time", legacyValue: "full_time" },
@@ -236,8 +219,13 @@ export default function EmployeeDetail() {
   // text for employees who have no unit FK yet.
   const currentUnitName = useMemo(() => {
     if (!employee) return null;
-    return (employee.org_unit_id ? unitNames[employee.org_unit_id] : null) ?? employee.department ?? null;
+    return employee.org_unit_id ? unitNames[employee.org_unit_id] ?? null : null;
   }, [employee, unitNames]);
+
+  const currentJobTitle = useMemo(() => {
+    if (!employee?.job_title_id) return null;
+    return jobTitles.find((t) => t.id === employee.job_title_id)?.title ?? null;
+  }, [employee, jobTitles]);
 
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [leaves, setLeaves] = useState<Leave[]>([]);
@@ -777,7 +765,7 @@ export default function EmployeeDetail() {
 
     if (tenantId) {
       db.from("employees")
-        .select("id, full_name, designation, profile_photo_url")
+        .select("id, full_name, job_title_id, profile_photo_url")
         .eq("tenant_id", tenantId)
         .eq("status", "active")
         .neq("id", employeeId)
@@ -878,21 +866,11 @@ export default function EmployeeDetail() {
     setEditForm((current) => ({ ...current, [field]: value }));
   };
 
-  const updateDepartment = (value: string) => {
-    const selected = departmentOptions.find((option) => option.value === value);
-    setEditForm((current) => ({
-      ...current,
-      org_unit_id: orgUnits.some((unit) => unit.id === value) ? value : null,
-      department: selected?.legacyValue ?? value,
-    }));
-  };
-
   const updateDesignation = (value: string) => {
-    const selected = jobTitles.find((jobTitle) => jobTitle.title.toLowerCase() === value.trim().toLowerCase());
+    // The select's value IS the job_title_id now; there is no text column left to mirror it into.
     setEditForm((current) => ({
       ...current,
-      designation: value,
-      job_title_id: selected?.id ?? null,
+      job_title_id: jobTitles.some((jobTitle) => jobTitle.id === value) ? value : null,
     }));
   };
 
@@ -964,9 +942,8 @@ export default function EmployeeDetail() {
       city: editForm.city,
       state: editForm.state,
       pincode: editForm.pincode,
-      department: editForm.department,
-      org_unit_id: editForm.org_unit_id || null,
-      designation: editForm.designation,
+      // org_unit_id is deliberately NOT written here — the employee_unit_assignment_sync trigger owns
+      // it. Writing it from this form is what produced the contradiction described above.
       job_title_id: editForm.job_title_id || null,
       employee_code: editForm.employee_code,
       date_of_joining: editForm.date_of_joining,
@@ -1026,13 +1003,6 @@ export default function EmployeeDetail() {
       }
     } else {
       void logAction("employee.updated", "employees", employee.id, { fields_changed: Object.keys(payload) });
-    }
-
-    if (payload.org_unit_id !== employee.org_unit_id) {
-      void logAction("employee.department_changed", "employees", employee.id, {
-        from: employee.org_unit_id,
-        to: payload.org_unit_id,
-      });
     }
 
     await loadData();
@@ -1097,7 +1067,7 @@ export default function EmployeeDetail() {
 
   const handleActivate = async () => {
     if (!employee || !tenantId) return;
-    if (!editForm.designation?.trim() || !editForm.department || !editForm.date_of_joining || !editForm.employee_code?.trim()) {
+    if (!editForm.job_title_id || !editForm.org_unit_id || !editForm.date_of_joining || !editForm.employee_code?.trim()) {
       toastError("Please fill in designation, department, joining date, and employee code before activating.");
       return;
     }
@@ -1175,9 +1145,7 @@ export default function EmployeeDetail() {
         .update({
           status: "active",
           user_id: createdUserId,
-          designation: editForm.designation.trim(),
           job_title_id: editForm.job_title_id || null,
-          department: editForm.department,
           org_unit_id: editForm.org_unit_id || null,
           date_of_joining: editForm.date_of_joining,
           employee_code: editForm.employee_code.trim(),
@@ -1646,34 +1614,35 @@ export default function EmployeeDetail() {
           </label>
           <label className="text-sm">
             <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Department</span>
-            {isEditing ? (
-              <select
-                value={editForm.org_unit_id || editForm.department || ""}
-                onChange={(event) => updateDepartment(event.target.value)}
-                className="w-full capitalize rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 bg-white"
-              >
-                {departmentOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            ) : (
-              <span className="capitalize font-semibold text-slate-900 block mt-2">{currentUnitName || "No Department"}</span>
+            <span className="capitalize font-semibold text-slate-900 block mt-2">{currentUnitName || "No Department"}</span>
+            {/* Not editable here. Unit membership is effective-dated (06 §3.5) and `employees.org_unit_id`
+                is a trigger-maintained pointer at the open `employee_unit_assignments` row. Editing it
+                inline wrote the pointer with no assignment row, so this field and the assignment
+                history's "Current" row disagreed after a save. Transfer is the supported path. */}
+            {isEditing && (
+              <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                Use <span className="font-semibold">Transfer</span> to move this employee between units — it records the effective date and keeps the history.
+              </span>
             )}
           </label>
           <label className="text-sm">
             <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Designation</span>
-            <input
-              list="employee-detail-job-title-options"
-              value={editForm.designation ?? ""}
-              onChange={(event) => updateDesignation(event.target.value)}
-              disabled={!isEditing}
-              className="w-full capitalize rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:opacity-100"
-            />
-            <datalist id="employee-detail-job-title-options">
-              {jobTitles.map((jobTitle) => (
-                <option key={jobTitle.id} value={jobTitle.title} />
-              ))}
-            </datalist>
+            {/* A picker, not free text — employees.designation was dropped (06 §5 step 6), so
+                job_titles is the only place a title can live. */}
+            {isEditing ? (
+              <select
+                value={editForm.job_title_id ?? ""}
+                onChange={(event) => updateDesignation(event.target.value)}
+                className="w-full capitalize rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 bg-white"
+              >
+                <option value="">No job title</option>
+                {jobTitles.map((jobTitle) => (
+                  <option key={jobTitle.id} value={jobTitle.id}>{jobTitle.title}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="capitalize font-semibold text-slate-900 block mt-2">{currentJobTitle ?? "—"}</span>
+            )}
           </label>
           <label className="text-sm">
             <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Employee Code</span>
@@ -1856,7 +1825,7 @@ export default function EmployeeDetail() {
                     )}
                     <div>
                       <span className="font-semibold text-slate-900">{selectedManager.full_name}</span>
-                      <span className="text-slate-500"> — {selectedManager.designation || "No designation"}</span>
+                      <span className="text-slate-500"> — {titleLabel(selectedManager, "No designation")}</span>
                     </div>
                   </div>
                 )}
@@ -1888,7 +1857,7 @@ export default function EmployeeDetail() {
                           )}
                           <div className="min-w-0">
                             <p className="text-xs text-slate-900 truncate font-semibold">{emp.full_name}</p>
-                            <p className="text-[10px] text-slate-500 truncate">{emp.designation || "—"}</p>
+                            <p className="text-[10px] text-slate-500 truncate">{titleLabel(emp)}</p>
                           </div>
                         </button>
                       ))
@@ -1953,7 +1922,7 @@ export default function EmployeeDetail() {
                     )}
                     <div>
                       <span className="font-semibold text-slate-900">{selectedSecondaryManager.full_name}</span>
-                      <span className="text-slate-500"> — {selectedSecondaryManager.designation || "No designation"}</span>
+                      <span className="text-slate-500"> — {titleLabel(selectedSecondaryManager, "No designation")}</span>
                     </div>
                   </div>
                 )}
@@ -1985,7 +1954,7 @@ export default function EmployeeDetail() {
                           )}
                           <div className="min-w-0">
                             <p className="text-xs text-slate-900 truncate font-semibold">{emp.full_name}</p>
-                            <p className="text-[10px] text-slate-500 truncate">{emp.designation || "—"}</p>
+                            <p className="text-[10px] text-slate-500 truncate">{titleLabel(emp)}</p>
                           </div>
                         </button>
                       ))

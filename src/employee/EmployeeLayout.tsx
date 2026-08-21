@@ -17,6 +17,7 @@ import { db, realtime } from "../insforge/client";
 import { Sidebar, DesktopSidebar, SidebarLink, useSidebar } from "../components/ui/sidebar";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "../utils/cn";
+import { useDepartmentLabel } from "../contexts/OrgUnitsContext";
 
 type NavLinkItem = {
   label: string;
@@ -86,10 +87,11 @@ function EmployeeSidebarContent({
   location: any;
   unreadConnectCount: number;
   onItemClick?: () => void;
-  employee?: { full_name?: string; profile_photo_url?: string; department?: string } | null;
+  employee?: { full_name?: string; profile_photo_url?: string; org_unit_id?: string | null } | null;
   flatLayout?: boolean;
   isLight?: boolean;
 }) {
+  const deptLabel = useDepartmentLabel();
   const { open } = useSidebar();
   const [openSection, setOpenSection] = useState<string | null>(() => {
     const activeSection = sections.find((section) =>
@@ -341,7 +343,7 @@ function EmployeeSidebarContent({
               className="overflow-hidden whitespace-nowrap min-w-0"
             >
               <p className={cn("text-xs truncate", textNameClass)}>{employee.full_name ?? 'Employee'}</p>
-              <p className={cn("text-[10px] truncate", textMutedClass)}>{employee.department ?? 'Employee'}</p>
+              <p className={cn("text-[10px] truncate", textMutedClass)}>{deptLabel(employee, 'Employee')}</p>
             </motion.div>
           </div>
         </div>
@@ -351,6 +353,7 @@ function EmployeeSidebarContent({
 }
 
 export default function EmployeeLayout() {
+  const deptLabel = useDepartmentLabel();
   const location = useLocation();
   const navigate = useNavigate();
   const { logout, tenantId } = useAuth();
@@ -605,9 +608,9 @@ export default function EmployeeLayout() {
                 )}
                 <div className="text-right">
                   <p className="text-sm font-semibold text-slate-900">{employee?.full_name ?? "Employee"}</p>
-                  {employee?.department && (
+                  {deptLabel(employee, '') && (
                     <span className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-600">
-                      {employee.department}
+                      {deptLabel(employee, '')}
                     </span>
                   )}
                 </div>
@@ -930,7 +933,7 @@ export default function EmployeeLayout() {
                             )}
                             <div className="min-w-0">
                               <p className="text-sm font-semibold text-slate-800 truncate">{employee?.full_name ?? 'Employee'}</p>
-                              <p className="text-xs text-slate-400 truncate">{employee?.department ?? 'Employee'}</p>
+                              <p className="text-xs text-slate-400 truncate">{deptLabel(employee, 'Employee')}</p>
                             </div>
                           </div>
                           {/* Sign out */}

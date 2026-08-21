@@ -6,7 +6,6 @@ import { useToast } from "../../shared/ToastContext";
 import { useAuditLog } from "../../hooks/useAuditLog";
 import { Skeleton } from "../../shared/Skeleton";
 import { EmptyState } from "../../shared/EmptyState";
-import type { Employee } from "../../types";
 import { MONTH_NAMES, formatCurrency } from "./payroll-calc";
 import {
   buildPayslipPreviewHtml,
@@ -16,7 +15,9 @@ import {
   isTenantPayslipPath,
   payslipFilename,
   type PayslipPdfData,
+  type PayslipEmployee,
 } from "./payslip-pdf";
+import { useDepartmentLabel, useJobTitleLabel } from "../../contexts/OrgUnitsContext";
 
 type RunStatus = "draft" | "under_review" | "approved" | "paid";
 const PAYSLIP_TEMPLATE_KEY = "payroll.payslip_template";
@@ -87,7 +88,7 @@ interface Payslip {
   employee_name?: string;
   employee_email?: string;
   employee_code?: string | null;
-  employee_department?: Employee["department"];
+  employee_department?: string | null;
   employee_designation?: string | null;
   expenses_reimbursement?: number;
 }
@@ -165,7 +166,7 @@ async function sharePayslipPdf(slip: Payslip, blob: Blob) {
   return Boolean(slip.employee_email);
 }
 
-function employeeFromPayslip(slip: Payslip, tenantId: string): Employee {
+function employeeFromPayslip(slip: Payslip, tenantId: string): PayslipEmployee {
   return {
     id: slip.employee_id,
     tenant_id: tenantId,
@@ -256,7 +257,7 @@ function pdfDataFromPayslip(slip: Payslip): PayslipPdfData {
   };
 }
 
-function templatePreviewEmployee(tenantId: string): Employee {
+function templatePreviewEmployee(tenantId: string): PayslipEmployee {
   return {
     id: "preview-employee",
     tenant_id: tenantId,
@@ -459,6 +460,8 @@ function PayslipRow({
 }
 
 function RunRow({ run, tenantId, tenant }: { run: PayrollRun; tenantId: string; tenant: NonNullable<ReturnType<typeof useTenant>["tenant"]> }) {
+  const deptLabel = useDepartmentLabel();
+  const titleLabel = useJobTitleLabel();
   const { error: toastError, success } = useToast();
   const { logAction } = useAuditLog();
   const [expanded, setExpanded] = useState(false);
@@ -490,7 +493,7 @@ function RunRow({ run, tenantId, tenant }: { run: PayrollRun; tenantId: string; 
 
       const { data: empData, error: empError } = await db
         .from("employees")
-        .select("id,full_name,email,employee_code,department,designation")
+        .select("id,full_name,email,employee_code,org_unit_id,job_title_id")
         .eq("tenant_id", tenantId)
         .in("id", empIds);
       if (empError) throw empError;
@@ -501,8 +504,8 @@ function RunRow({ run, tenantId, tenant }: { run: PayrollRun; tenantId: string; 
           full_name: string;
           email: string;
           employee_code: string | null;
-          department: Employee["department"];
-          designation: string | null;
+          org_unit_id: string | null;
+          job_title_id: string | null;
         }[]).map((e) => [e.id, e]),
       );
       setSlips(
@@ -511,8 +514,12 @@ function RunRow({ run, tenantId, tenant }: { run: PayrollRun; tenantId: string; 
           employee_name: empMap.get(s.employee_id)?.full_name,
           employee_email: empMap.get(s.employee_id)?.email,
           employee_code: empMap.get(s.employee_id)?.employee_code,
-          employee_department: empMap.get(s.employee_id)?.department,
-          employee_designation: empMap.get(s.employee_id)?.designation,
+          // Resolved from the employee's unit; payslips has no stored department column, so this
+          // decoration was always live-joined rather than a true point-in-time snapshot.
+          employee_department: deptLabel(empMap.get(s.employee_id), "") || null,
+          // Resolved from the employee's job title; payslips has no stored designation column,
+          // so this decoration was always live-joined rather than a point-in-time snapshot.
+          employee_designation: titleLabel(empMap.get(s.employee_id), "") || null,
         })),
       );
     } catch {

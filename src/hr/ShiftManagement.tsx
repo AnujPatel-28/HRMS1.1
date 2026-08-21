@@ -10,6 +10,7 @@ import { SelectDropdown } from "../shared/components/SelectDropdown";
 import { EmptyState } from "../shared/EmptyState";
 import { ConfirmModal } from "../shared/ConfirmModal";
 import { formatLocalDate } from "../utils/date";
+import { useDepartmentLabel } from "../contexts/OrgUnitsContext";
 
 type ShiftFormState = {
   name: string;
@@ -216,6 +217,7 @@ function ShiftFormFields({
 }
 
 export default function ShiftManagement() {
+  const deptLabel = useDepartmentLabel();
   const { tenantId } = useTenant();
   const { success, error: toastError } = useToast();
   const { logAction } = useAuditLog();
@@ -318,9 +320,9 @@ export default function ShiftManagement() {
     return assignmentRows.filter((row) => 
       row.employee.full_name.toLowerCase().includes(query) ||
       (row.employee.employee_code && row.employee.employee_code.toLowerCase().includes(query)) ||
-      (row.employee.department && row.employee.department.toLowerCase().includes(query))
+      deptLabel(row.employee, "").toLowerCase().includes(query)
     );
-  }, [assignmentRows, searchQuery]);
+  }, [assignmentRows, searchQuery, deptLabel]);
 
   async function saveShift(form: ShiftFormState, shiftId?: string) {
     if (!tenantId) return;
@@ -847,7 +849,7 @@ export default function ShiftManagement() {
                       />
                     </td>
                     <td className="px-4 py-3 font-medium text-slate-900">{row.employee.full_name}</td>
-                    <td className="px-4 py-3 text-slate-700 capitalize">{row.employee.department ?? "-"}</td>
+                    <td className="px-4 py-3 text-slate-700 capitalize">{deptLabel(row.employee, "-")}</td>
                     <td className="px-4 py-3 text-slate-700">
                       <div>{row.currentShift?.name ?? "Standard shift"}</div>
                       {row.nextShift && row.nextShift.id !== row.currentShift?.id && (
@@ -922,7 +924,7 @@ export default function ShiftManagement() {
                   />
                   <div className="min-w-0 flex-1">
                     <p className="font-bold text-slate-900 truncate">{row.employee.full_name}</p>
-                    <p className="text-xs font-medium text-slate-500 capitalize">{row.employee.department ?? "No Dept"}</p>
+                    <p className="text-xs font-medium text-slate-500 capitalize">{deptLabel(row.employee, "No Dept")}</p>
                   </div>
                 </div>
                 <div className="pl-7 space-y-3 text-sm">

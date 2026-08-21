@@ -8,6 +8,7 @@ import { useToast } from "../../shared/ToastContext";
 import { Skeleton } from "../../shared/Skeleton";
 import { EmptyState } from "../../shared/EmptyState";
 import type { Project, Employee, Task } from "../../types";
+import { useDepartmentLabel, useJobTitleLabel } from "../../contexts/OrgUnitsContext";
 
 const DEPT_OPTIONS = ["sales", "dev", "marketing", "operations", "design", "other"] as const;
 
@@ -64,6 +65,8 @@ interface ProjectCardData extends Project {
 }
 
 export default function ProjectList() {
+  const deptLabel = useDepartmentLabel();
+  const titleLabel = useJobTitleLabel();
   const { tenantId } = useTenant();
   const { employee: currentHr } = useEmployee();
   const navigate = useNavigate();
@@ -229,13 +232,20 @@ export default function ProjectList() {
       toastError("End date must be after start date.");
       return;
     }
+    if (formVisibilityType === "departments" && formSelectedOrgUnitIds.length === 0) {
+      // projects_employee_read now gates the departments branch on org_unit_ids only — an empty
+      // selection here would save a project no employee could ever read.
+      toastError("Select at least one org unit. The legacy department list is no longer read by RLS.");
+      return;
+    }
 
     try {
       const visibility_config = {
         type: formVisibilityType,
         departments: formVisibilityType === "departments" ? formSelectedDepts : undefined,
         // Slice B target-side key, written alongside `departments` — RLS still reads `departments`
-        // until Slice B is applied. visibility_config is jsonb, so this key is safe to write today.
+        // Slice B is APPLIED (20260820110000): projects_employee_read gates the departments branch
+        // on org_unit_ids ONLY. `departments` is kept for display and is no longer an RLS input.
         org_unit_ids: formVisibilityType === "departments" ? formSelectedOrgUnitIds : undefined,
         employee_ids: formVisibilityType === "people" ? formSelectedPeople : undefined,
       };
@@ -627,7 +637,7 @@ export default function ProjectList() {
                             </span>
                             <div className="flex-1 truncate">
                               <p className="font-semibold">{m.full_name}</p>
-                              <p className="text-[10px] text-slate-400 capitalize">{m.designation || m.role}</p>
+                              <p className="text-[10px] text-slate-400 capitalize">{titleLabel(m, m.role)}</p>
                             </div>
                           </button>
                         ))}
@@ -698,7 +708,7 @@ export default function ProjectList() {
                 {/* Specific Departments Multi-select */}
                 {formVisibilityType === "departments" && (
                   <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Departments</p>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Departments (Legacy)</p>
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                       {DEPT_OPTIONS.map((dept) => {
                         const isChecked = formSelectedDepts.includes(dept);
@@ -732,10 +742,10 @@ export default function ProjectList() {
                 )}
 
                 {/* Org Unit Picker — Slice B org_unit_ids write path, alongside the legacy Departments
-                    picker above (which RLS still reads until Slice B is applied). */}
+                    picker above, which RLS no longer reads — org units are the authoritative target. */}
                 {formVisibilityType === "departments" && (
                   <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Org Units (optional)</p>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Org Units <span className="text-rose-500">*</span></p>
                     {orgUnits.length === 0 ? (
                       <p className="text-xs text-slate-400">No org units configured for this tenant yet.</p>
                     ) : (
@@ -810,7 +820,7 @@ export default function ProjectList() {
                             />
                             <div className="flex-1 truncate">
                               <p className="font-semibold text-slate-800">{emp.full_name}</p>
-                              <p className="text-[10px] text-slate-400 capitalize">{emp.department || "No Department"}</p>
+                              <p className="text-[10px] text-slate-400 capitalize">{deptLabel(emp, "No Department")}</p>
                             </div>
                           </label>
                         );

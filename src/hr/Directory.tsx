@@ -10,29 +10,16 @@ import { EmptyState } from "../shared/EmptyState";
 import { SelectDropdown } from "../shared/components/SelectDropdown";
 import { useAuth } from "../hooks/useAuth";
 import { useOrgStructure } from "../hooks/useOrgStructure";
+import { useDepartmentLabel, useJobTitleLabel } from "../contexts/OrgUnitsContext";
 
 export default function Directory() {
   const navigate = useNavigate();
   const { tenantId } = useTenant();
   const { role, user } = useAuth();
   const { error: toastError } = useToast();
-  const { orgUnits, locations, jobTitles, employmentTypes } = useOrgStructure();
-
-  const getDepartmentLabel = (emp: Employee) => {
-    if (emp.org_unit_id) {
-      const unit = orgUnits.find((u) => u.id === emp.org_unit_id);
-      if (unit) return unit.name;
-    }
-    return emp.department || "—";
-  };
-
-  const getDesignationLabel = (emp: Employee) => {
-    if (emp.job_title_id) {
-      const job = jobTitles.find((j) => j.id === emp.job_title_id);
-      if (job) return job.title;
-    }
-    return emp.designation || "—";
-  };
+  const { orgUnits, locations, employmentTypes } = useOrgStructure();
+  const deptLabel = useDepartmentLabel();
+  const titleLabel = useJobTitleLabel();
 
   const getLocationLabel = (emp: Employee) => {
     if (emp.location_id) {
@@ -107,8 +94,9 @@ export default function Directory() {
   }, [isHr, tenantId, toastError]);
 
   const departmentOptions = useMemo(() => {
+    // Every active unit, at any depth — 06 §0 allows assignment to a Division or Team, so
+    // filtering on unit_type === "department" hid units the HR admin had deliberately created.
     const lookupDepartments = orgUnits
-      .filter((unit) => unit.unit_type === "department")
       .map((unit) => ({ value: unit.id, label: unit.name }));
 
     return lookupDepartments.length > 0
@@ -197,7 +185,7 @@ export default function Directory() {
     const normalizedQuery = search.trim().toLowerCase();
 
     return employees.filter((employee) => {
-      const matchesDepartment = departmentFilter === "all" || employee.org_unit_id === departmentFilter || employee.department === departmentFilter;
+      const matchesDepartment = departmentFilter === "all" || employee.org_unit_id === departmentFilter;
       const matchesGrade = gradeFilter === "all" || employee.grade === gradeFilter;
       const matchesLocation = workLocationFilter === "all" || employee.location_id === workLocationFilter || employee.work_location === workLocationFilter;
       const matchesManager = managerFilter === "all" || employee.manager_id === managerFilter;
@@ -210,12 +198,12 @@ export default function Directory() {
       const matchesSearch =
         normalizedQuery.length === 0 ||
         employee.full_name.toLowerCase().includes(normalizedQuery) ||
-        (employee.designation ?? "").toLowerCase().includes(normalizedQuery) ||
+        titleLabel(employee, "").toLowerCase().includes(normalizedQuery) ||
         employee.email.toLowerCase().includes(normalizedQuery);
 
       return matchesDepartment && matchesGrade && matchesLocation && matchesManager && matchesStatus && matchesEmploymentType && matchesSearch;
     });
-  }, [employees, search, departmentFilter, gradeFilter, workLocationFilter, managerFilter, statusFilter, employmentTypeFilter]);
+  }, [employees, search, departmentFilter, gradeFilter, workLocationFilter, managerFilter, statusFilter, employmentTypeFilter, titleLabel]);
 
   const hasActiveFilters =
     search ||
@@ -406,14 +394,14 @@ export default function Directory() {
                     <h3 className="font-bold text-slate-900 truncate group-hover:text-brand-600 transition-colors">
                       {emp.full_name}
                     </h3>
-                    <p className="text-xs text-slate-500 font-medium truncate mt-0.5">{getDesignationLabel(emp)}</p>
+                    <p className="text-xs text-slate-500 font-medium truncate mt-0.5">{titleLabel(emp)}</p>
                   </div>
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-1.5">
-                  {getDepartmentLabel(emp) !== "—" && (
+                  {deptLabel(emp) !== "—" && (
                     <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600">
-                      {getDepartmentLabel(emp)}
+                      {deptLabel(emp)}
                     </span>
                   )}
                   {emp.grade && (
@@ -495,8 +483,8 @@ export default function Directory() {
                       </span>
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-slate-700 capitalize font-medium">{getDepartmentLabel(emp)}</td>
-                  <td className="px-4 py-4 text-slate-600 capitalize font-medium">{getDesignationLabel(emp)}</td>
+                  <td className="px-4 py-4 text-slate-700 capitalize font-medium">{deptLabel(emp)}</td>
+                  <td className="px-4 py-4 text-slate-600 capitalize font-medium">{titleLabel(emp)}</td>
                   <td className="px-4 py-4">
                     {emp.grade ? (
                       <span className="rounded-md bg-blue-50 px-2 py-1 text-xs font-bold text-blue-600">{emp.grade}</span>
@@ -549,8 +537,8 @@ export default function Directory() {
             selectedEmployee.phone,
             selectedEmployee.date_of_joining,
             selectedEmployee.employee_code,
-            selectedEmployee.org_unit_id || selectedEmployee.department,
-            selectedEmployee.job_title_id || selectedEmployee.designation,
+            selectedEmployee.org_unit_id,
+            selectedEmployee.job_title_id,
             selectedEmployee.employment_type_id || selectedEmployee.employment_type,
             selectedEmployee.aadhaar_number,
             selectedEmployee.pan_number,
@@ -600,12 +588,12 @@ export default function Directory() {
                   </div>
                 )}
                 <h3 className="text-lg font-bold text-slate-900 mt-2">{selectedEmployee.full_name}</h3>
-                <p className="text-xs font-semibold text-slate-500 capitalize">{getDesignationLabel(selectedEmployee)}</p>
+                <p className="text-xs font-semibold text-slate-500 capitalize">{titleLabel(selectedEmployee)}</p>
                 
                 <div className="mt-2 flex flex-wrap justify-center gap-1.5">
-                  {getDepartmentLabel(selectedEmployee) !== "—" && (
+                  {deptLabel(selectedEmployee) !== "—" && (
                     <span className="rounded-full bg-brand-50 border border-brand-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-brand-600">
-                      {getDepartmentLabel(selectedEmployee)}
+                      {deptLabel(selectedEmployee)}
                     </span>
                   )}
                   <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${statusBadge(selectedEmployee.status)}`}>

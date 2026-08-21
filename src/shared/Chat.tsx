@@ -7,6 +7,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useTenant } from "../contexts/TenantContext";
 import { EmptyState } from "./EmptyState";
 import { ConfirmModal } from "./ConfirmModal";
+import { useDepartmentLabel } from "../contexts/OrgUnitsContext";
 
 // Helper for generating local optimistic UUIDs
 function uuidv4() {
@@ -128,6 +129,7 @@ function messageReducer(state: Record<string, ChatMessage[]>, action: MessageAct
 }
 
 export default function Chat() {
+  const deptLabel = useDepartmentLabel();
   const { employee } = useEmployee();
   const { role } = useAuth();
   const { tenantId } = useTenant();
@@ -472,6 +474,12 @@ export default function Chat() {
       alert("Please select at least one department.");
       return;
     }
+    if (newChannelType === "department" && newChannelOrgUnitIds.length === 0) {
+      // chat_messages_select / channels_employee_select now gate department channels on
+      // target_org_unit_ids only — an empty selection here creates a channel no employee can read.
+      alert("Please select at least one org unit. The legacy department list is no longer read by RLS.");
+      return;
+    }
     if (newChannelType === "custom" && newChannelMembers.length === 0) {
       alert("Please select at least one member for the private channel.");
       return;
@@ -484,7 +492,8 @@ export default function Chat() {
         description: newChannelDesc.trim() || null,
         type: newChannelType,
         created_by: employee?.id,
-        // target_departments stays the field RLS reads until Slice B is applied — kept as-is.
+        // Slice B is APPLIED (20260820110000 / 20260820130000): every chat policy now gates on
+        // target_org_unit_ids. target_departments is kept for the legacy display fallback only.
         target_departments: newChannelType === "department" ? newChannelDepts : [],
         // Slice B target-side write path. Only sent when there's something to write, so
         // global/custom channels — and department channels created before any org units are picked —
@@ -543,11 +552,17 @@ export default function Chat() {
     }
   }
 
+  // Mirrors the DB predicate exactly: every chat policy gates department channels on
+  // target_org_unit_ids (20260820110000 / 20260820130000). The legacy target_departments branch that
+  // used to sit beside this is gone — it compared capitalised unit names against the hardcoded
+  // lowercase slug list, so it could never match, and employees.department no longer exists.
   const visibleChannels = isHr
     ? channels
     : channels.filter(c =>
         c.type === "global" ||
-        (c.type === "department" && c.target_departments.includes(employee?.department || "")) ||
+        (c.type === "department" &&
+          !!employee?.org_unit_id &&
+          (c.target_org_unit_ids ?? []).includes(employee.org_unit_id)) ||
         c.type === "custom"
       );
 
@@ -802,7 +817,7 @@ export default function Chat() {
           {/* Department Picker */}
           {newChannelType === "department" && (
             <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Select Departments</label>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Select Departments (Legacy)</label>
               <div className="flex flex-wrap gap-2">
                 {DEPARTMENTS.map(dept => (
                   <button
@@ -826,10 +841,10 @@ export default function Chat() {
           )}
 
           {/* Org Unit Picker — Slice B target_org_unit_ids write path, alongside the legacy Department
-              Picker above (which RLS still reads until Slice B is applied). */}
+              Picker above, which RLS no longer reads — org units are the authoritative target. */}
           {newChannelType === "department" && (
             <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Select Org Units (optional)</label>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Select Org Units</label>
               {orgUnits.length === 0 ? (
                 <p className="text-[11px] text-slate-400">No org units configured for this tenant yet.</p>
               ) : (
@@ -856,6 +871,9 @@ export default function Chat() {
                     );
                   })}
                 </div>
+              )}
+              {newChannelOrgUnitIds.length === 0 && (
+                <p className="mt-1.5 text-[11px] text-rose-400 font-medium">Please select at least one org unit.</p>
               )}
             </div>
           )}
@@ -885,7 +903,7 @@ export default function Chat() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className={`font-semibold truncate text-xs ${newChannelMembers.includes(emp.id) ? "text-brand-800" : "text-slate-700"}`}>{emp.full_name}</p>
-                        <p className="text-[10px] text-slate-400 capitalize">{emp.department || "—"}</p>
+                        <p className="text-[10px] text-slate-400 capitalize">{deptLabel(emp)}</p>
                       </div>
                       {newChannelMembers.includes(emp.id) && (
                         <span className="text-brand-600 text-xs font-bold">✓</span>

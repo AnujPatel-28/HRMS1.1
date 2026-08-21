@@ -9,7 +9,6 @@ import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { useManagerView } from "../hooks/useManagerView";
-import { resolveTaskNotificationTargets } from "../utils/notificationTargets";
 
 const PRIORITY_BADGE: Record<Task["priority"], string> = {
   low: "bg-slate-100 text-slate-600",
@@ -169,7 +168,8 @@ export default function MyTasks() {
       }
 
       // Submitter identity is derived server-side from auth.uid(); do not pass p_employee_id.
-      const { error: rpcErr } = await db.rpc('submit_task_request', {
+      // The RPC also fans out the submission notification in the same transaction.
+      const { data, error: rpcErr } = await db.rpc('submit_task_request', {
         p_task_id: task.id,
         p_notes: notes || null,
         p_attachment_url: attachment_url,
@@ -177,29 +177,9 @@ export default function MyTasks() {
       });
       if (rpcErr) throw rpcErr;
 
-      // Notify the manager, else the unit head chain (06 §9.1: own unit head → parent unit head → HR)
-      const targetNotifyIds = employee.manager_id
-        ? [employee.manager_id]
-        : await resolveTaskNotificationTargets(tenantId, employee.id, employee.org_unit_id);
-
-      if (targetNotifyIds.length > 0) {
-        // .select() matters: RLS refuses a write by matching zero rows, which comes back as a
-        // SUCCESSFUL empty response rather than an error.
-        const { data: notified, error: notifyErr } = await db.from("notifications").insert(
-          targetNotifyIds.map((id) => ({
-            employee_id: id,
-            tenant_id: tenantId,
-            title: "Task Submitted",
-            body: `${employee.full_name} submitted task: "${task.title}"`,
-            type: "general",
-            reference_id: task.id,
-          }))
-        ).select();
-        if (notifyErr || !notified || (notified as unknown[]).length === 0) {
-          console.error("Task submitted, but the submission notification was refused.", notifyErr);
-        }
-      } else {
-        console.error("Task submitted, but no notification recipient could be resolved.");
+      const notifiedCount = (data as any)?.notified ?? (data as any)?.[0]?.notified;
+      if (notifiedCount === 0) {
+        console.warn("Task submitted, but no reviewer was resolved to notify.");
       }
 
       success("Task submitted successfully!");

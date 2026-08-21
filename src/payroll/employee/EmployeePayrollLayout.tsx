@@ -3,12 +3,14 @@ import { ArrowLeft, LogOut, Wallet } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { useEmployee } from "../../hooks/useEmployee";
 import { useTenant } from "../../contexts/TenantContext";
+import { useJobTitleLabel } from "../../contexts/OrgUnitsContext";
 
 export default function EmployeePayrollLayout() {
   const navigate = useNavigate();
   const { logout } = useAuth();
   const { employee } = useEmployee();
   const { tenant } = useTenant();
+  const titleLabel = useJobTitleLabel();
 
   const handleLogout = async () => {
     await logout();
@@ -69,7 +71,7 @@ export default function EmployeePayrollLayout() {
                 <p className="text-sm font-semibold text-slate-900 leading-tight">
                   {employee?.full_name ?? "Employee"}
                 </p>
-                <p className="text-[11px] text-slate-500 capitalize">{employee?.designation ?? "Employee"}</p>
+                <p className="text-[11px] text-slate-500 capitalize">{titleLabel(employee, "Employee")}</p>
               </div>
             </div>
 

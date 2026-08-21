@@ -10,6 +10,7 @@ import { EmptyState } from "../shared/EmptyState";
 import { useToast } from "../shared/ToastContext";
 import AddTeamMemberModal from "./AddTeamMemberModal";
 import { ConfirmModal } from "../shared/ConfirmModal";
+import { useDepartmentLabel, useJobTitleLabel } from "../contexts/OrgUnitsContext";
 
 const TODAY = formatLocalDate(new Date());
 
@@ -19,6 +20,8 @@ interface TeamMemberWithStatus extends Employee {
 }
 
 export default function MyTeam() {
+  const deptLabel = useDepartmentLabel();
+  const titleLabel = useJobTitleLabel();
   const { currentEmployee, isManager } = useAuth();
   const { tenantId } = useTenant();
   const { success, error } = useToast();
@@ -45,7 +48,7 @@ export default function MyTeam() {
       // 1. Fetch direct reports (active + draft/pending statuses) from public view
       const { data: employeesData, error: empErr } = await db
         .from("employee_directory_public")
-        .select("id, user_id, manager_id, full_name, profile_photo_url, designation, department, status")
+        .select("id, user_id, manager_id, full_name, profile_photo_url, job_title_id, org_unit_id, status")
         .eq("manager_id", currentEmployee.id)
         .eq("tenant_id", tenantId)
         .in("status", ["active", "draft", "pending_onboarding", "pending_hr_review", "inactive"])
@@ -354,8 +357,8 @@ export default function MyTeam() {
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-slate-400 truncate">{member.designation ?? "Employee"}</p>
-                    <p className="text-[10px] text-slate-400 uppercase tracking-wide truncate">{member.department ?? "—"} department</p>
+                    <p className="text-xs text-slate-400 truncate">{titleLabel(member, "Employee")}</p>
+                    <p className="text-[10px] text-slate-400 uppercase tracking-wide truncate">{deptLabel(member)} department</p>
                   </div>
                 </div>
 
@@ -418,7 +421,7 @@ export default function MyTeam() {
                 )}
                 <div>
                   <h3 className="font-semibold text-slate-950">{selectedMember.full_name}</h3>
-                  <p className="text-xs text-slate-400">{selectedMember.designation ?? "Employee"}</p>
+                  <p className="text-xs text-slate-400">{titleLabel(selectedMember, "Employee")}</p>
                 </div>
               </div>
               <button

@@ -8,6 +8,7 @@ import {
 import { db, storage, realtime } from "../../insforge/client";
 import { useAuth } from "../../hooks/useAuth";
 import { useTenant } from "../../contexts/TenantContext";
+import { useJobTitleLabel } from "../../contexts/OrgUnitsContext";
 
 // Types matching database columns
 interface PostReaction {
@@ -21,7 +22,7 @@ interface PostAuthor {
   id: string;
   full_name: string;
   profile_photo_url: string | null;
-  designation: string | null;
+  job_title_id: string | null;
 }
 
 interface Post {
@@ -43,7 +44,7 @@ interface BirthdayEmployee {
   full_name: string;
   profile_photo_url: string | null;
   date_of_birth: string | null;
-  designation: string | null;
+  job_title_id: string | null;
 }
 
 // Local mock comment type to satisfy the 'Everyone can react + comment' requirement
@@ -59,6 +60,7 @@ export default function Connect() {
   const { currentEmployee, role } = useAuth();
   const { tenant, tenantId } = useTenant();
   const location = useLocation();
+  const titleLabel = useJobTitleLabel();
 
   const isHr = role === "hr";
   const firstName = currentEmployee?.full_name?.split(" ")[0] ?? "Employee";
@@ -104,7 +106,7 @@ export default function Connect() {
     try {
       const { data, error } = await db
         .from("employees")
-        .select("id, full_name, profile_photo_url, date_of_birth, designation")
+        .select("id, full_name, profile_photo_url, date_of_birth, job_title_id")
         .eq("tenant_id", tenantId)
         .eq("status", "active");
 
@@ -161,7 +163,7 @@ export default function Connect() {
         .from("posts")
         .select(`
           *,
-          author:employees(id, full_name, profile_photo_url, designation),
+          author:employees(id, full_name, profile_photo_url, job_title_id),
           post_reactions(id, post_id, employee_id, reaction)
         `)
         .eq("tenant_id", tenantId);
@@ -196,7 +198,7 @@ export default function Connect() {
       .from("posts")
       .select(`
         *,
-        author:employees(id, full_name, profile_photo_url, designation),
+        author:employees(id, full_name, profile_photo_url, job_title_id),
         post_reactions(id, post_id, employee_id, reaction)
       `)
       .eq("id", payload.id)
@@ -616,7 +618,7 @@ export default function Connect() {
             </div>
             
             <h2 className="font-display font-bold text-slate-800 truncate">{currentEmployee?.full_name}</h2>
-            <p className="text-xs text-slate-500 font-medium truncate mb-2">{currentEmployee?.designation ?? "Employee"}</p>
+            <p className="text-xs text-slate-500 font-medium truncate mb-2">{titleLabel(currentEmployee, "Employee")}</p>
             
             <div className="mt-3 border-t border-slate-100 pt-3">
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Company</p>
@@ -905,7 +907,7 @@ export default function Connect() {
                               )}
                             </div>
                             <p className="text-[10px] text-slate-400 font-semibold leading-tight">
-                              {isAnnouncement ? "Official Broadcast" : (post.author?.designation ?? "Employee")} · {formatTimeAgo(post.created_at)}
+                              {isAnnouncement ? "Official Broadcast" : titleLabel(post.author, "Employee")} · {formatTimeAgo(post.created_at)}
                             </p>
                           </div>
                         </div>
@@ -1154,7 +1156,7 @@ export default function Connect() {
                     )}
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-xs text-slate-800 truncate">{emp.full_name}</p>
-                      <p className="text-[10px] text-slate-400 truncate">{emp.designation || "Employee"}</p>
+                      <p className="text-[10px] text-slate-400 truncate">{titleLabel(emp, "Employee")}</p>
                     </div>
                     <span className="rounded-full bg-pink-100 border border-pink-200 text-pink-700 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider shrink-0 animate-pulse">
                       Today
@@ -1204,7 +1206,7 @@ export default function Connect() {
                         )}
                         <div className="min-w-0">
                           <p className="font-semibold text-xs text-slate-700 truncate">{emp.full_name}</p>
-                          <p className="text-[9px] text-slate-400 truncate">{emp.designation || "Employee"}</p>
+                          <p className="text-[9px] text-slate-400 truncate">{titleLabel(emp, "Employee")}</p>
                         </div>
                       </div>
                       <span className="text-[10px] font-semibold text-slate-500 shrink-0 bg-slate-50 border border-slate-200/50 px-2 py-0.5 rounded-lg">

@@ -5,6 +5,7 @@ import { Skeleton } from "../shared/Skeleton";
 import { useTenant } from "../contexts/TenantContext";
 import { useToast } from "../shared/ToastContext";
 import { db, storage } from "../insforge/client";
+import { useDepartmentLabel, useJobTitleLabel } from "../contexts/OrgUnitsContext";
 
 function MaskedField({ value, label }: { value: string | null; label: string }) {
   const [shown, setShown] = useState(false);
@@ -34,6 +35,8 @@ function Field({ label, value, className = "capitalize" }: { label: string; valu
 }
 
 export default function MyProfile() {
+  const deptLabel = useDepartmentLabel();
+  const titleLabel = useJobTitleLabel();
   const { employee, refreshEmployee } = useEmployee();
   const { tenantId } = useTenant();
   const { success, error: toastError } = useToast();
@@ -155,10 +158,10 @@ export default function MyProfile() {
         </div>
         <div className="flex-1">
           <h3 className="text-2xl font-bold text-slate-900">{employee.full_name}</h3>
-          <p className="text-slate-500 mt-0.5">{employee.designation ?? "—"}</p>
+          <p className="text-slate-500 mt-0.5">{titleLabel(employee)}</p>
           <div className="flex flex-wrap gap-2 mt-2">
-            {employee.department && (
-              <span className="rounded-full bg-brand-100 text-brand-700 px-3 py-1 text-xs font-semibold capitalize">{employee.department}</span>
+            {deptLabel(employee, "") && (
+              <span className="rounded-full bg-brand-100 text-brand-700 px-3 py-1 text-xs font-semibold capitalize">{deptLabel(employee, "")}</span>
             )}
             {employee.employment_type && (
               <span className="rounded-full bg-slate-100 text-slate-600 px-3 py-1 text-xs font-semibold capitalize">{employee.employment_type.replace("_", " ")}</span>
@@ -195,8 +198,8 @@ export default function MyProfile() {
           <h3 className="font-semibold text-slate-800 mb-4 pb-2 border-b border-slate-100">Job Details</h3>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Employee Code" value={employee.employee_code} />
-            <Field label="Department" value={employee.department} />
-            <Field label="Designation" value={employee.designation} />
+            <Field label="Department" value={deptLabel(employee, "")} />
+            <Field label="Designation" value={titleLabel(employee, "")} />
             <Field label="Employment Type" value={employee.employment_type?.replace("_", " ")} />
             <Field label="Date of Joining" value={employee.date_of_joining} />
             <Field label="Status" value={employee.status} />

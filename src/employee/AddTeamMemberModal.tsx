@@ -4,6 +4,7 @@ import { db } from "../insforge/client";
 import { useAuth } from "../hooks/useAuth";
 import { useTenant } from "../contexts/TenantContext";
 import { useToast } from "../shared/ToastContext";
+import { useOrgStructure } from "../hooks/useOrgStructure";
 
 interface Props {
   onClose: () => void;
@@ -14,11 +15,12 @@ export default function AddTeamMemberModal({ onClose, onCreated }: Props) {
   const { currentEmployee } = useAuth();
   const { tenantId } = useTenant();
   const { success, error } = useToast();
+  const { jobTitles } = useOrgStructure();
 
   const [form, setForm] = useState({
     full_name: "",
     email: "",
-    designation: "",
+    job_title_id: "",
     date_of_joining: "",
   });
   const [submitting, setSubmitting] = useState(false);
@@ -26,8 +28,8 @@ export default function AddTeamMemberModal({ onClose, onCreated }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!currentEmployee?.id || !tenantId) return;
-    if (!form.full_name.trim() || !form.email.trim() || !form.designation.trim()) {
-      error("Name, email, and designation are required.");
+    if (!form.full_name.trim() || !form.email.trim() || !form.job_title_id) {
+      error("Name, email, and job title are required.");
       return;
     }
 
@@ -51,7 +53,7 @@ export default function AddTeamMemberModal({ onClose, onCreated }: Props) {
         tenant_id: tenantId,
         full_name: form.full_name.trim(),
         email: form.email.trim().toLowerCase(),
-        designation: form.designation.trim(),
+        job_title_id: form.job_title_id,
         date_of_joining: form.date_of_joining || null,
         status: "inactive",
         manager_id: currentEmployee.id,
@@ -129,13 +131,24 @@ export default function AddTeamMemberModal({ onClose, onCreated }: Props) {
             <label className="mb-1 block text-xs font-semibold text-slate-600 uppercase tracking-wide">
               Role / Designation *
             </label>
-            <input
+            {/* A picker, not free text: employees.designation was dropped (06 §5 step 6), so a
+                title only exists as a job_titles row. */}
+            <select
               required
-              value={form.designation}
-              onChange={(e) => setForm(p => ({ ...p, designation: e.target.value }))}
-              placeholder="e.g. Senior Sales Executive"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-            />
+              value={form.job_title_id}
+              onChange={(e) => setForm(p => ({ ...p, job_title_id: e.target.value }))}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 bg-white"
+            >
+              <option value="">Select a job title…</option>
+              {jobTitles.map((jobTitle) => (
+                <option key={jobTitle.id} value={jobTitle.id}>{jobTitle.title}</option>
+              ))}
+            </select>
+            {jobTitles.length === 0 && (
+              <span className="mt-1 block text-[11px] text-amber-600">
+                No job titles exist yet — ask HR to add them under Organisation Structure.
+              </span>
+            )}
           </div>
 
           <div>

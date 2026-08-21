@@ -12,6 +12,7 @@ import { EmptyState } from "../shared/EmptyState";
 import { formatLocalDate } from "../utils/date";
 import { calculateBusinessDays } from "../utils/leave";
 import { useManagerView } from "../hooks/useManagerView";
+import { useDepartmentLabel, useJobTitleLabel } from "../contexts/OrgUnitsContext";
 
 type Tab = "apply" | "history" | "team_requests";
 
@@ -42,6 +43,8 @@ interface LeaveBalance {
 }
 
 export default function MyLeaves() {
+  const deptLabel = useDepartmentLabel();
+  const titleLabel = useJobTitleLabel();
   const { employee } = useEmployee();
   const { tenantId } = useTenant();
   const { shift } = useEmployeeShift();
@@ -122,7 +125,7 @@ export default function MyLeaves() {
       if (isManagerMode && directReportIds.length > 0) {
         const { data: teamData, error: teamErr } = await db
           .from("employee_directory_public")
-          .select("id, full_name, profile_photo_url, designation, department")
+          .select("id, full_name, profile_photo_url, job_title_id, org_unit_id")
           .eq("tenant_id", tenantId)
           .in("id", directReportIds);
         if (!teamErr && teamData) {
@@ -414,7 +417,7 @@ export default function MyLeaves() {
                       )}
                       <div>
                         <p className="font-semibold text-slate-900">{emp?.full_name ?? "Unknown"}</p>
-                        <p className="text-xs capitalize text-slate-500">{emp?.department ?? "—"} · {emp?.designation ?? "—"}</p>
+                        <p className="text-xs capitalize text-slate-500">{deptLabel(emp)} · {titleLabel(emp)}</p>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-3 text-sm text-slate-600">

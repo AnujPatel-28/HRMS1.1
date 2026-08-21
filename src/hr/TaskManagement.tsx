@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, X, Eye, Paperclip, ChevronDown, ChevronUp, Trash2, ClipboardList } from "lucide-react";
 import type { Employee, Task, TaskSubmission } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
 import { useEmployee } from "../hooks/useEmployee";
+import { useOrgStructure } from "../hooks/useOrgStructure";
 import { useToast } from "../shared/ToastContext";
 import { ConfirmModal } from "../shared/ConfirmModal";
 import { Skeleton } from "../shared/Skeleton";
@@ -15,7 +16,6 @@ import { ALL_TASK_STATUSES, BLOCKING_TASK_STATUSES, SUBMITTED_TASK_STATUSES } fr
 type Tab = "active" | "inbox" | "all" | "assign";
 type StatusFilter = "all" | Task["status"];
 type PriorityFilter = "all" | Task["priority"];
-const DEPT_OPTIONS = ["all","sales","dev","marketing","operations","design","other"] as const;
 
 const PRIORITY_BADGE: Record<Task["priority"], string> = {
   low: "bg-slate-100 text-slate-600",
@@ -33,6 +33,7 @@ const STATUS_BADGE: Record<Task["status"], string> = {
 };
 
 import { Link } from "react-router-dom";
+import { useDepartmentLabel } from "../contexts/OrgUnitsContext";
 
 interface TaskWithEmployee extends Task {
   assignee?: Employee;
@@ -49,6 +50,8 @@ export default function TaskManagement() {
   const { employee: hrEmployee } = useEmployee();
   const { tenantId } = useTenant();
   const { logAction } = useAuditLog();
+  const { orgUnits } = useOrgStructure();
+  const deptLabel = useDepartmentLabel();
   const [tab, setTab] = useState<Tab>("active");
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [tasks, setTasks] = useState<TaskWithEmployee[]>([]);
@@ -68,6 +71,22 @@ export default function TaskManagement() {
   const { success, error: toastError } = useToast();
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; taskId: string | null }>({ isOpen: false, taskId: null });
 
+  // employees.department now mirrors the org unit NAME (kept in sync by a DB trigger), so it's fine for
+  // display but not a stable filter/assignment key — options carry org_unit_id as the value instead.
+  const deptOptions = useMemo(() => {
+    const lookupDepartments = orgUnits.map((unit) => ({ value: unit.id, label: unit.name }));
+    return lookupDepartments.length > 0
+      ? lookupDepartments
+      : [
+          { value: "sales", label: "Sales" },
+          { value: "dev", label: "Development" },
+          { value: "marketing", label: "Marketing" },
+          { value: "operations", label: "Operations" },
+          { value: "design", label: "Design" },
+          { value: "other", label: "Other" },
+        ];
+  }, [orgUnits]);
+
   useEffect(() => {
     db.from("employees").select("*").eq("tenant_id", tenantId).eq("status","active").order("full_name")
       .then(({ data }) => { if (data) setEmployees(data as Employee[]); });
@@ -82,7 +101,8 @@ export default function TaskManagement() {
       if (statusFilter !== "all" && tab === "all") q = q.eq("status", statusFilter);
       if (priorityFilter !== "all") q = q.eq("priority", priorityFilter);
       if (empFilter !== "all") q = q.eq("assigned_to", empFilter);
-      if (deptFilter !== "all") q = q.eq("department_filter", deptFilter);
+      // department_filter is now stale slug text pre-migration; org_unit_id is the stable FK to filter on.
+      if (deptFilter !== "all") q = q.eq("org_unit_id", deptFilter);
       const { data, error: fetchErr } = await q;
       if (fetchErr) throw fetchErr;
       
@@ -129,14 +149,23 @@ export default function TaskManagement() {
     setSubmitting(true);
     const targets: Employee[] = form.assign_mode === "employee"
       ? employees.filter(e => e.id === form.assigned_to)
-      : employees.filter(e => e.department === form.department);
+      // department text is the unit's name now, not a stable key — match on org_unit_id, what the picker selects.
+      : employees.filter(e => e.org_unit_id === form.department);
+    if (form.assign_mode === "department" && targets.length === 0) {
+      toastError("No active employees found in that department.");
+      setSubmitting(false);
+      return;
+    }
     try {
+      const deptName = form.assign_mode === "department" ? deptOptions.find(d => d.value === form.department)?.label ?? null : null;
       for (const emp of targets) {
         const { error: taskErr } = await db.from("tasks").insert([{
           title: form.title, description: form.description || null,
           tenant_id: tenantId,
           assigned_to: emp.id, assigned_by: hrEmployee.id,
-          department_filter: form.assign_mode === "department" ? form.department : null,
+          // department_filter keeps the unit's name for legacy display; org_unit_id is the real join key.
+          department_filter: deptName,
+          org_unit_id: form.assign_mode === "department" ? form.department : null,
           priority: form.priority, due_date: form.due_date || null, due_time: form.due_time || null,
           status: "assigned",
           attendance_lock_date: form.due_date || null
@@ -310,7 +339,7 @@ export default function TaskManagement() {
                           {e.full_name.slice(0,2).toUpperCase()}
                         </span>
                         <span className="flex-1 font-medium text-slate-800">{e.full_name}</span>
-                        <span className="text-xs capitalize text-slate-400">{e.department ?? "—"}</span>
+                        <span className="text-xs capitalize text-slate-400">{deptLabel(e)}</span>
                         {form.assigned_to === e.id && <Check className="h-4 w-4 text-brand-600" />}
                       </button>
                     ))}
@@ -321,7 +350,7 @@ export default function TaskManagement() {
                 <select value={form.department} onChange={e => setForm({...form,department:e.target.value})}
                   className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none ring-brand-600 focus:ring focus:border-brand-500 transition-shadow bg-slate-50 hover:bg-white focus:bg-white">
                   <option value="">Select department *</option>
-                  {DEPT_OPTIONS.filter(d=>d!=="all").map(d=><option key={d} value={d} className="capitalize">{d}</option>)}
+                  {deptOptions.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
                 </select>
               )}
             </div>
@@ -385,7 +414,7 @@ export default function TaskManagement() {
                 }
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-900">{task.title}</p>
-                  <p className="text-sm text-slate-500">{task.assignee?.full_name ?? "—"} · {task.assignee?.department ?? "—"}</p>
+                  <p className="text-sm text-slate-500">{task.assignee?.full_name ?? "—"} · {deptLabel(task.assignee)}</p>
                   {task.submission && (
                     <p className="mt-1 text-xs text-slate-400">
                       Submitted {new Date(task.submission.submitted_at).toLocaleString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}
@@ -466,7 +495,7 @@ export default function TaskManagement() {
             <SelectDropdown
               value={deptFilter}
               onChange={setDeptFilter}
-              options={DEPT_OPTIONS.map(d => ({ value: d, label: d === "all" ? "All Departments" : d.charAt(0).toUpperCase() + d.slice(1) }))}
+              options={[{ value: "all", label: "All Departments" }, ...deptOptions]}
               containerClassName="min-w-0 flex-1 sm:flex-none sm:min-w-[150px]"
               triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
             />
@@ -534,7 +563,7 @@ export default function TaskManagement() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-slate-600">{task.assignee?.full_name ?? "—"}</td>
-                      <td className="px-4 py-3 capitalize text-slate-500 text-xs">{task.assignee?.department ?? "—"}</td>
+                      <td className="px-4 py-3 capitalize text-slate-500 text-xs">{deptLabel(task.assignee)}</td>
                       <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${PRIORITY_BADGE[task.priority]}`}>{task.priority}</span></td>
                       <td className="px-4 py-3 text-slate-500 text-xs">{task.due_date ?? "—"}</td>
                       <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${STATUS_BADGE[task.status]}`}>{task.status.replace("_"," ")}</span></td>

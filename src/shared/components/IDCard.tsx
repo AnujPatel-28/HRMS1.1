@@ -3,6 +3,7 @@ import { Phone, Mail, MapPin } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Employee } from "../../types";
 import type { Tenant } from "../../contexts/TenantContext";
+import { useDepartmentLabel, useJobTitleLabel } from "../../contexts/OrgUnitsContext";
 
 interface IDCardProps {
   employee: Employee;
@@ -13,6 +14,8 @@ interface IDCardProps {
 
 export const IDCard = forwardRef<HTMLDivElement, IDCardProps>(
   ({ employee, tenant, side, type }, ref) => {
+    const deptLabel = useDepartmentLabel();
+    const titleLabel = useJobTitleLabel();
     const isId = type === "id";
     const isFront = side === "front";
 
@@ -71,7 +74,7 @@ export const IDCard = forwardRef<HTMLDivElement, IDCardProps>(
                   {employee.full_name}
                 </div>
                 <div className="text-[9px] font-medium text-slate-500 truncate max-w-[280px] capitalize mt-0.5">
-                  {employee.designation || "—"} {employee.department ? `• ${employee.department}` : ""}
+                  {titleLabel(employee)} {deptLabel(employee, "") ? `• ${deptLabel(employee, "")}` : ""}
                 </div>
               </div>
 
@@ -160,11 +163,11 @@ export const IDCard = forwardRef<HTMLDivElement, IDCardProps>(
                 )}
                 <div className="text-xs font-bold tracking-wide truncate max-w-[150px]">{employee.full_name}</div>
                 <div className="text-[8px] text-teal-400 font-semibold truncate mt-0.5 capitalize max-w-[150px]">
-                  {employee.designation || "—"}
+                  {titleLabel(employee)}
                 </div>
-                {employee.department && (
+                {deptLabel(employee, "") && (
                   <div className="text-[7px] text-slate-400 font-medium uppercase tracking-wider mt-0.5">
-                    {employee.department}
+                    {deptLabel(employee, "")}
                   </div>
                 )}
               </div>

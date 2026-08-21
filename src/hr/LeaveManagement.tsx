@@ -12,6 +12,7 @@ import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { SelectDropdown } from "../shared/components/SelectDropdown";
 import { formatLocalMonthBoundary } from "../utils/date";
+import { useDepartmentLabel, useJobTitleLabel } from "../contexts/OrgUnitsContext";
 
 type Tab = "pending" | "all" | "holidays";
 
@@ -44,6 +45,8 @@ function exportCSV(rows: string[][], filename: string) {
 }
 
 export default function LeaveManagement() {  const { tenantId } = useTenant();
+  const deptLabel = useDepartmentLabel();
+  const titleLabel = useJobTitleLabel();
   const { logAction } = useAuditLog();
   const location = useLocation();
   const [tab, setTab] = useState<Tab>(() => {
@@ -378,7 +381,7 @@ export default function LeaveManagement() {  const { tenantId } = useTenant();
                     )}
                     <div>
                       <p className="font-semibold text-slate-900">{leave.employee?.full_name ?? "Unknown"}</p>
-                      <p className="text-xs capitalize text-slate-500">{leave.employee?.department ?? "—"} · {leave.employee?.designation ?? "—"}</p>
+                      <p className="text-xs capitalize text-slate-500">{deptLabel(leave.employee)} · {titleLabel(leave.employee)}</p>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-3 text-sm text-slate-600">

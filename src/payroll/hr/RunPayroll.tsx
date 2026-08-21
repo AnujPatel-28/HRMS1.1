@@ -11,6 +11,7 @@ import type { SalaryStructure } from "./SalaryStructures";
 import { MONTH_NAMES, formatCurrency, roundCurrency, calcPayslip, getWorkingDays, getEsiContributionPeriod, type PayslipCalc, type SalaryPolicySnapshot } from "./payroll-calc";
 import { PayrollError } from "../../utils/errors";
 import { uploadPayslipPdf } from "./payslip-pdf";
+import { useDepartmentLabel, useJobTitleLabel } from "../../contexts/OrgUnitsContext";
 
 const LATE_MARK_BATCH_SIZE = 20;
 
@@ -101,6 +102,8 @@ function buildGrossMonthly(structure: SalaryStructure) {
 
 // Main Component
 export default function RunPayroll() {
+  const deptLabel = useDepartmentLabel();
+  const titleLabel = useJobTitleLabel();
   const { tenantId, tenant } = useTenant();
   const { employee: hrEmployee } = useEmployee();
   const { logAction } = useAuditLog();
@@ -488,7 +491,7 @@ export default function RunPayroll() {
           }
         }
 
-        const pdfUrl = tenant ? await uploadPayslipPdf(storage, tenant, r.employee, r, tenantId, month, year) : null;
+        const pdfUrl = tenant ? await uploadPayslipPdf(storage, tenant, { ...r.employee, department: deptLabel(r.employee, "") || null, designation: titleLabel(r.employee, "") || null }, r, tenantId, month, year) : null;
         const payload = {
           tenant_id: tenantId,
           payroll_run_id: runId,
@@ -679,7 +682,7 @@ export default function RunPayroll() {
                             <span className="md:hidden text-xs font-semibold text-slate-500 mt-0.5">Employee</span>
                             <div className="text-right md:text-left">
                               <p className="font-medium text-slate-900">{r.employee.full_name}</p>
-                              <p className="text-xs text-slate-500 capitalize">{r.employee.department}</p>
+                              <p className="text-xs text-slate-500 capitalize">{deptLabel(r.employee, "")}</p>
                               {r.overtimeAmount && r.overtimeAmount > 0 ? (
                                 <p className="text-xs font-medium text-purple-700">Overtime: {formatCurrency(r.overtimeAmount)}</p>
                               ) : null}

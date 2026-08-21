@@ -5,8 +5,11 @@ import { useTenant } from "../contexts/TenantContext";
 import { useToast } from "../shared/ToastContext";
 import type { ExitClearance, ExitInterviewData, ExitRequest } from "../types";
 import InitiateExitModal from "./components/InitiateExitModal";
+import { useDepartmentLabel, useJobTitleLabel } from "../contexts/OrgUnitsContext";
 
 export default function OffboardingManagement() {
+  const deptLabel = useDepartmentLabel();
+  const titleLabel = useJobTitleLabel();
   const { tenantId } = useTenant();
   const { success, error: toastError } = useToast();
 
@@ -121,8 +124,8 @@ export default function OffboardingManagement() {
           *,
           employee:employees!exit_requests_employee_id_fkey (
             full_name,
-            designation,
-            department,
+            job_title_id,
+            org_unit_id,
             profile_photo_url
           )
         `)
@@ -403,7 +406,7 @@ export default function OffboardingManagement() {
                           )}
                           <div>
                             <p className="font-semibold text-slate-900">{req.employee?.full_name}</p>
-                            <p className="text-[10px] text-slate-400 capitalize">{req.employee?.designation || "Staff"}</p>
+                            <p className="text-[10px] text-slate-400 capitalize">{titleLabel(req.employee, "Staff")}</p>
                           </div>
                         </td>
                         <td className="px-6 py-4">
@@ -461,7 +464,7 @@ export default function OffboardingManagement() {
                 )}
                 <div>
                   <h4 className="font-bold text-slate-900">{selectedRequest.employee?.full_name}</h4>
-                  <p className="text-xs text-slate-500 capitalize">{selectedRequest.employee?.designation} • {selectedRequest.employee?.department}</p>
+                  <p className="text-xs text-slate-500 capitalize">{titleLabel(selectedRequest.employee, "")} • {deptLabel(selectedRequest.employee, "")}</p>
                 </div>
               </div>
 

@@ -1,5 +1,13 @@
 import type { Employee } from "../types";
 
+/**
+ * Input to the tree builders: an employee plus a resolved `department` LABEL. `employees.department`
+ * was dropped (06 §5 step 6), so callers resolve the unit name from `org_unit_id` first — see
+ * `lookupDecoratedEmployees` in shared/pages/OrgChart.tsx. Kept on the node because OrgChartNode
+ * styles and renders it.
+ */
+export type OrgTreeInput = Employee & { department?: string | null; designation?: string | null };
+
 export interface OrgNode {
   id: string;
   full_name: string;
@@ -42,7 +50,7 @@ export interface OrgTreeResult {
  *
  * Use `buildOrgTree` for a plain root array (backward-compatible wrapper).
  */
-export function buildOrgTreeWithOrphans(employees: Employee[]): OrgTreeResult {
+export function buildOrgTreeWithOrphans(employees: OrgTreeInput[]): OrgTreeResult {
   // Build a map for quick lookup
   const map = new Map<string, OrgNode>();
   employees.forEach(emp => {

@@ -9,6 +9,7 @@ import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { SelectDropdown } from "../shared/components/SelectDropdown";
 import { useOrgStructure } from "../hooks/useOrgStructure";
+import { useDepartmentLabel, useJobTitleLabel } from "../contexts/OrgUnitsContext";
 
 export default function EmployeeList() {
   const navigate = useNavigate();
@@ -22,23 +23,9 @@ export default function EmployeeList() {
   const [workLocationFilter, setWorkLocationFilter] = useState("all");
 
   const { error: toastError } = useToast();
-  const { orgUnits, locations, jobTitles } = useOrgStructure();
-
-  const getDepartmentLabel = (emp: Employee) => {
-    if (emp.org_unit_id) {
-      const unit = orgUnits.find((u) => u.id === emp.org_unit_id);
-      if (unit) return unit.name;
-    }
-    return emp.department || "—";
-  };
-
-  const getDesignationLabel = (emp: Employee) => {
-    if (emp.job_title_id) {
-      const job = jobTitles.find((j) => j.id === emp.job_title_id);
-      if (job) return job.title;
-    }
-    return emp.designation || "—";
-  };
+  const { orgUnits, locations } = useOrgStructure();
+  const deptLabel = useDepartmentLabel();
+  const titleLabel = useJobTitleLabel();
 
   useEffect(() => {
     let active = true;
@@ -88,8 +75,8 @@ export default function EmployeeList() {
   }, [employees]);
 
   const departmentOptions = useMemo(() => {
+    // Every active unit, at any depth — see the note in Directory.tsx.
     const lookupDepartments = orgUnits
-      .filter((unit) => unit.unit_type === "department")
       .map((unit) => ({ value: unit.id, label: unit.name }));
 
     return lookupDepartments.length > 0
@@ -124,7 +111,7 @@ export default function EmployeeList() {
     const normalizedQuery = search.trim().toLowerCase();
 
     return employees.filter((employee) => {
-      const matchesDepartment = departmentFilter === "all" || employee.org_unit_id === departmentFilter || employee.department === departmentFilter;
+      const matchesDepartment = departmentFilter === "all" || employee.org_unit_id === departmentFilter;
       const matchesStatus =
         statusFilter === "all" ||
         (statusFilter === "pending_review"
@@ -295,8 +282,8 @@ export default function EmployeeList() {
                   </td>
                   <td className="px-4 py-3 font-medium text-slate-900">{employee.full_name}</td>
                   <td className="px-4 py-3 text-slate-700">{employee.employee_code ?? "—"}</td>
-                  <td className="px-4 py-3 capitalize text-slate-700">{getDepartmentLabel(employee)}</td>
-                  <td className="px-4 py-3 text-slate-700 capitalize">{getDesignationLabel(employee)}</td>
+                  <td className="px-4 py-3 capitalize text-slate-700">{deptLabel(employee)}</td>
+                  <td className="px-4 py-3 text-slate-700 capitalize">{titleLabel(employee)}</td>
                   <td className="px-4 py-3 text-slate-700">{employee.manager_name ?? "—"}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusBadgeClass(employee)}`}>
@@ -364,7 +351,7 @@ export default function EmployeeList() {
                     {employee.full_name}
                   </p>
                   <p className="truncate text-xs font-medium text-slate-500 capitalize mt-0.5">
-                    {getDepartmentLabel(employee)} • {employee.employee_code ?? "—"}
+                    {deptLabel(employee)} • {employee.employee_code ?? "—"}
                   </p>
                 </div>
               </div>

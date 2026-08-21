@@ -13,8 +13,6 @@ export interface Employee {
   city: string | null;
   state: string | null;
   pincode: string | null;
-  department: string | null;
-  designation: string | null;
   employee_code: string | null;
   date_of_joining: string | null;
   employment_type: string | null;
@@ -174,8 +172,8 @@ export interface ExitRequest {
   updated_at: string;
   employee?: {
     full_name: string;
-    designation: string | null;
-    department: string | null;
+    job_title_id: string | null;
+    org_unit_id: string | null;
     profile_photo_url: string | null;
   };
   clearances?: ExitClearance[];
@@ -395,6 +393,9 @@ export interface Task {
   assigned_to: string;
   assigned_by: string;
   department_filter: string | null;
+  // Slice B target column (20260820160000). department_filter is kept alongside it for
+  // display; org_unit_id is the stable target the assign flow filters on.
+  org_unit_id?: string | null;
   priority: "low" | "medium" | "high" | "urgent";
   due_date: string | null;
   due_time: string | null;
@@ -439,7 +440,8 @@ export interface ChatChannel {
   target_departments: string[];
   // Slice B target-side column (doc/architecture/06-organisation-management.md §5 step 3). Nullable —
   // the column has no default, and is only populated by department-type channels created after this
-  // write path shipped. target_departments remains the field RLS reads until Slice B is applied.
+  // write path shipped. Slice B is APPLIED — target_org_unit_ids is what every chat policy reads;
+  // target_departments survives only for the legacy client-side display fallback.
   target_org_unit_ids?: string[] | null;
   created_by: string | null;
   created_at: string;
@@ -496,7 +498,7 @@ export interface Project {
     type: "all" | "departments" | "people";
     departments?: string[];
     // Slice B target-side key (doc/architecture/06-organisation-management.md §5 step 3), written
-    // alongside `departments` — RLS still reads `departments` until Slice B is applied.
+    // alongside `departments` — Slice B is APPLIED, so RLS reads `org_unit_ids` only.
     org_unit_ids?: string[];
     employee_ids?: string[];
   };

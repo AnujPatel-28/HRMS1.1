@@ -4,6 +4,7 @@ import { db, auth } from "../../insforge/client";
 import { useTenant } from "../../contexts/TenantContext";
 import { useToast } from "../../shared/ToastContext";
 import type { Employee } from "../../types";
+import { useDepartmentLabel, useJobTitleLabel } from "../../contexts/OrgUnitsContext";
 
 interface InitiateExitModalProps {
   isOpen: boolean;
@@ -18,6 +19,8 @@ export default function InitiateExitModal({
   onSuccess,
   preselectedEmployeeId
 }: InitiateExitModalProps) {
+  const deptLabel = useDepartmentLabel();
+  const titleLabel = useJobTitleLabel();
   const { tenantId } = useTenant();
   const { success, error: toastError } = useToast();
 
@@ -36,7 +39,7 @@ export default function InitiateExitModal({
     if (isOpen && tenantId) {
       setLoadingEmployees(true);
       db.from("employees")
-        .select("id, full_name, designation, department")
+        .select("id, full_name, job_title_id, org_unit_id")
         .eq("tenant_id", tenantId)
         .eq("status", "active")
         .order("full_name")
@@ -173,7 +176,7 @@ export default function InitiateExitModal({
                   <option value="">-- Choose Employee --</option>
                   {employees.map(emp => (
                     <option key={emp.id} value={emp.id}>
-                      {emp.full_name} ({emp.designation || "No Title"} - {emp.department || "No Dept"})
+                      {emp.full_name} ({titleLabel(emp, "No Title")} - {deptLabel(emp, "No Dept")})
                     </option>
                   ))}
                 </select>

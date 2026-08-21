@@ -3,10 +3,11 @@ import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { Attendance, CalendarEvent, Employee, Holiday, Leave, Task } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
+import { useOrgStructure } from "../hooks/useOrgStructure";
 import { formatLocalDate, formatLocalMonthBoundary, parseLocalDate } from "../utils/date";
+import { useDepartmentLabel } from "../contexts/OrgUnitsContext";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-const DEPT_OPTIONS = ["all","sales","dev","marketing","operations","design","other"] as const;
 const BLOCKING_TASK_STATES = ["assigned", "in_progress", "rejected"];
 
 type EmpDay = {
@@ -22,7 +23,9 @@ type DayPopup = {
 };
 
 export default function HRCalendar() {
+  const deptLabel = useDepartmentLabel();
   const { tenantId } = useTenant();
+  const { orgUnits } = useOrgStructure();
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth());
   const [deptFilter, setDeptFilter] = useState("all");
@@ -123,8 +126,24 @@ export default function HRCalendar() {
     return m;
   }, [tasks]);
 
+  // employees.department mirrors the org unit NAME via a DB trigger now, not a stable id — filter by
+  // org_unit_id, the same key the picker below selects.
+  const deptOptions = useMemo(() => {
+    const lookupDepartments = orgUnits.map((unit) => ({ value: unit.id, label: unit.name }));
+    return lookupDepartments.length > 0
+      ? lookupDepartments
+      : [
+          { value: "sales", label: "Sales" },
+          { value: "dev", label: "Development" },
+          { value: "marketing", label: "Marketing" },
+          { value: "operations", label: "Operations" },
+          { value: "design", label: "Design" },
+          { value: "other", label: "Other" },
+        ];
+  }, [orgUnits]);
+
   const visibleEmps = useMemo(() =>
-    deptFilter === "all" ? employees : employees.filter(e => e.department === deptFilter),
+    deptFilter === "all" ? employees : employees.filter(e => e.org_unit_id === deptFilter),
   [employees, deptFilter]);
 
   const getEmpStatus = useCallback((empId: string, dateStr: string): EmpDay["status"] => {
@@ -223,7 +242,8 @@ export default function HRCalendar() {
         <div className="flex flex-wrap items-center gap-2">
           <select value={deptFilter} onChange={e=>setDeptFilter(e.target.value)}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none ring-brand-600 focus:ring">
-            {DEPT_OPTIONS.map(d=><option key={d} value={d} className="capitalize">{d==="all"?"All Departments":d}</option>)}
+            <option value="all">All Departments</option>
+            {deptOptions.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
           </select>
           <button onClick={()=>navMonth(-1)} className="rounded-lg border border-slate-200 p-1.5 hover:bg-slate-100"><ChevronLeft className="h-4 w-4"/></button>
           <span className="min-w-[140px] text-center text-sm font-semibold text-slate-700">{MONTHS[month]} {year}</span>
@@ -318,7 +338,7 @@ export default function HRCalendar() {
                     <div key={emp.id} className="flex items-center gap-3 rounded-xl border border-slate-100 px-3 py-2">
                       <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${getDotClass(status)}`}/>
                       <span className="flex-1 text-sm font-medium text-slate-800">{emp.full_name}</span>
-                      <span className="text-xs capitalize text-slate-400">{emp.department??""}</span>
+                      <span className="text-xs capitalize text-slate-400">{deptLabel(emp, "")}</span>
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${
                         status==="approved"?"bg-emerald-100 text-emerald-700":
                         status==="incomplete"?"bg-rose-100 text-rose-700":

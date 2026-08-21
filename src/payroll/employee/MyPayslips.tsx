@@ -24,6 +24,7 @@ import {
   payslipFilename,
   type PayslipPdfData,
 } from "../hr/payslip-pdf";
+import { useDepartmentLabel, useJobTitleLabel } from "../../contexts/OrgUnitsContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -192,6 +193,8 @@ function RecentEarningsCards({ payslips }: { payslips: Payslip[] }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function MyPayslips() {
+  const deptLabel = useDepartmentLabel();
+  const titleLabel = useJobTitleLabel();
   const { tenantId, tenant } = useTenant();
   const { employee, loading: empLoading } = useEmployee();
   const { error: toastError } = useToast();
@@ -299,7 +302,7 @@ export default function MyPayslips() {
       } catch (err) {
         if ((err as Error).message !== "This payslip needs regeneration.") throw err;
       }
-      const blob = await createPayslipPdfBlob(tenant, employee, pdfDataFromPayslip(slip), slip.month, slip.year);
+      const blob = await createPayslipPdfBlob(tenant, { ...employee, department: deptLabel(employee, "") || null, designation: titleLabel(employee, "") || null }, pdfDataFromPayslip(slip), slip.month, slip.year);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -326,7 +329,7 @@ export default function MyPayslips() {
       } catch (err) {
         if ((err as Error).message !== "This payslip needs regeneration.") throw err;
       }
-      const blob = await createPayslipPdfBlob(tenant, employee, pdfDataFromPayslip(slip), slip.month, slip.year);
+      const blob = await createPayslipPdfBlob(tenant, { ...employee, department: deptLabel(employee, "") || null, designation: titleLabel(employee, "") || null }, pdfDataFromPayslip(slip), slip.month, slip.year);
       const url = URL.createObjectURL(blob);
       window.open(url, "_blank", "noopener,noreferrer");
       setTimeout(() => URL.revokeObjectURL(url), 60_000);

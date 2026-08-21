@@ -12,6 +12,7 @@ import { NotificationBell } from "../shared/NotificationBell";
 import { Sidebar, DesktopSidebar, SidebarLink, useSidebar } from "../components/ui/sidebar";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "../utils/cn";
+import { useDepartmentLabel } from "../contexts/OrgUnitsContext";
 
 type NavLinkItem = {
   label: string;
@@ -95,10 +96,11 @@ function HRSidebarContent({
   unreadConnectCount: number;
   pendingExpensesCount: number;
   onItemClick?: () => void;
-  employee?: { full_name?: string; profile_photo_url?: string; department?: string } | null;
+  employee?: { full_name?: string; profile_photo_url?: string; org_unit_id?: string | null } | null;
   flatLayout?: boolean;
   isLight?: boolean;
 }) {
+  const deptLabel = useDepartmentLabel();
   const { open } = useSidebar();
   const [openSection, setOpenSection] = useState<string | null>(() => {
     const activeSection = sections.find((section) =>
@@ -345,7 +347,7 @@ function HRSidebarContent({
               className="overflow-hidden whitespace-nowrap min-w-0"
             >
               <p className={cn("text-xs truncate", textNameClass)}>{employee.full_name ?? 'HR User'}</p>
-              <p className={cn("text-[10px] truncate", textMutedClass)}>{employee.department ?? 'HR'}</p>
+              <p className={cn("text-[10px] truncate", textMutedClass)}>{deptLabel(employee, 'HR')}</p>
             </motion.div>
           </div>
         </div>
@@ -357,6 +359,7 @@ function HRSidebarContent({
 const dashboardLink: NavLinkItem = { label: "Dashboard", href: "/hr/dashboard", icon: Home };
 
 export default function HRLayout() {
+  const deptLabel = useDepartmentLabel();
   const location = useLocation();
   const navigate = useNavigate();
   const { logout, tenantId } = useAuth();
@@ -850,7 +853,7 @@ export default function HRLayout() {
                             )}
                             <div className="min-w-0">
                               <p className="text-sm font-semibold text-slate-800 truncate">{employee?.full_name ?? 'HR User'}</p>
-                              <p className="text-xs text-slate-400 truncate">{employee?.department ?? 'HR'}</p>
+                              <p className="text-xs text-slate-400 truncate">{deptLabel(employee, 'HR')}</p>
                             </div>
                           </div>
                           {/* Sign out */}

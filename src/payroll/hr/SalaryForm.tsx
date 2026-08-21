@@ -8,6 +8,7 @@ import { useToast } from "../../shared/ToastContext";
 import type { Employee } from "../../types";
 import type { SalaryStructure } from "./SalaryStructures";
 import { formatLocalDate } from "../../utils/date";
+import { useDepartmentLabel } from "../../contexts/OrgUnitsContext";
 
 type SalaryFormProps = {
   employee: Employee;
@@ -71,6 +72,7 @@ function calculateBreakdown(values: {
 }
 
 export function SalaryForm({ employee, structure, onClose, onSaved }: SalaryFormProps) {
+  const deptLabel = useDepartmentLabel();
   const { tenantId } = useTenant();
   const { employee: currentEmployee } = useEmployee();
   const { logAction } = useAuditLog();
@@ -220,7 +222,7 @@ export function SalaryForm({ employee, structure, onClose, onSaved }: SalaryForm
             )}
             <div className="min-w-0">
               <h2 className="truncate text-lg font-semibold text-slate-900">{employee.full_name}</h2>
-              <p className="text-sm capitalize text-slate-500">{employee.department ?? "No department"}</p>
+              <p className="text-sm capitalize text-slate-500">{deptLabel(employee, "No department")}</p>
             </div>
           </div>
           <button

@@ -9,6 +9,7 @@ import { Skeleton } from "../../shared/Skeleton";
 import { EmptyState } from "../../shared/EmptyState";
 import { useAuditLog } from "../../hooks/useAuditLog";
 import type { Project, Employee, Task, TaskSubmission } from "../../types";
+import { useDepartmentLabel, useJobTitleLabel } from "../../contexts/OrgUnitsContext";
 
 const PRIORITY_DOT: Record<Task["priority"], string> = {
   low: "bg-slate-400",
@@ -76,6 +77,8 @@ function sortOrgUnitsHierarchically(units: OrgUnitOption[]): OrgUnitOption[] {
 }
 
 export default function ProjectDetail() {
+  const deptLabel = useDepartmentLabel();
+  const titleLabel = useJobTitleLabel();
   const { projectId } = useParams<{ projectId: string }>();
   const { tenantId } = useTenant();
   const { employee: currentHr } = useEmployee();
@@ -287,13 +290,20 @@ export default function ProjectDetail() {
       toastError("End date must be after start date.");
       return;
     }
+    if (editVisibilityType === "departments" && editSelectedOrgUnitIds.length === 0) {
+      // projects_employee_read now gates the departments branch on org_unit_ids only — an empty
+      // selection here would save a project no employee could ever read.
+      toastError("Select at least one org unit. The legacy department list is no longer read by RLS.");
+      return;
+    }
 
     try {
       const visibility_config = {
         type: editVisibilityType,
         departments: editVisibilityType === "departments" ? editSelectedDepts : undefined,
         // Slice B target-side key, written alongside `departments` — RLS still reads `departments`
-        // until Slice B is applied. visibility_config is jsonb, so this key is safe to write today.
+        // Slice B is APPLIED (20260820110000): projects_employee_read gates the departments branch
+        // on org_unit_ids ONLY. `departments` is kept for display and is no longer an RLS input.
         org_unit_ids: editVisibilityType === "departments" ? editSelectedOrgUnitIds : undefined,
         employee_ids: editVisibilityType === "people" ? editSelectedPeople : undefined,
       };
@@ -878,7 +888,7 @@ export default function ProjectDetail() {
                   )}
                   <div>
                     <h4 className="font-semibold text-slate-800 text-sm">{member.employee?.full_name}</h4>
-                    <p className="text-xs text-slate-400 capitalize">{member.employee?.department} Department</p>
+                    <p className="text-xs text-slate-400 capitalize">{deptLabel(member.employee, "")} Department</p>
                   </div>
                 </div>
 
@@ -1142,7 +1152,7 @@ export default function ProjectDetail() {
                       {empMap.get(selectedTask.assigned_to)?.full_name || "—"}
                     </h4>
                     <p className="text-xs text-slate-400 capitalize">
-                      {empMap.get(selectedTask.assigned_to)?.department || "No Department"}
+                      {deptLabel(empMap.get(selectedTask.assigned_to), "No Department")}
                     </p>
                   </div>
                 </div>
@@ -1384,7 +1394,7 @@ export default function ProjectDetail() {
                             </span>
                             <div className="flex-1 truncate">
                               <p className="font-semibold">{m.full_name}</p>
-                              <p className="text-[10px] text-slate-400 capitalize">{m.designation || m.role}</p>
+                              <p className="text-[10px] text-slate-400 capitalize">{titleLabel(m, m.role)}</p>
                             </div>
                           </button>
                         ))}
@@ -1451,7 +1461,7 @@ export default function ProjectDetail() {
                 {/* Specific Departments Multi-select */}
                 {editVisibilityType === "departments" && (
                   <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Departments</p>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Departments (Legacy)</p>
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                       {DEPT_OPTIONS.map((dept) => {
                         const isChecked = editSelectedDepts.includes(dept);
@@ -1485,10 +1495,10 @@ export default function ProjectDetail() {
                 )}
 
                 {/* Org Unit Picker — Slice B org_unit_ids write path, alongside the legacy Departments
-                    picker above (which RLS still reads until Slice B is applied). */}
+                    picker above, which RLS no longer reads — org units are the authoritative target. */}
                 {editVisibilityType === "departments" && (
                   <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Org Units (optional)</p>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Org Units <span className="text-rose-500">*</span></p>
                     {orgUnits.length === 0 ? (
                       <p className="text-xs text-slate-400">No org units configured for this tenant yet.</p>
                     ) : (
@@ -1563,7 +1573,7 @@ export default function ProjectDetail() {
                             />
                             <div className="flex-1 truncate">
                               <p className="font-semibold text-slate-800">{emp.full_name}</p>
-                              <p className="text-[10px] text-slate-400 capitalize">{emp.department || "No Department"}</p>
+                              <p className="text-[10px] text-slate-400 capitalize">{deptLabel(emp, "No Department")}</p>
                             </div>
                           </label>
                         );
@@ -1694,7 +1704,7 @@ export default function ProjectDetail() {
                           </span>
                           <div className="flex-1 truncate">
                             <p className="font-semibold">{emp.full_name}</p>
-                            <p className="text-[10px] text-slate-400 capitalize">{emp.department || "No Department"}</p>
+                            <p className="text-[10px] text-slate-400 capitalize">{deptLabel(emp, "No Department")}</p>
                           </div>
                         </button>
                       ))}

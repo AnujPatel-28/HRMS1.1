@@ -47,6 +47,7 @@ import EmployeePayrollLayout from "./payroll/employee/EmployeePayrollLayout";
 import MyPayslips from "./payroll/employee/MyPayslips";
 import { AuthProvider } from "./contexts/AuthContext";
 import { TenantProvider } from "./contexts/TenantContext";
+import { OrgUnitsProvider } from "./contexts/OrgUnitsContext";
 import { useAuth } from "./hooks/useAuth";
 import { ManagerViewProvider } from "./hooks/useManagerView";
 import Login from "./shared/Login";
@@ -107,7 +108,13 @@ function RequireAuthTenant({ children }: { children: ReactElement }) {
     return <Navigate to="/admin/dashboard" replace />;
   }
 
-  return <TenantProvider>{children}</TenantProvider>;
+  // OrgUnitsProvider sits INSIDE TenantProvider because it keys its fetch on tenantId. One
+  // insertion point covers every tenant screen that renders a department label.
+  return (
+    <TenantProvider>
+      <OrgUnitsProvider>{children}</OrgUnitsProvider>
+    </TenantProvider>
+  );
 }
 
 function AdminRoutes() {

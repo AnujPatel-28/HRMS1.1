@@ -25,6 +25,7 @@ import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import type { Expense, Employee } from "../types";
 import { MONTH_NAMES } from "../payroll/hr/payroll-calc";
+import { useDepartmentLabel } from "../contexts/OrgUnitsContext";
 
 const CATEGORIES = [
   { value: "travel", label: "Travel", icon: Car },
@@ -36,6 +37,7 @@ const CATEGORIES = [
 ] as const;
 
 export default function HRExpenses() {
+  const deptLabel = useDepartmentLabel();
   const { employee: currentHR } = useEmployee();
   const { tenantId } = useTenant();
   const { success, error } = useToast();
@@ -487,7 +489,7 @@ export default function HRExpenses() {
                         <div>
                           <p className="font-bold text-slate-800">{emp?.full_name || "Unknown"}</p>
                           <p className="text-xs text-slate-400 font-medium capitalize">
-                            {emp?.department || "No department"}
+                            {deptLabel(emp, "No department")}
                           </p>
                         </div>
                       </div>

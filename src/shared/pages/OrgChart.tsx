@@ -249,7 +249,7 @@ export default function OrgChart() {
 
     Promise.all([
       db.from(employeesTable)
-        .select("id, full_name, designation, department, org_unit_id, job_title_id, location_id, employment_type_id, profile_photo_url, grade, status, role, user_id")
+        .select("id, full_name, org_unit_id, job_title_id, location_id, employment_type_id, profile_photo_url, grade, status, role, user_id")
         .eq("tenant_id", tenantId)
         .in("status", ["active", "draft", "pending_hr_review", "inactive"]),
       db.from("employee_reporting_relationships")
@@ -300,8 +300,10 @@ export default function OrgChart() {
 
     return visibleEmployees.map((employee) => ({
       ...employee,
-      department: employee.org_unit_id ? orgUnitNameById.get(employee.org_unit_id) ?? employee.department : employee.department,
-      designation: employee.job_title_id ? jobTitleById.get(employee.job_title_id) ?? employee.designation : employee.designation,
+      // Resolved unit name only — employees.department no longer exists. Everything downstream
+      // (filter, grouping, search, node styling) reads THIS decorated field, not a column.
+      department: employee.org_unit_id ? orgUnitNameById.get(employee.org_unit_id) ?? "" : "",
+      designation: employee.job_title_id ? jobTitleById.get(employee.job_title_id) ?? "" : "",
       secondary_manager_name: employee.secondary_manager_id ? employeeNameById.get(employee.secondary_manager_id) ?? null : null,
     }));
   }, [jobTitles, orgUnits, visibleEmployees]);
@@ -417,12 +419,14 @@ export default function OrgChart() {
   }, [focusNodeId, flatNodes]);
 
   const headcountStats = useMemo(() => {
-    const total = employees.length;
-    const depts = new Set(employees.map(e => e.department).filter(Boolean)).size;
-    const activeManagerIds = new Set(employees.map(e => e.manager_id).filter(Boolean));
+    // Reads the RESOLVED department label, which lives on the decorated list — employees.department
+    // was dropped (06 §5 step 6), so the raw rows carry only org_unit_id.
+    const total = lookupDecoratedEmployees.length;
+    const depts = new Set(lookupDecoratedEmployees.map(e => e.department).filter(Boolean)).size;
+    const activeManagerIds = new Set(lookupDecoratedEmployees.map(e => e.manager_id).filter(Boolean));
     const managers = activeManagerIds.size;
-    
-    const deptCounts = employees.reduce((acc, e) => {
+
+    const deptCounts = lookupDecoratedEmployees.reduce((acc, e) => {
       if (e.department) {
         acc[e.department] = (acc[e.department] || 0) + 1;
       }
@@ -434,11 +438,11 @@ export default function OrgChart() {
       .map(([name, count]) => `${name} (${count})`);
       
     return { total, depts, managers, topDepts };
-  }, [employees]);
+  }, [lookupDecoratedEmployees]);
 
   // Focus a node: clears search, resets department filter if needed, and sets highlight
   const handleFocusNode = (nodeId: string) => {
-    const target = employees.find((e) => e.id === nodeId);
+    const target = lookupDecoratedEmployees.find((e) => e.id === nodeId);
     if (target) {
       if (filterDept !== "all" && target.department !== filterDept) {
         setFilterDept("all");

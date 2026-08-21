@@ -13,6 +13,7 @@ import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { SelectDropdown } from "../shared/components/SelectDropdown";
 import { formatLocalDate } from "../utils/date";
+import { useJobTitleLabel } from "../contexts/OrgUnitsContext";
 
 
 interface KPI {
@@ -34,6 +35,7 @@ export default function HRDashboard() {
   const currentLayout = context.layoutStyle || (localStorage.getItem('sidebar_layout_style') as 'dropdown' | 'double_sidebar' | 'classic') || 'double_sidebar';
   const { employee } = useEmployee();
   const { tenantId, tenant } = useTenant();
+  const titleLabel = useJobTitleLabel();
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [pendingLeaves, setPendingLeaves] = useState<(Leave & { employee?: Employee })[]>([]);
@@ -70,7 +72,7 @@ export default function HRDashboard() {
           .lte("effective_from", today)
           .or(`effective_to.is.null,effective_to.gte.${today}`),
         db.from("employees")
-          .select("id, full_name, designation, probation_end_date, probation_status")
+          .select("id, full_name, job_title_id, probation_end_date, probation_status")
           .eq("tenant_id", tenantId)
           .in("probation_status", ["on_probation", "extended"])
           .order("probation_end_date"),
@@ -493,7 +495,7 @@ export default function HRDashboard() {
                     <div key={emp.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
                       <div className="min-w-0">
                         <p className="font-semibold text-slate-900">{emp.full_name}</p>
-                        <p className="text-xs text-slate-500">{emp.designation || "Staff"}</p>
+                        <p className="text-xs text-slate-500">{titleLabel(emp, "Staff")}</p>
                         {emp.probation_end_date && (
                           <p className={`text-[10px] font-bold mt-1 ${daysLeft !== null && daysLeft <= 7 ? "text-rose-600" : "text-amber-600"}`}>
                             Ends: {new Date(emp.probation_end_date).toLocaleDateString()} ({daysLeft !== null ? (daysLeft < 0 ? `Overdue by ${Math.abs(daysLeft)} days` : `${daysLeft} days left`) : "Date passed"})
@@ -805,7 +807,7 @@ export default function HRDashboard() {
                     <div key={emp.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
                       <div className="min-w-0">
                         <p className="font-semibold text-slate-900 text-sm">{emp.full_name}</p>
-                        <p className="text-[11px] text-slate-500">{emp.designation || "Staff"}</p>
+                        <p className="text-[11px] text-slate-500">{titleLabel(emp, "Staff")}</p>
                         {emp.probation_end_date && (
                           <p className={`text-[10px] font-bold mt-1 ${daysLeft !== null && daysLeft <= 7 ? "text-rose-600" : "text-amber-600"}`}>
                             Ends: {new Date(emp.probation_end_date).toLocaleDateString()} ({daysLeft !== null ? (daysLeft < 0 ? `Overdue by ${Math.abs(daysLeft)} days` : `${daysLeft} days left`) : "Date passed"})

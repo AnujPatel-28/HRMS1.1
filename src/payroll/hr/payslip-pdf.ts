@@ -54,6 +54,13 @@ const moneyRow = (label: string, value: number, strong = false) => `
   </tr>
 `;
 
+/**
+ * The employee as the PAYSLIP records them. `department` and `designation` are carried explicitly
+ * rather than read off `Employee`, because both columns were dropped (06 §5 step 6) AND because a
+ * payslip must keep showing the department and title held when it was ISSUED, not the current ones.
+ */
+export type PayslipEmployee = Employee & { department: string | null; designation: string | null };
+
 export function buildPayslipStoragePath(tenantId: string, year: number, month: number, employeeId: string) {
   return `${tenantId}/${year}/${String(month).padStart(2, "0")}/${employeeId}.pdf`;
 }
@@ -99,7 +106,7 @@ function logoMarkup(tenant: Tenant) {
 
 export function buildPayslipTemplateHtml(
   tenant: Tenant,
-  employee: Employee,
+  employee: PayslipEmployee,
   slip: PayslipPdfData,
   month: number,
   year: number,
@@ -301,18 +308,18 @@ export function htmlToPdfBlob(html: string): Promise<Blob> {
   });
 }
 
-export function buildPayslipPreviewHtml(tenant: Tenant, employee: Employee, slip: PayslipPdfData, month: number, year: number) {
+export function buildPayslipPreviewHtml(tenant: Tenant, employee: PayslipEmployee, slip: PayslipPdfData, month: number, year: number) {
   return buildPayslipTemplateHtml(tenant, employee, slip, month, year);
 }
 
-export async function createPayslipPdfBlob(tenant: Tenant, employee: Employee, slip: PayslipPdfData, month: number, year: number) {
+export async function createPayslipPdfBlob(tenant: Tenant, employee: PayslipEmployee, slip: PayslipPdfData, month: number, year: number) {
   return htmlToPdfBlob(buildPayslipTemplateHtml(tenant, employee, slip, month, year));
 }
 
 export async function uploadPayslipPdf(
   storage: StorageClient,
   tenant: Tenant,
-  employee: Employee,
+  employee: PayslipEmployee,
   slip: PayslipPdfData,
   tenantId: string,
   month: number,

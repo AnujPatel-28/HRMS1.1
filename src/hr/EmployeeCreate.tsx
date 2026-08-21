@@ -7,6 +7,7 @@ import { insforge, db } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
 import { useOrgStructure } from "../hooks/useOrgStructure";
 import { validateManagerAssignment } from "../utils/managerCycleValidation";
+import { useJobTitleLabel } from "../contexts/OrgUnitsContext";
 
 
 interface FormState {
@@ -19,9 +20,7 @@ interface FormState {
   city: string;
   state: string;
   pincode: string;
-  department: string;
   org_unit_id: string;
-  designation: string;
   job_title_id: string;
   employee_code: string;
   date_of_joining: string;
@@ -54,9 +53,7 @@ const initialState: FormState = {
   city: "",
   state: "",
   pincode: "",
-  department: "sales",
   org_unit_id: "",
-  designation: "",
   job_title_id: "",
   employee_code: "",
   date_of_joining: "",
@@ -102,6 +99,7 @@ export default function EmployeeCreate() {
   const { tenantId } = useTenant();
   const { logAction } = useAuditLog();
   const { orgUnits, jobTitles, locations, employmentTypes } = useOrgStructure();
+  const titleLabel = useJobTitleLabel();
 
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<FormState>(initialState);
@@ -198,7 +196,7 @@ export default function EmployeeCreate() {
   useEffect(() => {
     if (tenantId) {
       db.from("employees")
-        .select("id, full_name, designation, profile_photo_url")
+        .select("id, full_name, job_title_id, profile_photo_url")
         .eq("tenant_id", tenantId)
         .eq("status", "active")
         .order("full_name")
@@ -222,7 +220,7 @@ export default function EmployeeCreate() {
       return Boolean(form.full_name.trim() && form.email.trim() && form.phone.trim() && authStep === "done");
     }
     if (step === 2) {
-      return Boolean(form.department && form.designation.trim() && form.employee_code.trim() && form.date_of_joining);
+      return Boolean(form.org_unit_id && form.job_title_id && form.employee_code.trim() && form.date_of_joining);
     }
     if (step === 3) {
       return Boolean(form.aadhaar_number.trim() && form.pan_number.trim());
@@ -351,21 +349,17 @@ export default function EmployeeCreate() {
   ], []);
 
   const departmentOptions = useMemo(() => {
-    const normalizedLegacy = new Set(legacyDepartmentOptions.map((option) => option.value));
+    // Every active unit, at any depth — see the note in Directory.tsx.
+    //
     const mappedOrgUnits = orgUnits
-      .filter((unit) => unit.unit_type === "department")
-      .map((unit) => {
-        const normalizedName = unit.name.trim().toLowerCase().replace(/\s+/g, "_");
-        return {
-          value: unit.id,
-          label: unit.name,
-          legacyValue: normalizedLegacy.has(normalizedName) ? normalizedName : "other",
-        };
-      });
+      .map((unit) => ({
+        value: unit.id,
+        label: unit.name,
+      }));
 
     return mappedOrgUnits.length > 0
       ? mappedOrgUnits
-      : legacyDepartmentOptions.map((option) => ({ ...option, legacyValue: option.value }));
+      : legacyDepartmentOptions;
   }, [legacyDepartmentOptions, orgUnits]);
 
   const employmentTypeOptions = useMemo(() => {
@@ -397,20 +391,18 @@ export default function EmployeeCreate() {
   };
 
   const handleDepartmentChange = (value: string) => {
-    const selected = departmentOptions.find((option) => option.value === value);
+    // employees.department was dropped (06 §5 step 6) — org_unit_id is now the only thing written.
     setForm((prev) => ({
       ...prev,
       org_unit_id: orgUnits.some((unit) => unit.id === value) ? value : "",
-      department: selected?.legacyValue ?? value,
     }));
   };
 
   const handleDesignationChange = (value: string) => {
-    const selected = jobTitles.find((jobTitle) => jobTitle.title.toLowerCase() === value.trim().toLowerCase());
+    // The select's value IS the job_title_id now; there is no text column left to mirror it into.
     setForm((prev) => ({
       ...prev,
-      designation: value,
-      job_title_id: selected?.id ?? "",
+      job_title_id: jobTitles.some((jobTitle) => jobTitle.id === value) ? value : "",
     }));
   };
 
@@ -550,9 +542,7 @@ export default function EmployeeCreate() {
                 city: empData.city || "",
                 state: empData.state || "",
                 pincode: empData.pincode || "",
-                department: empData.department || "sales",
                 org_unit_id: empData.org_unit_id || "",
-                designation: empData.designation || "",
                 job_title_id: empData.job_title_id || "",
                 employee_code: empData.employee_code || "",
                 date_of_joining: empData.date_of_joining || "",
@@ -702,9 +692,7 @@ export default function EmployeeCreate() {
           p_city: form.city.trim() || null,
           p_state: form.state.trim() || null,
           p_pincode: form.pincode.trim() || null,
-          p_department: form.department,
           p_org_unit_id: form.org_unit_id || null,
-          p_designation: form.designation.trim(),
           p_job_title_id: form.job_title_id || null,
           p_employee_code: form.employee_code.trim(),
           p_date_of_joining: form.date_of_joining || null,
@@ -749,9 +737,7 @@ export default function EmployeeCreate() {
             city: form.city.trim() || null,
             state: form.state.trim() || null,
             pincode: form.pincode.trim() || null,
-            department: form.department,
             org_unit_id: form.org_unit_id || null,
-            designation: form.designation.trim(),
             job_title_id: form.job_title_id || null,
             employee_code: form.employee_code.trim(),
             date_of_joining: form.date_of_joining,
@@ -1221,7 +1207,7 @@ export default function EmployeeCreate() {
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Department *</span>
                 <select
-                  value={form.org_unit_id || form.department}
+                  value={form.org_unit_id}
                   onChange={(event) => handleDepartmentChange(event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                   required
@@ -1233,22 +1219,25 @@ export default function EmployeeCreate() {
               </label>
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Designation *</span>
-                <input
-                  type="text"
-                  placeholder="e.g. Software Engineer"
-                  maxLength={100}
-                  list="job-title-options"
-                  value={form.designation}
+                {/* A picker, not free text. employees.designation was dropped (06 §5 step 6), so
+                    job_titles is the only place a title can live. Free text used to silently produce
+                    an employee with NO job_title_id whenever it did not exactly match a row. */}
+                <select
+                  value={form.job_title_id}
                   onChange={(event) => handleDesignationChange(event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                   required
-                />
-                <datalist id="job-title-options">
+                >
+                  <option value="">Select a job title…</option>
                   {jobTitles.map((jobTitle) => (
-                    <option key={jobTitle.id} value={jobTitle.title} />
+                    <option key={jobTitle.id} value={jobTitle.id}>{jobTitle.title}</option>
                   ))}
-                </datalist>
-
+                </select>
+                {jobTitles.length === 0 && (
+                  <span className="mt-1 block text-[11px] font-normal text-amber-600">
+                    No job titles exist yet — add them under Organisation Structure first.
+                  </span>
+                )}
               </label>
               <label className="text-sm">
                 <span className="mb-1 block text-slate-600">Employee Code *</span>
@@ -1368,7 +1357,7 @@ export default function EmployeeCreate() {
                     )}
                     <div>
                       <span className="font-semibold text-slate-900">{selectedManager.full_name}</span>
-                      <span className="text-slate-500"> — {selectedManager.designation || "No designation"}</span>
+                      <span className="text-slate-500"> — {titleLabel(selectedManager, "No designation")}</span>
                     </div>
                   </div>
                 )}
@@ -1400,7 +1389,7 @@ export default function EmployeeCreate() {
                           )}
                           <div className="min-w-0">
                             <p className="text-xs text-slate-900 truncate font-semibold">{emp.full_name}</p>
-                            <p className="text-[10px] text-slate-500 truncate">{emp.designation || "—"}</p>
+                            <p className="text-[10px] text-slate-500 truncate">{titleLabel(emp)}</p>
                           </div>
                         </button>
                       ))
@@ -1457,7 +1446,7 @@ export default function EmployeeCreate() {
                     )}
                     <div>
                       <span className="font-semibold text-slate-900">{selectedSecondaryManager.full_name}</span>
-                      <span className="text-slate-500"> — {selectedSecondaryManager.designation || "No designation"}</span>
+                      <span className="text-slate-500"> — {titleLabel(selectedSecondaryManager, "No designation")}</span>
                     </div>
                   </div>
                 )}
@@ -1489,7 +1478,7 @@ export default function EmployeeCreate() {
                           )}
                           <div className="min-w-0">
                             <p className="text-xs text-slate-900 truncate font-semibold">{emp.full_name}</p>
-                            <p className="text-[10px] text-slate-500 truncate">{emp.designation || "—"}</p>
+                            <p className="text-[10px] text-slate-500 truncate">{titleLabel(emp)}</p>
                           </div>
                         </button>
                       ))

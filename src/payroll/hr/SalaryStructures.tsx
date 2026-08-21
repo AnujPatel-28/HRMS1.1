@@ -7,6 +7,7 @@ import { Skeleton } from "../../shared/Skeleton";
 import { useToast } from "../../shared/ToastContext";
 import type { Employee } from "../../types";
 import { SalaryForm, calculateBreakdown, formatCurrency } from "./SalaryForm";
+import { useDepartmentLabel, useUnitNames } from "../../contexts/OrgUnitsContext";
 
 export type SalaryStructure = {
   id: string;
@@ -38,8 +39,8 @@ const employeeColumns = [
   "city",
   "state",
   "pincode",
-  "department",
-  "designation",
+  "org_unit_id",
+  "job_title_id",
   "employee_code",
   "date_of_joining",
   "employment_type",
@@ -75,6 +76,8 @@ function pickCurrentStructures(structures: SalaryStructure[]) {
 }
 
 export default function SalaryStructures() {
+  const deptLabel = useDepartmentLabel();
+  const unitNames = useUnitNames();
   const { tenantId } = useTenant();
   const { error: toastError } = useToast();
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -117,12 +120,14 @@ export default function SalaryStructures() {
   const configuredCount = employees.filter((employee) => currentStructures.has(employee.id)).length;
   const remainingCount = Math.max(employees.length - configuredCount, 0);
 
+  // Options are the org units actually represented in the roster: the VALUE is the unit id so the
+  // filter below matches on org_unit_id, the LABEL is the resolved name.
   const departments = useMemo(
     () =>
-      Array.from(new Set(employees.map((employee) => employee.department).filter(Boolean) as string[])).sort((a, b) =>
-        a.localeCompare(b),
-      ),
-    [employees],
+      Array.from(new Set(employees.map((employee) => employee.org_unit_id).filter(Boolean) as string[]))
+        .map((unitId) => ({ id: unitId, name: unitNames[unitId] ?? "—" }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [employees, unitNames],
   );
 
   const filteredEmployees = useMemo(() => {
@@ -130,7 +135,7 @@ export default function SalaryStructures() {
 
     return employees.filter((employee) => {
       const matchesSearch = normalizedSearch.length === 0 || employee.full_name.toLowerCase().includes(normalizedSearch);
-      const matchesDepartment = departmentFilter === "all" || employee.department === departmentFilter;
+      const matchesDepartment = departmentFilter === "all" || employee.org_unit_id === departmentFilter;
       return matchesSearch && matchesDepartment;
     });
   }, [departmentFilter, employees, search]);
@@ -188,8 +193,8 @@ export default function SalaryStructures() {
             >
               <option value="all">All departments</option>
               {departments.map((department) => (
-                <option key={department} value={department}>
-                  {department}
+                <option key={department.id} value={department.id}>
+                  {department.name}
                 </option>
               ))}
             </select>
@@ -254,7 +259,7 @@ export default function SalaryStructures() {
                           <div className="font-medium text-slate-900">{employee.full_name}</div>
                           <div className="text-xs text-slate-500">{employee.employee_code ?? employee.email}</div>
                         </td>
-                        <td className="px-4 py-3 capitalize text-slate-700">{employee.department ?? "Not assigned"}</td>
+                        <td className="px-4 py-3 capitalize text-slate-700">{deptLabel(employee, "Not assigned")}</td>
                         {structure && breakdown ? (
                           <>
                             <td className="px-4 py-3 font-medium text-slate-900">{formatCurrency(structure.ctc_annual)}</td>
