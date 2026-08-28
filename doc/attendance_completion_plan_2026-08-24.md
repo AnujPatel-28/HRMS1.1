@@ -270,10 +270,20 @@ The exception handler is gone, so an ingest failure now aborts the punch.
 
 ## Open
 
-- **Not verified:** the agent was killed by the monthly spend limit while investigating something
-  it intended to fix in a follow-up migration. What that was is unknown. Phase 3's stated
-  deliverables all verify, but its own assertion output was never reported. **Re-run Phase 3's
-  E-case battery before treating B6 as closed.**
+- **E-case battery: VERIFIED (2026-08-28).** Phase 3's F0-F10 assertions were extracted to
+  `tests.sql` and re-run against the live database, each `DO` block executed separately (10 of
+  the 12 blocks isolate cleanly; the battery is written so a pass exits normally and a failure
+  raises). Every block exited clean, and row counts were **identical before and after** —
+  attendance 13, events 3, runs 0, shifts 6, employee_shifts 9, leaves 3, inactive employees 0
+  — so the probes cleaned up after themselves and left no residue in production tables. This
+  closes the concern that Pass 2's absent / weekly_off / holiday branches and the watermark
+  interlock had never been exercised. **B6's assertions are proven.**
+- **STILL UNKNOWN — do not treat as dismissed:** the Phase 3 agent was killed by the spend limit
+  while investigating something it intended to fix in a follow-up migration. A passing battery
+  does **not** retire this. The battery only runs the assertions that agent *wrote*; whatever it
+  found afterward is by definition something those assertions do not cover. Reasoning "the known
+  checks pass, therefore the unknown finding was nothing" is backwards. Treat it as an open
+  thread to re-derive during B7, not as closed.
 - `approve_leave_request` still deducts whole days and ignores `leaves.day_fraction` (default
   `1.0`, so behaviour is unchanged). Making balance deduction fraction-aware is a separate
   release.
