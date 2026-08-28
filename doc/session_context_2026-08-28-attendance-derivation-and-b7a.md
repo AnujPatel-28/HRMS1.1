@@ -24,13 +24,39 @@ Data            attendance 13 | attendance_events 4 | derivation_runs 0 | shifts
             started. VERIFY BY MARKER STRING BEFORE DOING ANYTHING IN B7b.
 ```
 
-**First thing next session: find out why.** Before the push, `origin/main` was four commits behind
-local, so Vercel genuinely had nothing to build — that explained the stale bundle all session. That
-explanation is now spent. If the bundle is still `index-_OaU7Cj5.js`, the remaining candidates are:
-a build still running, a build that **failed**, or a Vercel project not actually wired to this repo
-and branch. Check the Vercel dashboard directly. **Do not start B7b until a marker string proves
-the new bundle is live** — B7b switches the punch path, and shipping it onto an unverified deploy is
-exactly the mistake the marker rule exists to prevent.
+**CAUSE IDENTIFIED from the Vercel dashboard (`vercel.com/talentmeshs-projects/hrms-1-1`).**
+Both pushed commits reached Vercel and created Production deployments on `main`:
+
+```
+4901ef4  docs: session handoff -- attendance derivation built, B7a shipped   Production  BLOCKED
+1d2ad2e  fix(attendance): sync is_late from derived late_entry               Production  BLOCKED
+24ea41a  docs: session handoff -- module composition and attendance B2/B3/B4 Production  READY  <- still live
+```
+
+**Status is `Blocked`, not `Error` and not `Building`.** So this is NOT a build failure, NOT a
+misconfigured project, and NOT a wiring problem — **Vercel is correctly connected to this repo and
+does deploy `main` to Production.** Every deployment through `24ea41a` (Aug 21) is `Ready`, and
+`24ea41a` is still the live Production deployment, which is exactly the stale bundle the marker
+check kept measuring.
+
+`Blocked` is an **account/plan-level gate**, not a code problem. The project is on the **Hobby**
+plan. **Open the blocked deployment in the dashboard and read the stated reason** — do not guess it;
+the usual causes are plan deployment limits or a usage/spend cap, and the dashboard names the actual
+one. **This is a human action; nothing in the repo will fix it.**
+
+**Consequence: production is running code from Aug 21 while the database is at `20260828120001`.**
+The DB is ahead of the frontend, which is the SAFE direction (every server change this session was
+additive, and the legacy punch path was explicitly verified still working). But it is now a
+persistent state rather than a transient one, so treat it as a standing condition, not a race.
+
+**Do not start B7b until the block is cleared and a marker string proves the new bundle is live.**
+B7b switches the punch path; shipping it onto an undeployed frontend is precisely the mistake the
+marker rule exists to prevent.
+
+**Unrelated repo-hygiene note spotted at the same time:** GitHub's **default branch is
+`updateSuggestion`**, not `main`. Production deploys from `main`, so this is not currently harmful,
+but the default branch is the retired one — a PR opened without changing the base will target the
+wrong branch. Worth fixing when convenient.
 
 ### The plan documents are the map
 
