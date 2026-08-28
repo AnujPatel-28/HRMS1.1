@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Clock, Pencil, Plus, Save, Search, Trash2, Users } from "lucide-react";
+import { AlertTriangle, ChevronDown, Clock, Pencil, Plus, Save, Search, Trash2, Users } from "lucide-react";
 import { db } from "../insforge/client";
 import { useTenant } from "../contexts/TenantContext";
 import type { Employee, EmployeeShift, Shift } from "../types";
@@ -21,6 +21,18 @@ type ShiftFormState = {
   punch_in_opens_minutes_before: string;
   late_mark_grace_override: string;
   is_default: boolean;
+  // §5.3 policy fields (Phase 0) -- consumed by the derivation processor once it ships.
+  working_hours_threshold_for_absent: string;
+  working_hours_threshold_for_half_day: string;
+  determine_check_in_and_check_out: "alternating" | "strict_log_type";
+  working_hours_calculation_based_on: "first_last" | "every_pair";
+  enable_late_entry_marking: boolean;
+  late_entry_grace_minutes: string;
+  enable_early_exit_marking: boolean;
+  early_exit_grace_minutes: string;
+  enable_auto_derivation: boolean;
+  mark_attendance_on_holidays: boolean;
+  allowed_punch_sources: string[];
 };
 
 type EmployeeAssignmentRow = {
@@ -40,6 +52,24 @@ const DAY_OPTIONS = [
   { value: 6, label: "Saturday" },
 ];
 
+const PUNCH_SOURCE_OPTIONS = [
+  { value: "app", label: "App (GPS + selfie)" },
+  { value: "device", label: "Biometric / RFID device" },
+  { value: "kiosk", label: "Shared kiosk" },
+  { value: "manual", label: "HR manual entry" },
+  { value: "import", label: "CSV / Excel import" },
+];
+
+const CHECK_IN_OUT_OPTIONS = [
+  { value: "alternating", label: "Alternating (device doesn't report direction)" },
+  { value: "strict_log_type", label: "Strict log type (device reports IN/OUT)" },
+];
+
+const WORKING_HOURS_BASIS_OPTIONS = [
+  { value: "first_last", label: "First check-in to last check-out" },
+  { value: "every_pair", label: "Every check-in/check-out pair" },
+];
+
 const defaultShiftForm: ShiftFormState = {
   name: "",
   start_time: "09:00",
@@ -49,6 +79,17 @@ const defaultShiftForm: ShiftFormState = {
   punch_in_opens_minutes_before: "60",
   late_mark_grace_override: "",
   is_default: false,
+  working_hours_threshold_for_absent: "0",
+  working_hours_threshold_for_half_day: "0",
+  determine_check_in_and_check_out: "alternating",
+  working_hours_calculation_based_on: "first_last",
+  enable_late_entry_marking: true,
+  late_entry_grace_minutes: "10",
+  enable_early_exit_marking: false,
+  early_exit_grace_minutes: "10",
+  enable_auto_derivation: true,
+  mark_attendance_on_holidays: false,
+  allowed_punch_sources: ["app", "device", "kiosk", "manual", "import"],
 };
 
 function formatTimeValue(value: string | null | undefined) {
@@ -74,6 +115,19 @@ function toShiftForm(shift: Shift): ShiftFormState {
     punch_in_opens_minutes_before: String(shift.punch_in_opens_minutes_before ?? 60),
     late_mark_grace_override: shift.late_mark_grace_override ? String(shift.late_mark_grace_override) : "",
     is_default: Boolean(shift.is_default),
+    working_hours_threshold_for_absent: String(shift.working_hours_threshold_for_absent ?? 0),
+    working_hours_threshold_for_half_day: String(shift.working_hours_threshold_for_half_day ?? 0),
+    determine_check_in_and_check_out: shift.determine_check_in_and_check_out ?? "alternating",
+    working_hours_calculation_based_on: shift.working_hours_calculation_based_on ?? "first_last",
+    enable_late_entry_marking: shift.enable_late_entry_marking ?? true,
+    late_entry_grace_minutes: String(shift.late_entry_grace_minutes ?? 10),
+    enable_early_exit_marking: shift.enable_early_exit_marking ?? false,
+    early_exit_grace_minutes: String(shift.early_exit_grace_minutes ?? 10),
+    enable_auto_derivation: shift.enable_auto_derivation ?? true,
+    mark_attendance_on_holidays: shift.mark_attendance_on_holidays ?? false,
+    allowed_punch_sources: Array.isArray(shift.allowed_punch_sources)
+      ? shift.allowed_punch_sources
+      : ["app", "device", "kiosk", "manual", "import"],
   };
 }
 
@@ -86,6 +140,19 @@ function normalizeShift(raw: Shift): Shift {
     punch_in_opens_minutes_before: Number(raw.punch_in_opens_minutes_before ?? 60),
     late_mark_grace_override: raw.late_mark_grace_override ? Number(raw.late_mark_grace_override) : null,
     working_days: Array.isArray(raw.working_days) ? raw.working_days.map(Number) : [1, 2, 3, 4, 5, 6],
+    working_hours_threshold_for_absent: Number(raw.working_hours_threshold_for_absent ?? 0),
+    working_hours_threshold_for_half_day: Number(raw.working_hours_threshold_for_half_day ?? 0),
+    determine_check_in_and_check_out: raw.determine_check_in_and_check_out ?? "alternating",
+    working_hours_calculation_based_on: raw.working_hours_calculation_based_on ?? "first_last",
+    enable_late_entry_marking: raw.enable_late_entry_marking ?? true,
+    late_entry_grace_minutes: Number(raw.late_entry_grace_minutes ?? 10),
+    enable_early_exit_marking: raw.enable_early_exit_marking ?? false,
+    early_exit_grace_minutes: Number(raw.early_exit_grace_minutes ?? 10),
+    enable_auto_derivation: raw.enable_auto_derivation ?? true,
+    mark_attendance_on_holidays: raw.mark_attendance_on_holidays ?? false,
+    allowed_punch_sources: Array.isArray(raw.allowed_punch_sources)
+      ? raw.allowed_punch_sources
+      : ["app", "device", "kiosk", "manual", "import"],
   };
 }
 
@@ -108,6 +175,8 @@ function ShiftFormFields({
   form: ShiftFormState;
   onChange: (next: ShiftFormState) => void;
 }) {
+  const [showPolicy, setShowPolicy] = useState(false);
+
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <label className="block">
@@ -212,6 +281,149 @@ function ShiftFormFields({
           <span className="mt-1 block text-xs text-slate-500">Only one shift can be the default. Setting this as default will remove default from the current default shift.</span>
         </span>
       </label>
+
+      <div className="md:col-span-2">
+        <button
+          type="button"
+          onClick={() => setShowPolicy((current) => !current)}
+          className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+        >
+          <span>Attendance derivation policy (advanced)</span>
+          <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${showPolicy ? "rotate-180" : ""}`} />
+        </button>
+        {showPolicy ? (
+          <div className="mt-3 grid gap-4 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-2">
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-600">Absent threshold (hours worked)</span>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={form.working_hours_threshold_for_absent}
+                onChange={(event) => onChange({ ...form, working_hours_threshold_for_absent: event.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
+                placeholder="0"
+              />
+              <span className="mt-1 block text-xs text-slate-500">Below this many hours worked, mark Absent. 0 disables hours-based absence.</span>
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-600">Half-day threshold (hours worked)</span>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={form.working_hours_threshold_for_half_day}
+                onChange={(event) => onChange({ ...form, working_hours_threshold_for_half_day: event.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
+                placeholder="0"
+              />
+              <span className="mt-1 block text-xs text-slate-500">Below this many hours worked (and at/above the absent threshold), mark Half Day. 0 disables hours-based half-day.</span>
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-600">Check-in/out direction from device logs</span>
+              <SelectDropdown
+                value={form.determine_check_in_and_check_out}
+                onChange={(value) => onChange({ ...form, determine_check_in_and_check_out: value as ShiftFormState["determine_check_in_and_check_out"] })}
+                options={CHECK_IN_OUT_OPTIONS}
+                containerClassName="w-full"
+                triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-600">Working hours calculation</span>
+              <SelectDropdown
+                value={form.working_hours_calculation_based_on}
+                onChange={(value) => onChange({ ...form, working_hours_calculation_based_on: value as ShiftFormState["working_hours_calculation_based_on"] })}
+                options={WORKING_HOURS_BASIS_OPTIONS}
+                containerClassName="w-full"
+                triggerClassName="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-shadow hover:bg-slate-50 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              />
+            </label>
+            <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <input
+                type="checkbox"
+                checked={form.enable_late_entry_marking}
+                onChange={(event) => onChange({ ...form, enable_late_entry_marking: event.target.checked })}
+                className="mt-1 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+              />
+              <span className="text-sm text-slate-700">Flag late entries</span>
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-600">Late entry grace (minutes)</span>
+              <input
+                type="number"
+                min="0"
+                value={form.late_entry_grace_minutes}
+                onChange={(event) => onChange({ ...form, late_entry_grace_minutes: event.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
+                placeholder="10"
+              />
+            </label>
+            <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <input
+                type="checkbox"
+                checked={form.enable_early_exit_marking}
+                onChange={(event) => onChange({ ...form, enable_early_exit_marking: event.target.checked })}
+                className="mt-1 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+              />
+              <span className="text-sm text-slate-700">Flag early exits</span>
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-600">Early exit grace (minutes)</span>
+              <input
+                type="number"
+                min="0"
+                value={form.early_exit_grace_minutes}
+                onChange={(event) => onChange({ ...form, early_exit_grace_minutes: event.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
+                placeholder="10"
+              />
+            </label>
+            <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <input
+                type="checkbox"
+                checked={form.enable_auto_derivation}
+                onChange={(event) => onChange({ ...form, enable_auto_derivation: event.target.checked })}
+                className="mt-1 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+              />
+              <span className="text-sm text-slate-700">Include this shift in automatic attendance derivation</span>
+            </label>
+            <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <input
+                type="checkbox"
+                checked={form.mark_attendance_on_holidays}
+                onChange={(event) => onChange({ ...form, mark_attendance_on_holidays: event.target.checked })}
+                className="mt-1 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+              />
+              <span className="text-sm text-slate-700">Mark attendance for employees who work on a holiday</span>
+            </label>
+            <div className="md:col-span-2">
+              <span className="mb-2 block text-xs font-semibold text-slate-600">Allowed punch sources</span>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {PUNCH_SOURCE_OPTIONS.map((source) => {
+                  const checked = form.allowed_punch_sources.includes(source.value);
+                  return (
+                    <label key={source.value} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) => {
+                          const nextSources = event.target.checked
+                            ? [...form.allowed_punch_sources, source.value]
+                            : form.allowed_punch_sources.filter((value) => value !== source.value);
+                          onChange({ ...form, allowed_punch_sources: nextSources });
+                        }}
+                        className="rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+                      />
+                      {source.label}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -348,6 +560,17 @@ export default function ShiftManagement() {
         p_punch_in_opens_minutes_before: Number(form.punch_in_opens_minutes_before || 60),
         p_late_mark_grace_override: form.late_mark_grace_override ? Number(form.late_mark_grace_override) : null,
         p_is_default: form.is_default,
+        p_working_hours_threshold_for_absent: Number(form.working_hours_threshold_for_absent || 0),
+        p_working_hours_threshold_for_half_day: Number(form.working_hours_threshold_for_half_day || 0),
+        p_determine_check_in_and_check_out: form.determine_check_in_and_check_out,
+        p_working_hours_calculation_based_on: form.working_hours_calculation_based_on,
+        p_enable_late_entry_marking: form.enable_late_entry_marking,
+        p_late_entry_grace_minutes: Number(form.late_entry_grace_minutes || 10),
+        p_enable_early_exit_marking: form.enable_early_exit_marking,
+        p_early_exit_grace_minutes: Number(form.early_exit_grace_minutes || 10),
+        p_enable_auto_derivation: form.enable_auto_derivation,
+        p_mark_attendance_on_holidays: form.mark_attendance_on_holidays,
+        p_allowed_punch_sources: form.allowed_punch_sources,
       });
       if (saveError) throw saveError;
       success(shiftId ? "Shift updated." : "Shift created.");

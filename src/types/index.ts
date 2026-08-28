@@ -298,6 +298,20 @@ export interface Shift {
   is_active?: boolean;
   created_at?: string;
   updated_at?: string;
+  // §5.3 policy fields (Phase 0, 20260824100000) -- optional so rows fetched before this
+  // migration still type-check; normalizeShift() in ShiftManagement.tsx fills defaults.
+  working_hours_threshold_for_absent?: number;
+  working_hours_threshold_for_half_day?: number;
+  determine_check_in_and_check_out?: "alternating" | "strict_log_type";
+  working_hours_calculation_based_on?: "first_last" | "every_pair";
+  enable_late_entry_marking?: boolean;
+  late_entry_grace_minutes?: number;
+  enable_early_exit_marking?: boolean;
+  early_exit_grace_minutes?: number;
+  enable_auto_derivation?: boolean;
+  mark_attendance_on_holidays?: boolean;
+  allowed_punch_sources?: string[];
+  crosses_midnight?: boolean;
 }
 
 export interface EmployeeShift {
