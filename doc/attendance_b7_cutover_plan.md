@@ -107,6 +107,22 @@ derivation for the duration of B7 so the contract's output is unchanged; the con
 emitting the same field. Retiring `is_late` is then a payroll-era decision, made when payroll is
 actually designed, rather than a side effect of a frontend cutover. State it; do not drift into it.
 
+**DECIDED AND SHIPPED (2026-08-28, `20260828120000`).** Implemented exactly as recommended.
+Investigating it surfaced a **live latent bug**: `attendance_derive_pass1` wrote `late_entry` and
+never `is_late`, while `payroll_period_input` counts late marks as
+`WHERE a.is_late AND a.status NOT IN ('absent','half_day')`. Every derived row would therefore
+have contributed **0** to `late_mark_count` however late the employee was — silently, no error.
+Same class as the ₹0 payslips: a value that should be N reads as 0. Latent only because
+derivation had not yet been run in production. Pass 1 now writes both, on the INSERT and the
+UPDATE path; `payroll_period_input` is byte-identical and untouched.
+
+**STILL OPEN — the other `is_late` writers.** `hr_update_attendance` and
+`hr_approve_attendance_correction` write `is_late` from their **own** cutoff-time calculation
+(`shift.start_time` + `tenant_settings.late_mark_grace_minutes`) and never touch `late_entry`.
+So an HR correction on a derived row leaves `late_entry` stale while `is_late` moves — the same
+two-sources-of-truth split, just relocated. Reconcile in B7b/B7c. Recorded on the column comments
+(`20260828120001`) so it is visible from the schema, not only from this document.
+
 ### 3b. C6 is a class of bug, not one line
 
 `TODAY` in `PunchInOut.tsx` is the dangerous instance — it is the one where a wrong day **writes
