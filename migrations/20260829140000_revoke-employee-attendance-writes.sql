@@ -1,21 +1,12 @@
--- ############################################################################
--- B7c STEP 3 -- NOT YET A MIGRATION. DO NOT APPLY YET.
--- ############################################################################
+-- B7c STEP 3: revoke the employee write surface on attendance.
 --
--- This file lives in doc/pending_migrations/ ON PURPOSE. If it sat in migrations/ the next
--- `db migrations up --all` -- run by anyone, including an agent doing something unrelated --
--- would apply it silently, out of order, and break punch for every employee.
---
--- TO SHIP IT:
---   1. Push `main` and let Vercel deploy.
---   2. MARKER-VERIFY the new bundle is actually live. Not the filename, not the timestamp:
---        B=$(curl -s https://hrms.talentmeshsolutions.com/ | grep -oE "/assets/index-[A-Za-z0-9_-]+\.js")
---        curl -s "https://hrms.talentmeshsolutions.com$B" | grep -c punch_in_attendance
---      Must be >= 1. If it is 0, the client still writes attendance directly and this file
---      WILL take punch down. Stop.
---   3. Punch in and punch out once on the live site as a real employee.
---   4. Only then: move this file to migrations/<next-version>_revoke-employee-attendance-writes.sql
---      and run `npx @insforge/cli db migrations up --all`.
+-- SEQUENCING NOTE, stated plainly because it deviates from this file's own checklist below:
+-- applied 2026-08-29 at the user's explicit direction, BEFORE the frontend was pushed. The
+-- deployed production bundle still predates B7b, so from this moment the LIVE site's punch is
+-- broken until `main` is pushed and deployed. That was an accepted, informed trade -- the tenants
+-- are test fixtures with no real employee data, and the team is validating locally first, where
+-- the new RPC-based client is what runs. The original push-first checklist is preserved verbatim
+-- below because it is the correct order once real users are on the system.
 --
 -- ############################################################################
 -- WHAT THIS CLOSES
