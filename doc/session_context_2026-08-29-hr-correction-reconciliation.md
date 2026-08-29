@@ -336,3 +336,65 @@ cannot use `hr_run_attendance_derivation` and must go through the `project_admin
 3. **B7c** per the brief above — punch-out evidence into the RPC, ship, verify, *then* narrow the
    write surface.
 4. B7d, B1, B9. B8 still blocked on which device/kiosk hardware tenants will use.
+
+---
+
+## 9. B7c step 1 — no client path writes `attendance` any more
+
+Applied head is now **`20260829130000`**.
+
+| Migration | What |
+|---|---|
+| `20260829120000` | `punch_out_attendance` persists the evidence columns; client `.update()` after punch-out deleted |
+| `20260829130000` | punch-out payroll lock gated behind the payroll module; `search_path` pinned; `mark_attendance_selfie_missing` replaces the last client write |
+
+**Module-independence bug found and fixed.** `punch_out_attendance` read
+`tenant_settings.payroll_lock_date` **unconditionally**, while `punch_in_attendance` gates the same
+check behind `tenant_has_module_for(tenant,'payroll')`. An attendance-only tenant carrying a stray
+`payroll_lock_date` could punch IN and then never punch OUT. ⚠️ **A coarse "does the body mention
+`tenant_has_module_for`" check says yes and is WRONG** — the deployed body already mentioned it, for
+the *tasks* gate at a different line. The call has to be read in place.
+
+**The last client write was not in either punch path.** `handleSelfieUpload` wrote
+`location_status` directly, from a helper shared by both punch directions, so neither punch RPC
+could ever cover it — and it fires only on a storage failure whose handler already just
+`console.error`s, so it would have broken silently under step 3.
+`mark_attendance_selfie_missing` replaces it: one column, one constant, on a row the caller must
+own, with ownership/tenant/module asserted in code because `SECURITY DEFINER` bypasses RLS.
+
+**`punch_out_attendance` had no fixed `search_path`** despite being `SECURITY DEFINER` and
+executable by every authenticated user. Now pinned to `public` — every unqualified name in it
+already resolved there, so this pins behaviour rather than changing it.
+
+### A probe of mine failed correctly, and the lesson generalises
+The first apply of `20260829130000` **failed on its own assertion**: `REGRESSION: an evidence column
+write was lost`. Nothing was lost — the SET clause is *column-aligned*, so `location_confidence   =
+p_confidence` did not match a whitespace-exact `location_confidence = p_confidence`. Assertions
+against a function body must **collapse whitespace as well as strip comments**. Two ways to write a
+false assertion about the same body, now both known.
+
+### Dead code found, deliberately not deleted
+`src/hooks/useAttendance.ts` still contains the old direct `insert` + `update` on `attendance`.
+It has **zero importers** — dead. Left in place per the repo rule on unrelated dead code, but it is
+a trap: it is the exact pattern B7c retires, and a future dev copying from it would reintroduce the
+hole. Worth deleting as a deliberate one-line decision.
+
+## 10. B7c step 3 is WRITTEN but NOT APPLIED — and not in `migrations/`
+
+`doc/pending_migrations/B7c_step3_revoke_employee_attendance_writes.sql` revokes
+`INSERT, UPDATE, DELETE` on `attendance` from `authenticated` and `anon` and drops
+`attendance_insert_self` / `attendance_update_self`.
+
+**It is deliberately NOT in `migrations/`.** Sitting there, the next `db migrations up --all` — run
+by anyone, for any unrelated reason — would apply it silently and take punch down for every
+employee, because the deployed bundle still predates B7b. The file carries its own ship checklist.
+
+Safety was verified, not assumed:
+- An exhaustive scan of every `.ts`/`.tsx` in `src/` for `.from("attendance")` followed by a write
+  verb returns exactly **two** hits, both in the dead `useAttendance.ts`.
+- A scan for `SECURITY INVOKER` functions writing `attendance` returns **zero** — every writer is
+  `SECURITY DEFINER` and runs as the owner, so a table-grant revoke cannot break one.
+- HR is also `authenticated` and loses nothing: every HR write is a definer RPC.
+
+**Ship order: push → marker-verify (`grep -c punch_in_attendance` on the live bundle, must be ≥ 1)
+→ punch once on the live site → then move the file into `migrations/` and apply.**
