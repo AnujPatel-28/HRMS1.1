@@ -724,8 +724,8 @@ export default function PunchInOut() {
     lng: number | null,
     accuracy: number | null,
     status: string | null,
-    _confidence: string | null,
-    _remoteExceptionId: string | null,
+    confidence: string | null,
+    remoteExceptionId: string | null,
     verificationSnapshot: Record<string, any>,
     selfieBlob: Blob | null
   ) => {
@@ -737,6 +737,11 @@ export default function PunchInOut() {
 
     // Server-authoritative punch-in (B7b): business date, lateness and half-day status
     // are all derived server-side. The client no longer computes or writes any of them.
+    // The evidence columns go through the RPC too (20260829110000) rather than a follow-up
+    // client UPDATE, which would re-open the direct write path B7c exists to revoke.
+    // p_ip is null: the pre-B7b client looked the IP up from a third-party service on the
+    // punch path, and punch-out never recorded one either. Left for a server-side or
+    // device-ingest source rather than re-adding an external call to the punch path.
     const { data, error: dbErr } = await db.rpc("punch_in_attendance", {
       p_tenant_id: tenantId,
       p_employee_id: employee.id,
@@ -744,6 +749,10 @@ export default function PunchInOut() {
       p_lng: lng,
       p_acc: accuracy,
       p_loc_status: status === "selfie_missing" ? "selfie_missing" : status,
+      p_ip: null,
+      p_confidence: confidence,
+      p_remote_exception_id: remoteExceptionId,
+      p_verification_snapshot: verificationSnapshot,
     });
 
     if (dbErr) throw dbErr;
