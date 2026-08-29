@@ -15,7 +15,7 @@ import { formatLocalDate } from "../utils/date";
 import { BLOCKING_TASK_STATUSES } from "../utils/taskConstants";
 
 type AttendanceWithLocation = Attendance & {
-  late_entry?: boolean | null;
+  late_entry?: boolean;
   early_exit?: boolean | null;
   in_time?: string | null;
   out_time?: string | null;
@@ -420,7 +420,7 @@ export default function PunchInOut() {
       // late_entry is the derived authority; is_late is what rows written before derivation ran
       // still carry. Prefer the authority, fall back so an underived late day is not shown as
       // on-time. The client never WRITES either column (D12).
-      if (!(attendance?.late_entry ?? attendance?.is_late) || !employee?.id || !tenantId) {
+      if (!(attendance?.late_entry || attendance?.is_late) || !employee?.id || !tenantId) {
         setLateMarkSummary(null);
         return;
       }
@@ -1203,7 +1203,7 @@ export default function PunchInOut() {
           </div>
         </div>
 
-        {(attendance.late_entry ?? attendance.is_late) ? (
+        {(attendance.late_entry || attendance.is_late) ? (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             <p className="font-semibold">Today's punch-in was marked as late.</p>
             <p className="mt-1">
