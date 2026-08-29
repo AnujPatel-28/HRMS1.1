@@ -11,7 +11,7 @@ TalentMesh HRM is a modern, full-stack Human Resource Management platform design
 - **Backend & Auth**: [InsForge SDK](https://insforge.com)
 - **Routing**: React Router DOM v6
 
-## ✨ Key Features.
+## ✨ Key Features
 
 ### 🏢 HR Administration Portal
 - **Workforce Dashboard**: High-level overview of team status, attendance, and pending tasks.
