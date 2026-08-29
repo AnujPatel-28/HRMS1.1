@@ -74,6 +74,11 @@ in this session and the last was additive or corrective, never restrictive.
 `derivation_source` to NULL for one employee-day. HR-gated, payroll-lock-aware, audited as
 `attendance.unlocked`, returns the row count. **Not wired to any UI.**
 
+⚠️ **It is day-scoped, not row-scoped.** On a multi-shift day it unlocks *every* row for that
+employee-day, including rows locked by a different HR action than the one being undone. Nothing
+calls it yet so nothing is at risk today, but whoever wires a control to it should either surface
+that blast radius or add a shift-scoped variant.
+
 Locking without an unlock is a one-way door: because nothing had ever written `is_locked`, nothing
 could clear it either, so a single HR punch-time tweak would have permanently excluded that
 employee-day from re-derivation after a backdated event (E17) or a month replay (E45) — the two
@@ -91,8 +96,34 @@ all.** The migration is honest about this in its header. What was actually prove
 | | Proven |
 |---|---|
 | **Structural** (comment-stripped source scan, re-run independently against the live DB after apply) | Both functions write `late_entry` beside `is_late` on INSERT and UPDATE; both set `is_locked = true`; both carry the ambiguity guard; both still gate on `assert_hr_for_tenant`; exactly one overload each; ACL unchanged at `project_admin=X, authenticated=X` with no `anon` |
-| **Behavioural** | A row shaped as the HR paths now write it (`is_locked`, `derivation_source = manual`) is **skipped** by the deployed `attendance_derive_pass1` — `rows_skipped = 1`, row survives unchanged. A two-row employee-day is **constructible**, so the ambiguity guard guards a real condition |
+| **Behavioural, Pass 1 only** | A row shaped as the HR paths now write it (`is_locked`, `derivation_source = manual`) is **skipped** by the deployed `attendance_derive_pass1` — `rows_skipped = 1`, row survives unchanged. A two-row employee-day is **constructible**, so the ambiguity guard guards a real condition |
+| **Source-level, Pass 2** | See the correction below. `attendance_derive_pass2` never updates an `attendance` row at all |
 | **Population** | attendance 13 → 13, attendance_events 4 → 4, derivation_runs 0 → 0. Every probe rolled back cleanly |
+
+### ⚠️ Correction to the migration header — `attendance_derive_pass2` and `is_locked`
+
+`20260829100000`'s header states that Pass 1 and Pass 2 both reference `is_locked` "purely as a
+skip-guard." **That is wrong about Pass 2, and it is wrong because of this repo's own most-repeated
+trap: the scan that produced it was not comment-stripped.** `attendance_derive_pass2` mentions
+`is_locked` only in a *comment*; the executable body never reads it. The migration is applied and
+forward-only, so the file is left exactly as applied and the correction lives here.
+
+**The conclusion the migration acted on is unchanged and still correct** — nothing wrote
+`is_locked`, and the fix stands. But the reason an HR row is safe from Pass 2 is different from the
+reason it is safe from Pass 1, and the next session needs the real one:
+
+- **Pass 1** consults `is_locked` explicitly: `IF FOUND AND v_existing_locked THEN CONTINUE`.
+- **Pass 2 has exactly two write statements** (verified on the comment-stripped deployed body): one
+  `INSERT INTO public.attendance`, guarded by `IF EXISTS (… tenant_id, employee_id, date …) THEN
+  CONTINUE`, and one `UPDATE public.attendance_derivation_runs`. **It never UPDATEs or DELETEs an
+  `attendance` row.** So an HR-written row is protected from Pass 2 by the existence check, not by
+  the lock — including the common HR shape Pass 1 can never see (absent/on_leave, no punch times,
+  no events, so no event group exists to group).
+
+Two consequences worth carrying: Pass 2's existence check **ignores `shift_id`**, so once any row
+exists for an employee-day it creates no per-shift completeness rows for that day either; and if
+Pass 2 ever gains an UPDATE path, it will need the `is_locked` arm that its comment already implies
+it has.
 
 **NOT proven, carried forward:** calling either RPC over HTTP with a real HR JWT and watching the
 row change. This is the identical gap that leaves **C3** open, and it wants the same fixture: an HR
@@ -122,6 +153,18 @@ tools, not with `cat <<EOF`.
 
 **`assert_date_range_unlocked` reads `tenant_settings.payroll_lock_date` and `payroll_runs`, not
 `attendance.is_locked`.** Two different things called "locked" on the same table's code path.
+
+**The comment trap bites audits, not just assertions — and it bit this session.** The repo already
+knows "comments are part of `pg_get_functiondef`," but that rule was only ever applied to migration
+*assertions*. The scan that surveyed which functions reference `is_locked` was **not**
+comment-stripped, so `attendance_derive_pass2` was recorded as a skip-guard when it only mentions
+the column in a comment. The wrong claim reached a committed migration header before review caught
+it. **Strip comments in every scan whose output you will state as a fact, not only in assertions.**
+
+**"Proven for one pass" is not "proven for the processor."** Pass 1 and Pass 2 have different
+shapes — Pass 1 runs over event groups, Pass 2 over assigned employees — so the row shapes they can
+even see are different. A probe against Pass 1 says nothing about the HR shape (no punch, no events)
+that only Pass 2 encounters. Name the pass in every claim.
 
 ---
 
