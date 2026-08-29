@@ -398,3 +398,47 @@ Safety was verified, not assumed:
 
 **Ship order: push → marker-verify (`grep -c punch_in_attendance` on the live bundle, must be ≥ 1)
 → punch once on the live site → then move the file into `migrations/` and apply.**
+
+---
+
+## 11. B7c step 3 APPLIED, and a critical finding it exposed
+
+Applied head **`20260829150000`**. Policy drift now **34 of 272** (two self-write policies dropped;
+untracked count unmoved).
+
+| Migration | What |
+|---|---|
+| `20260829140000` | B7c step 3 — employee write surface on `attendance` revoked |
+| `20260829150000` | **CRITICAL** — `TRUNCATE`/`TRIGGER` revoked from `authenticated` and `anon` on every public relation |
+
+**Step 3 was applied BEFORE the frontend push**, at the user's explicit direction. The deployed
+bundle predates B7b, so the live site's punch is broken until `main` ships. Accepted trade: the
+tenants are test fixtures, and the team validates locally where the new RPC client runs. Recorded
+in the migration header so it is not mistaken for the recommended order.
+
+### RLS does not apply to TRUNCATE
+
+Narrowing attendance's grants exposed what was left behind on the table:
+`REFERENCES, SELECT, TRIGGER, TRUNCATE` — for **both** `authenticated` and `anon`, on **50 of 68
+public tables**, including `tenants`, `employees`, `payslips`, `payroll_runs`, `salary_structures`.
+
+Policies filter rows for SELECT/INSERT/UPDATE/DELETE. **`TRUNCATE` is governed solely by the
+privilege** and ignores every policy, tenant fence and `USING` clause. `anon` is the role behind the
+anon key, which ships in the public JS bundle *by design*, on the premise that RLS makes that safe.
+That premise did not hold here: anyone reading the bundle could have destroyed every tenant's data
+with one statement. Unauthenticated, irreversible, whole-database.
+
+The grants came from the **platform's default privileges**, not from any migration in this repo —
+which is why 50 tables shared one grant list. So the fix revokes on every relation *and* alters the
+default privileges, or the next `create table` silently reinherits it.
+
+Two lessons worth carrying:
+- **"RLS is on" says nothing about `TRUNCATE` or `TRIGGER`.** Audit
+  `information_schema.role_table_grants` for both, held by `anon`/`authenticated`. `TRIGGER` is an
+  escalation primitive — it permits attaching a trigger to another tenant's writes.
+- **Loop over `relkind IN ('r','p','v','m','f')`, not `'r'`.** The first run missed two views and
+  its own assertion caught it. TRUNCATE is meaningless on a view; TRIGGER is not.
+
+### Attendance write surface, final state
+`authenticated` on `public.attendance`: `SELECT` only. Every write — employee, HR, and derivation —
+goes through a `SECURITY DEFINER` RPC.
