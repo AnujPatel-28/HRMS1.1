@@ -14,11 +14,11 @@ import { useEmployeeShift } from "../hooks/useEmployeeShift";
 import { formatLocalDate } from "../utils/date";
 import { BLOCKING_TASK_STATUSES } from "../utils/taskConstants";
 
-// Business calendar date — uses local timezone to avoid UTC date-shift bugs.
-// See src/utils/date.ts for full explanation.
-const TODAY = formatLocalDate(new Date());
-
 type AttendanceWithLocation = Attendance & {
+  late_entry?: boolean | null;
+  early_exit?: boolean | null;
+  in_time?: string | null;
+  out_time?: string | null;
   is_late?: boolean | null;
   punch_in_lat?: number | string | null;
   punch_in_lng?: number | string | null;
@@ -101,6 +101,11 @@ function formatHours(hours: number | null | undefined) {
   return `${hours.toFixed(2)}h`;
 }
 
+function formatPunchFailureReason(reason: string | null | undefined) {
+  if (!reason) return "please try again";
+  return reason.replace(/_/g, " ").toLowerCase();
+}
+
 function formatDateLabel(dateStr: string) {
   return new Date(dateStr).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
@@ -117,6 +122,9 @@ export default function PunchInOut() {
   const { shift, isLoading: shiftLoading } = useEmployeeShift();
   const { logAction } = useAuditLog();
   const [attendance, setAttendance] = useState<AttendanceWithLocation | null>(null);
+  // Server-authoritative "today" for the tenant (C6) — never a device clock.
+  const [businessDate, setBusinessDate] = useState<string | null>(null);
+  const [businessDateLoading, setBusinessDateLoading] = useState(true);
   const [todayTasks, setTodayTasks] = useState<Task[]>([]);
   const [tenantSettings, setTenantSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -224,7 +232,6 @@ export default function PunchInOut() {
   const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
   const shiftStartTime = shift?.start_time ? parseTime(shift.start_time) : parseTime(tenant?.punch_in_start ?? "09:00");
   const halfDayCutoff = shift?.half_day_cutoff_override ?? tenant?.punch_in_cutoff ?? "10:30";
-  const halfDayCutoffMinutes = parseTime(halfDayCutoff);
   const expectedHours = shift ? getExpectedHours(shift.start_time, shift.end_time) : Number(tenant?.work_hours_per_day ?? 8);
   const isWorkingDay = shift ? shift.working_days.includes(currentTime.getDay()) : true;
   const isNightShift = shift ? parseTime(shift.end_time) < parseTime(shift.start_time) : false;
@@ -241,7 +248,7 @@ export default function PunchInOut() {
   const regularizationWindowDays = Math.max(1, parseInt(tenantSettings["regularization_window_days"] || "7", 10));
 
   const fetchData = async () => {
-    if (!employee?.id || !tenantId || !tenant) return;
+    if (!employee?.id || !tenantId || !tenant || !businessDate) return;
     try {
       const today = new Date();
       const recentStart = new Date(today);
@@ -253,8 +260,8 @@ export default function PunchInOut() {
       const recentStartDate = formatLocalDate(recentStart);
       const [attRes, todayClosedRes, taskRes, settingsRes, recentAttRes, overtimeRes, correctionsRes] = await Promise.all([
         db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("session_status", "open").not("punch_in", "is", null).order("punch_in", { ascending: false }).limit(1).maybeSingle(),
-        db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("date", TODAY).eq("session_status", "closed").order("punch_out", { ascending: false }).limit(1).maybeSingle(),
-        db.from("tasks").select("*").eq("tenant_id", tenantId).eq("assigned_to", employee.id).lte("due_date", TODAY).in("status", [...BLOCKING_TASK_STATUSES]),
+        db.from("attendance").select("*").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("date", businessDate).eq("session_status", "closed").order("punch_out", { ascending: false }).limit(1).maybeSingle(),
+        db.from("tasks").select("*").eq("tenant_id", tenantId).eq("assigned_to", employee.id).lte("due_date", businessDate).in("status", [...BLOCKING_TASK_STATUSES]),
         db.from("tenant_settings").select("key,value").eq("tenant_id", tenantId),
         db
           .from("attendance")
@@ -262,7 +269,7 @@ export default function PunchInOut() {
           .eq("tenant_id", tenantId)
           .eq("employee_id", employee.id)
           .gte("date", recentStartDate)
-          .lte("date", TODAY)
+          .lte("date", businessDate)
           .order("date", { ascending: false }),
         db
           .from("overtime_records")
@@ -270,14 +277,14 @@ export default function PunchInOut() {
           .eq("tenant_id", tenantId)
           .eq("employee_id", employee.id)
           .gte("date", recentStartDate)
-          .lte("date", TODAY),
+          .lte("date", businessDate),
         db
           .from("attendance_corrections")
           .select("id,attendance_date,requested_punch_in,requested_punch_out,reason,status,rejection_reason,created_at")
           .eq("tenant_id", tenantId)
           .eq("employee_id", employee.id)
           .gte("attendance_date", recentStartDate)
-          .lte("attendance_date", TODAY),
+          .lte("attendance_date", businessDate),
       ]);
 
       let activeAttendance = null;
@@ -326,7 +333,29 @@ export default function PunchInOut() {
     }
   };
 
-  useEffect(() => { void fetchData(); }, [employee?.id, tenantId, tenant]);
+  useEffect(() => {
+    if (!tenantId) return;
+    let cancelled = false;
+    setBusinessDateLoading(true);
+    (async () => {
+      try {
+        const { data, error: dateErr } = await db.rpc("tenant_business_date", { p_tenant_id: tenantId });
+        if (cancelled) return;
+        if (dateErr) throw dateErr;
+        setBusinessDate(typeof data === "string" ? data : null);
+      } catch (err) {
+        console.error("Failed to load business date", err);
+        if (!cancelled) setBusinessDate(null);
+      } finally {
+        if (!cancelled) setBusinessDateLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId]);
+
+  useEffect(() => { void fetchData(); }, [employee?.id, tenantId, tenant, businessDate]);
 
   useEffect(() => {
     if (attendance?.punch_in && !attendance.punch_out) {
@@ -388,7 +417,10 @@ export default function PunchInOut() {
 
   useEffect(() => {
     const fetchLateMarks = async () => {
-      if (!attendance?.is_late || !employee?.id || !tenantId) {
+      // late_entry is the derived authority; is_late is what rows written before derivation ran
+      // still carry. Prefer the authority, fall back so an underived late day is not shown as
+      // on-time. The client never WRITES either column (D12).
+      if (!(attendance?.late_entry ?? attendance?.is_late) || !employee?.id || !tenantId) {
         setLateMarkSummary(null);
         return;
       }
@@ -411,17 +443,7 @@ export default function PunchInOut() {
       }
     };
     void fetchLateMarks();
-  }, [attendance?.is_late, employee?.id, tenantId]);
-
-  async function getIp(): Promise<string> {
-    try {
-      const res = await fetch("https://api.ipify.org?format=json");
-      const { ip } = await res.json();
-      return ip as string;
-    } catch {
-      return "unknown";
-    }
-  }
+  }, [attendance?.late_entry, attendance?.is_late, employee?.id, tenantId]);
 
   interface PunchRequirements {
     geofenceRequired: boolean;
@@ -452,8 +474,8 @@ export default function PunchInOut() {
           .eq("tenant_id", tenantId)
           .eq("employee_id", employee.id)
           .eq("status", "approved")
-          .lte("start_date", TODAY)
-          .gte("end_date", TODAY)
+          .lte("start_date", businessDate!)
+          .gte("end_date", businessDate!)
           .limit(1)
           .maybeSingle();
 
@@ -488,7 +510,7 @@ export default function PunchInOut() {
   };
 
   const handlePunchClick = async (direction: "punch_in" | "punch_out") => {
-    if (!employee?.id || !tenantId || !tenant || acting) return;
+    if (!employee?.id || !tenantId || !tenant || !businessDate || acting) return;
 
     setActing(true);
     setActionText("Checking punch policy...");
@@ -702,8 +724,8 @@ export default function PunchInOut() {
     lng: number | null,
     accuracy: number | null,
     status: string | null,
-    confidence: string | null,
-    remoteExceptionId: string | null,
+    _confidence: string | null,
+    _remoteExceptionId: string | null,
     verificationSnapshot: Record<string, any>,
     selfieBlob: Blob | null
   ) => {
@@ -713,63 +735,24 @@ export default function PunchInOut() {
       console.error("Failed to auto-close stale sessions", err);
     }
 
-    const ip = await getIp();
-    const now = new Date();
-
-    const shiftStartDate = new Date();
-    shiftStartDate.setHours(Math.floor(shiftStartTime / 60), shiftStartTime % 60, 0, 0);
-    if (isNightShift && now.getHours() < 12) {
-      shiftStartDate.setDate(shiftStartDate.getDate() - 1);
-    }
-    const halfDayCutoffDate = new Date(shiftStartDate);
-    halfDayCutoffDate.setHours(Math.floor(halfDayCutoffMinutes / 60), halfDayCutoffMinutes % 60, 0, 0);
-    if (isNightShift && halfDayCutoffMinutes < shiftStartTime) {
-      halfDayCutoffDate.setDate(halfDayCutoffDate.getDate() + 1);
-    }
-    const isHalfDay = now.getTime() > halfDayCutoffDate.getTime();
-
-    const unapprovedTasks = todayTasks.filter((task) => BLOCKING_TASK_STATUSES.includes(task.status as any));
-    const allowed = tenant.punch_out_gate_enabled ? unapprovedTasks.length === 0 : true;
-
-    const gracePeriodMinutes =
-      shift?.late_mark_grace_override != null
-        ? shift.late_mark_grace_override
-        : parseInt(tenantSettings["late_mark_grace_minutes"] || "0", 10);
-    const elapsedSinceShiftStartMinutes = (now.getTime() - shiftStartDate.getTime()) / 60000;
-    const lateMarkFeatureEnabled = tenantSettings["late_mark_enabled"] === "true";
-    const isLate = lateMarkFeatureEnabled && elapsedSinceShiftStartMinutes > gracePeriodMinutes;
-
-    const { data: inserted, error: dbErr } = await db.from("attendance").insert([{
-      employee_id: employee.id,
-      tenant_id: tenantId,
-      date: TODAY,
-      punch_in_ip: ip,
-      punch_out_allowed: allowed,
-      status: isHalfDay ? "half_day" : "present",
-      session_status: "open",
-      punch_in_lat: lat,
-      punch_in_lng: lng,
-      punch_in_location_accuracy: accuracy,
-      punch_in_location_status: status === "selfie_missing" ? "selfie_missing" : status,
-      location_accuracy: accuracy,
-      location_confidence: confidence,
-      location_status: status,
-      remote_exception_id: remoteExceptionId,
-      verification_snapshot: verificationSnapshot,
-    }]).select("id").single();
+    // Server-authoritative punch-in (B7b): business date, lateness and half-day status
+    // are all derived server-side. The client no longer computes or writes any of them.
+    const { data, error: dbErr } = await db.rpc("punch_in_attendance", {
+      p_tenant_id: tenantId,
+      p_employee_id: employee.id,
+      p_lat: lat,
+      p_lng: lng,
+      p_acc: accuracy,
+      p_loc_status: status === "selfie_missing" ? "selfie_missing" : status,
+    });
 
     if (dbErr) throw dbErr;
-
-    if (isLate && inserted?.id) {
-      const { error: lateErr } = await db
-        .from("attendance")
-        .update({ is_late: true })
-        .eq("tenant_id", tenantId)
-        .eq("id", inserted.id);
-      if (lateErr) throw lateErr;
+    if (!data || data.success === false) {
+      error(`Punch in failed: ${formatPunchFailureReason(data?.reason)}`);
+      return;
     }
 
-    const attendanceId = inserted?.id;
+    const attendanceId = data.attendance_id as string;
 
     if (selfieBlob && attendanceId) {
       await handleSelfieUpload(attendanceId, "punch_in", selfieBlob);
@@ -909,7 +892,7 @@ export default function PunchInOut() {
 
     if ((!record || record.status === "absent") && workingDay) {
       issueLabel = "Absent / Missing";
-    } else if (record?.punch_in && !record.punch_out && dateStr !== TODAY) {
+    } else if (record?.punch_in && !record.punch_out && dateStr !== businessDate) {
       issueLabel = "Missing punch-out";
     } else if (record?.punch_out && !record.punch_in) {
       issueLabel = "Missing punch-in";
@@ -1015,7 +998,7 @@ export default function PunchInOut() {
                   {new Date(date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}
                 </p>
                 <p className="text-xs text-slate-500">
-                  {fmtTime(record?.punch_in)} - {fmtTime(record?.punch_out)} | {formatHours(record?.work_hours)}
+                  {fmtTime(record?.in_time ?? record?.punch_in)} - {fmtTime(record?.out_time ?? record?.punch_out)} | {formatHours(record?.work_hours)}
                 </p>
                 {issueLabel ? <p className="mt-1 text-xs font-semibold text-rose-600">{issueLabel}</p> : null}
                 {correction?.status === "pending" ? (
@@ -1065,14 +1048,30 @@ export default function PunchInOut() {
     ? recentDays.find((item) => item.date === selectedCorrectionDate) ?? null
     : null;
 
-  if (loading || !tenant || shiftLoading) {
+  if (loading || !tenant || shiftLoading || businessDateLoading) {
     return (
       <section className="space-y-6">
         <Skeleton className="h-12 w-48" />
         <Skeleton className="mx-auto h-64 w-full max-w-sm rounded-2xl" />
       </section>
     );
-  } let mainContent: React.ReactNode;
+  }
+
+  if (!businessDate) {
+    return (
+      <section className="space-y-6">
+        <div className="mx-auto max-w-sm rounded-2xl border border-rose-200 bg-rose-50 p-8 text-center shadow-sm">
+          <h3 className="mb-1 text-xl font-bold text-rose-700">Attendance unavailable</h3>
+          <p className="text-slate-600">
+            We couldn't determine today's business date for your organization. This can happen if
+            attendance isn't enabled for your tenant, or you don't have access. Please contact HR.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  let mainContent: React.ReactNode;
 
   if (isManagerMode) {
     mainContent = (
@@ -1096,15 +1095,15 @@ export default function PunchInOut() {
         <CheckCircle className="mx-auto mb-3 h-14 w-14 text-rose-500" />
         <h3 className="mb-1 text-xl font-bold text-rose-700">Marked Absent</h3>
         <p className="mb-4 text-slate-600">You have been marked absent for today.</p>
-        {regularizationEnabled && !correctionByDate[TODAY] ? (
+        {regularizationEnabled && !correctionByDate[businessDate] ? (
           <button
             type="button"
-            onClick={() => openCorrectionModal(TODAY)}
+            onClick={() => openCorrectionModal(businessDate)}
             className="w-full mt-2 rounded-xl border border-brand-200 bg-white py-3 text-sm font-semibold text-brand-700 transition hover:bg-brand-50"
           >
             Request Regularization
           </button>
-        ) : correctionByDate[TODAY]?.status === "pending" ? (
+        ) : correctionByDate[businessDate]?.status === "pending" ? (
           <p className="mt-2 text-xs font-semibold text-amber-700">Correction request pending</p>
         ) : null}
       </div>
@@ -1113,7 +1112,7 @@ export default function PunchInOut() {
     const h = Math.floor(attendance.work_hours ?? 0);
     const m = Math.round(((attendance.work_hours ?? 0) - h) * 60);
     const locationIndicator = getLocationIndicator(attendance.punch_in_location_status);
-    const todayOvertime = overtimeByDate[TODAY];
+    const todayOvertime = overtimeByDate[businessDate];
 
     mainContent = (
       <div className="mx-auto max-w-sm rounded-2xl border border-emerald-200 bg-emerald-50 p-8 text-center shadow-sm">
@@ -1195,7 +1194,7 @@ export default function PunchInOut() {
           </div>
         </div>
 
-        {attendance.is_late ? (
+        {(attendance.late_entry ?? attendance.is_late) ? (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             <p className="font-semibold">Today's punch-in was marked as late.</p>
             <p className="mt-1">
