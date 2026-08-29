@@ -81,6 +81,44 @@ columns (`late_entry`, `early_exit`, `in_time`, `out_time`) instead of the sessi
 Revoke/remove the direct-insert route and the client `is_late` write. **Only after B7b is
 confirmed live by marker string.** This is the step the marker rule exists for.
 
+**⚠️ B7c IS BIGGER THAN "RETIRE THE INSERT". Verified live 2026-08-29.** The employee write
+surface on `attendance` is currently unrestricted:
+
+```
+table grants   authenticated -> SELECT, INSERT, UPDATE, DELETE  (blanket, no column list)
+RLS policy     attendance_update_self  PERMISSIVE  UPDATE  {authenticated}
+               USING/CHECK: EXISTS (select 1 from employees e
+                                    where e.id = attendance.employee_id
+                                      and e.user_id = auth.uid())
+RLS policy     attendance_insert_self  PERMISSIVE  INSERT  {authenticated}  (same shape)
+```
+
+**Postgres RLS cannot restrict columns.** Column scoping requires `GRANT UPDATE (col, …)` at the
+table level, and the grant here is blanket. So an authenticated employee can today, from a browser
+console with their own session, write **any column on their own attendance row** — including
+`work_hours`, `status`, `is_late`, `late_entry`, `in_time`/`out_time`, `derivation_source`, and
+**`is_locked`**. All of `work_hours`, `status` and `is_late` feed `payroll_period_input`, so this is
+a payroll vector, not just a data-quality one.
+
+`is_locked` deserves separate mention: `20260829100000` made that flag load-bearing (a locked row
+is never re-derived), which means this hole now also lets an employee permanently freeze their own
+day against derivation. Making the flag meaningful raised the value of the hole — that is a
+consequence of that migration and should be closed with it in view.
+
+**Ordering — do not invert it, or punch-out breaks in production:**
+1. `runPunchOutDb` still writes `location_accuracy, location_confidence, location_status,
+   remote_exception_id, verification_snapshot` through a client
+   `db.from("attendance").update(...)`. Move those into `punch_out_attendance` first, exactly as
+   `20260829110000` did for punch-in. Same DROP + CREATE / re-grant discipline.
+2. Ship that client change and **marker-verify it live**.
+3. Only then narrow the employee write surface: replace the blanket `GRANT UPDATE` with a
+   column-scoped grant (or revoke employee UPDATE/INSERT entirely and route every legitimate
+   employee write through the RPCs, which is cleaner now that both punch directions are RPCs).
+4. `attendance_insert_self` should go at the same time — with `punch_in_attendance` live nothing
+   legitimate needs it.
+
+Revoking before step 2 takes punch-out evidence down for every employee.
+
 ### B7d — the HR punch trail
 Nothing in the product reads `attendance_events`. HR can see a derived day but not the evidence
 behind it. This is the release where the design philosophy applies (§4).

@@ -256,3 +256,79 @@ counts, deployed function bodies, ACLs, constraints, trigger definitions, fronte
 then one migration, then independent re-verification of the deployed result rather than trusting
 the apply. The `LIKE` wildcard false positive and the `punch_in DEFAULT now()` probe trap were both
 caught in that re-verification, not in the writing.
+
+---
+
+## 8. Second half of 2026-08-29 — deploy unblocked, B7b built
+
+**The Vercel block cleared** when the GitHub repo was made public. Verified by marker string:
+bundle `index-CiQbhTAP.js`, `working_hours_threshold_for_absent` count **1** (0 for eight days).
+Frontend releases ship again, so restrictive server changes are safe once more.
+
+⚠️ **Public repo = exposed credentials.** The three `ik_...` keys in tracked files are DEAD (live
+admin key is `ik_99bf...3b76`, matches none of them). But two REAL passwords are now world-readable,
+in tracked files *and in git history*: `admin@talentmeshsolutions.com` / `Password123!` and
+`quickwin089@gmail.com` / `RlsVerify!2026q`. **Rotate them** — deleting files does not help once the
+history is public. `.env` is correctly gitignored. `CLAUDE.md`'s claim that the leaked admin key is
+"still valid and unrotated" is stale.
+
+### Applied this half
+
+| Migration | What |
+|---|---|
+| `20260829110000` | `punch_in_attendance` persists the four punch-in evidence columns |
+
+`punch_in_attendance` did not write `punch_in_ip`, `location_confidence`, `remote_exception_id` or
+`verification_snapshot`, all of which the client insert B7b removes used to write. Without
+`remote_exception_id` an approved remote punch looks like an unjustified out-of-geofence punch;
+without `verification_snapshot` punch-in has no evidence trail while punch-out still has one.
+
+**DROP + CREATE, not CREATE OR REPLACE** — the four new parameters are trailing and defaulted, so a
+replace would have added a second overload. Grants re-issued (DROP does not preserve an ACL).
+Safe only because the function had **no callers**: zero database functions referenced it
+(comment-stripped scan) and the deployed bundle predates B7b. **That window is now closed.**
+
+### B7b is BUILT and committed, NOT pushed
+
+`src/employee/PunchInOut.tsx` calls `punch_in_attendance`, drops `const TODAY` for
+`tenant_business_date`, stops writing `is_late`, and renders an explicit "Attendance unavailable"
+state when the server date is NULL — it never falls back to a device clock.
+
+Two corrections were needed on top of the agent's work, both caught in review:
+
+1. **Derived reads had to fall back.** Reading `in_time`/`out_time`/`late_entry` alone would have
+   blanked every history row and shown the one genuinely late day as on-time — derivation has never
+   run, so `in_time` is NULL on 0-of-13 rows and `late_entry` is true on **zero** rows while
+   `is_late` is true on one. Now `in_time ?? punch_in`, `out_time ?? punch_out`,
+   `late_entry || is_late`.
+2. **The lateness fallback first used `??`, which was dead code.** `late_entry` is
+   `boolean NOT NULL DEFAULT false`, so it is never NULL and `??` never took the right branch — the
+   fallback did not fire at all. Fixed to `||`. The TS type said `boolean | null`, which is why the
+   compiler accepted it; the type now matches the column. `in_time`/`out_time` genuinely are
+   nullable, so `??` is correct there.
+
+### ⚠️ The biggest finding of the day — B7c is bigger than it looked
+
+Employees can write **any column on their own attendance row**. Blanket `GRANT UPDATE` to
+`authenticated` plus a column-blind `attendance_update_self` policy, and **Postgres RLS cannot
+restrict columns**. `work_hours`, `status` and `is_late` all feed `payroll_period_input`, and
+`is_locked` — which `20260829100000` just made load-bearing — can be set by the employee too.
+Full brief and the mandatory ordering are in `doc/attendance_b7_cutover_plan.md` §2 under B7c.
+**Do not revoke before moving punch-out's evidence write into the RPC**, or punch-out breaks for
+every employee.
+
+### B1 was killed by the monthly spend limit
+
+It applied **nothing** — head was `20260829100000` and the tree was clean when it died; its only
+artifact is an untracked `functions/run-attendance-derivation.ts` draft. **B1 is deferred, not
+abandoned:** it is not on B7's critical path, because B6 runs fine on the manual HR trigger. The
+design problem it was working on is real and still open — a scheduled run has no HR JWT, so it
+cannot use `hr_run_attendance_derivation` and must go through the `project_admin` pass functions.
+
+### Next, in order
+
+1. **Push** — four commits: `df54dc2`, `8833840`, `63522d4`, plus this doc. Then **marker-verify**.
+2. Watch a day of real punches.
+3. **B7c** per the brief above — punch-out evidence into the RPC, ship, verify, *then* narrow the
+   write surface.
+4. B7d, B1, B9. B8 still blocked on which device/kiosk hardware tenants will use.
