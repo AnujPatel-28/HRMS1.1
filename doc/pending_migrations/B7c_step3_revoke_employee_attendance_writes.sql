@@ -44,9 +44,12 @@
 -- WHY IT IS SAFE TO REVOKE (all verified live, not assumed)
 -- ############################################################################
 -- 1. NO live client path writes attendance any more. An exhaustive scan of every .ts/.tsx in src/
---    for `.from("attendance")` followed by .update/.insert/.delete/.upsert returns exactly TWO
---    hits, both in src/hooks/useAttendance.ts -- which has ZERO importers and is dead code.
---    Every real write now goes through an RPC:
+--    for `.from("attendance")` followed by .update/.insert/.delete/.upsert returns ZERO hits.
+--    (It returned two before, both in src/hooks/useAttendance.ts -- a hook with no importers that
+--    still held the old direct insert+update. It was deleted rather than documented around: it is
+--    precisely the path this file retires, and leaving it would have meant shipping code that
+--    cannot work the moment this applies.)
+--    Every write now goes through an RPC:
 --      punch_in_attendance             (20260828110000, extended 20260829110000)
 --      punch_out_attendance            (extended 20260829120000, gated 20260829130000)
 --      mark_attendance_selfie_missing  (20260829130000)
@@ -90,11 +93,12 @@ BEGIN
     RAISE EXCEPTION 'REVOKE FAILED: authenticated still holds % write privileges on attendance', v_n;
   END IF;
 
-  SELECT count(*) INTO v_n
-  FROM information_schema.role_table_grants
-  WHERE table_schema = 'public' AND table_name = 'attendance'
-    AND grantee = 'authenticated' AND privilege_type = 'SELECT';
-  IF v_n <> 1 THEN
+  -- has_table_privilege, NOT a count over role_table_grants: that view can return more than one
+  -- row for the same privilege (one per grantor) and is filtered by what the current role can
+  -- see, so `<> 1` would abort on a false negative -- AFTER the revokes above have already run in
+  -- this transaction. Same class as the whitespace-exact assertion that misfired in
+  -- 20260829130000: an assertion that is wrong about its own query shape, not about the schema.
+  IF NOT has_table_privilege('authenticated', 'public.attendance', 'SELECT') THEN
     RAISE EXCEPTION 'OVER-REVOKED: authenticated can no longer SELECT attendance -- the whole app is blind';
   END IF;
 
