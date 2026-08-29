@@ -1,4 +1,8 @@
-# Session context — 2026-08-29. HR write paths reconciled with derivation. B7b still gated.
+# Session context — 2026-08-29. HR write paths reconciled. Deploy unblocked. B7b built.
+
+> **Read §8 first.** §0–§7 were written in the morning, while the Vercel deploy was still blocked.
+> The block cleared later the same day and B7b was built; §8 is the current state and supersedes
+> every "deploy is not live" statement below.
 
 Continues `session_context_2026-08-28-attendance-derivation-and-b7a.md`. That handoff shipped B6 and
 B7a and left B7b **blocked on a Vercel account-level gate**. That gate is **still shut**, so this
@@ -19,10 +23,10 @@ Policy drift    34 of 274           UNCHANGED
 Data            attendance 13 | attendance_events 4 | derivation_runs 0 | tenants 15
                 (all three counts identical before and after — every probe rolled back)
 
-DEPLOY   STILL NOT LIVE. Re-checked by marker string at the top of this session:
-         bundle /assets/index-_OaU7Cj5.js, byte-identical to Aug 21,
-         grep -c working_hours_threshold_for_absent -> 0.
-         Nothing about the deploy changed. B7b and B7c remain closed.
+DEPLOY   SUPERSEDED -- see §8. As of the morning it was still blocked (bundle
+         /assets/index-_OaU7Cj5.js, marker count 0). It was UNBLOCKED later the same
+         day; live bundle is now index-CiQbhTAP.js with marker count 1, and B7b is
+         built and committed. Applied head is now 20260829110000, not ...100000.
 ```
 
 **The block is a human action and nothing in the repo can clear it.** Confirmed again this session:
