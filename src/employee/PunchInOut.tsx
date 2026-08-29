@@ -550,11 +550,12 @@ export default function PunchInOut() {
 
     if (uploadError) {
       console.error("Selfie upload failed:", uploadError);
-      await db
-        .from("attendance")
-        .update({ location_status: "selfie_missing" })
-        .eq("tenant_id", tenantId)
-        .eq("id", attendanceId);
+      // Server-side (B7c): the last direct client write to attendance used to live here. The RPC
+      // sets exactly this one column on a row the caller must own.
+      await db.rpc("mark_attendance_selfie_missing", {
+        p_tenant_id: tenantId,
+        p_attendance_id: attendanceId,
+      });
       void logAction("attendance.selfie_missing", "attendance", attendanceId, { error: uploadError.message });
       return;
     }
@@ -788,6 +789,9 @@ export default function PunchInOut() {
     // computes it from the same tenants / tenant_settings / shifts rows. Keeping a copy here
     // would recreate the two-sources-of-truth problem, and the copy is the one an attacker
     // controls.
+    // Evidence fields (location_confidence, remote_exception_id, verification_snapshot) go
+    // through the RPC too (20260829120000) rather than a follow-up client UPDATE, which would
+    // re-open the direct write path B7c exists to revoke.
     const { data, error: dbErr } = await db.rpc("punch_out_attendance", {
       p_attendance_id: attendance!.id,
       p_tenant_id: tenantId,
@@ -800,27 +804,14 @@ export default function PunchInOut() {
       // (migration 20260821200000). They were only ever computed from server data this
       // client had just read — but as request parameters they could be replaced in transit,
       // and a fabricated overtime amount landed in overtime_records (finding C1).
+      p_confidence: confidence,
+      p_remote_exception_id: remoteExceptionId,
+      p_verification_snapshot: verificationSnapshot,
     });
 
     if (dbErr) throw dbErr;
     if (data && data.success === false) {
       throw data;
-    }
-
-    const { error: updateErr } = await db
-      .from("attendance")
-      .update({
-        location_accuracy: accuracy,
-        location_confidence: confidence,
-        location_status: status,
-        remote_exception_id: remoteExceptionId,
-        verification_snapshot: verificationSnapshot,
-      })
-      .eq("tenant_id", tenantId)
-      .eq("id", attendance!.id);
-
-    if (updateErr) {
-      console.error("Failed to update punch-out verification columns", updateErr);
     }
 
     const workHoursReturned = data?.work_hours ?? 0;
