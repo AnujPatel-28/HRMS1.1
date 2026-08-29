@@ -116,12 +116,43 @@ Same class as the ₹0 payslips: a value that should be N reads as 0. Latent onl
 derivation had not yet been run in production. Pass 1 now writes both, on the INSERT and the
 UPDATE path; `payroll_period_input` is byte-identical and untouched.
 
-**STILL OPEN — the other `is_late` writers.** `hr_update_attendance` and
-`hr_approve_attendance_correction` write `is_late` from their **own** cutoff-time calculation
-(`shift.start_time` + `tenant_settings.late_mark_grace_minutes`) and never touch `late_entry`.
-So an HR correction on a derived row leaves `late_entry` stale while `is_late` moves — the same
-two-sources-of-truth split, just relocated. Reconcile in B7b/B7c. Recorded on the column comments
-(`20260828120001`) so it is visible from the schema, not only from this document.
+**CLOSED (2026-08-29, `20260829100000`).** `hr_update_attendance` and
+`hr_approve_attendance_correction` wrote `is_late` from their **own** cutoff-time calculation
+(`shift.start_time` + `tenant_settings.late_mark_grace_minutes`) and never touched `late_entry`,
+so an HR correction on a derived row left `late_entry` stale while `is_late` moved — the same
+two-sources-of-truth split, just relocated. Both now write `late_entry` from the *same* variable
+as `is_late`, on both the INSERT and the UPDATE branch. All four write paths (Pass 1, Pass 2, and
+the two HR paths) now agree, so the row is self-consistent whichever column a consumer reads.
+`payroll_period_input` is byte-identical and untouched.
+
+Investigating it surfaced **two further defects in the same two functions**, both latent only
+because derivation has never run in production (`attendance_derivation_runs` = 0, while five
+tenants already have `enable_auto_derivation` on):
+
+- **`attendance.is_locked` was read by the processor and written by NOBODY.** D5 (§5.2, E17, E45)
+  makes `is_locked` the flag that stops a day being re-derived, and Pass 1/Pass 2 both honour it —
+  but nothing in the database, in any trigger, or in `src/` ever set it. HR corrects a day, the
+  next derivation run silently reverts the correction, no error anywhere. Both HR paths now set
+  `is_locked = true` and stamp `derivation_source` (`manual` for a direct edit, `correction` for an
+  approved request). **`hr_unlock_attendance_day` was added in the same migration** because a lock
+  with no unlock is a one-way door: without it a single HR punch-time tweak would permanently
+  exclude that employee-day from re-derivation after a backdated event (E17) or a month replay
+  (E45), the two cases the decision doc explicitly wants to keep possible.
+- **Both functions located the row by `(tenant_id, employee_id, date)` with no `ORDER BY` and no
+  `LIMIT`.** Once Pass 1 writes per-shift rows the unique key
+  `(tenant_id, employee_id, date, COALESCE(shift_id, zero-uuid))` legitimately allows several rows
+  per employee-day, and a plpgsql `SELECT INTO` without `STRICT` silently takes an arbitrary one.
+  `attendance_corrections` has no `shift_id` column, so a correction request genuinely cannot name
+  a shift. Both paths now count first and raise a self-diagnosing error instead of correcting a
+  shift nobody chose.
+
+**Verification reach:** `assert_hr_for_tenant` refuses a NULL `auth.uid()`, so a migration running
+as `project_admin` cannot invoke either function. The migration's checks are structural for the two
+HR functions (comment-stripped source scan) and behavioural for the consequence — an HR-shaped
+locked row is proven to be skipped by the deployed `attendance_derive_pass1`, and a two-row
+employee-day is proven constructible so the ambiguity guard guards a real condition. **The
+end-to-end half — calling these RPCs over HTTP with a real HR JWT — is NOT covered and is carried
+as an open QA item alongside C3.**
 
 ### 3b. C6 is a class of bug, not one line
 
