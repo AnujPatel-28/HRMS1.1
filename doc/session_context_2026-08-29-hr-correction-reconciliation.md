@@ -580,3 +580,60 @@ part:
 - **B1** — scheduler. **`pg_cron` is installed**, which is very likely simpler than the edge-function
   auth story that killed the earlier attempt: `attendance_derive_pass1/pass2` already run as
   `project_admin` with no JWT problem.
+
+---
+
+## 14. B1 and B7d — and an honest read on what "attendance is finished" means
+
+Applied head **`20260829200000`**. Policy drift **34 of 273**.
+
+### B1 — derivation has now RUN IN PRODUCTION
+First real run: **5 tenants, 0 errors, 5 completed run rows, 8 derived attendance rows.**
+`schedules list` is no longer empty, which was C4's symptom. C8 was already satisfied.
+
+**Correction to something I told you earlier: pg_cron is NOT usable.** It is installed, which is
+exactly what makes it a trap — `project_admin` has no USAGE on the `cron` schema and a direct probe
+returns `permission denied for schema cron`. Scheduling goes through InsForge `schedules`.
+
+**The wall B1 actually sat behind** was never the scheduler; it was auth.
+`hr_run_attendance_derivation` opens with `assert_hr_for_tenant`, which raises when `auth.uid()` is
+NULL, so a scheduled call could never reach it. `attendance_run_scheduled_derivation` is the same
+orchestration without the HR fence, `project_admin`-only, granted to no API role.
+
+Orchestration lives in **SQL, not the edge function**. The earlier abandoned draft looped tenants
+and shifts in TypeScript — a round trip per shift, with run bookkeeping split across independently
+failing calls. That draft is replaced by a ~20-line trigger.
+
+The function needed its own caller gate: unlike `kiosk-punch` (open by design, because device
+credentials *are* the authentication), this takes no user input and writes across **every** tenant.
+It requires `DERIVATION_TRIGGER_TOKEN` by header, compared in constant time, and **fails closed** if
+the secret is unset. Verified 403 with no token and with a wrong one.
+
+**Every unprocessed event was verified as correct, not missed:** three predate the lookback window,
+one is the deliberately quarantined B7a artefact (`skip_derivation` + `void_reason`), two are the
+2099 ADMS probes.
+
+### B7d — the punch trail
+A tray over the attendance table; the day travels into the header. Events stagger in — earned
+*because* HR opens this rarely, where the same motion on the punch screen would irritate.
+
+**Empty is the common case at launch**, so it explains *why*, and distinguishes the two reasons,
+which mean opposite things: no `derivation_source` → the day predates the event log; derived with no
+events → genuinely no punches. Reading the first as "did not come in" is the wrong conclusion.
+Serial-only provenance and excluded events surface explicitly rather than going quietly missing.
+
+No migration needed — `attendance_events_select_hr` already grants HR read.
+
+### Where attendance actually stands
+**Done:** B1–B8, and B7a/b/c/d. Derivation runs on a schedule; punches arrive from the app, a kiosk,
+or a ZKTeco/eSSL unit through one seam; HR can correct a day and see the evidence behind it.
+
+**NOT done — B9 is only partly built.** The decision doc §8 scopes B9 as *"Bulk mark, CSV import,
+range regularization, unmarked-days view, aggregate reporting (v1 F7)"*. What exists is the device
+provisioning screen, which was really B8 support. **None of the five listed B9 capabilities are
+built.** Attendance is functionally complete and operable; its HR bulk-tooling is not.
+
+**Also still open:** 34 of 273 RLS policies are in no migration (unchanged for six sessions);
+`diagnose advisor` still returns "Access denied"; the C6 class of client-side dates remains in
+read-only screens; and nothing has been exercised by a real user yet — the kiosk in particular has
+never had a real punch through it.
