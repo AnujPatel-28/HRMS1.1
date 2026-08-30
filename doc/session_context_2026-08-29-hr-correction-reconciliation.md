@@ -501,3 +501,82 @@ matchable string. It does. Counts unchanged (events 8, devices 0).
 ### Next: ADMS
 Now a pure wire-format translator: parse ZKTeco/eSSL `key=value` bodies at `/iclock/cdata` and call
 the same seam. No attendance logic in it at all.
+
+---
+
+## 13. B8 complete — lockout, ADMS, and the kiosk design pass
+
+Applied head **`20260829180000`**. Deployed functions: `kiosk-punch`, `adms-cdata`.
+
+| Migration | What |
+|---|---|
+| `20260829170000` | Brute-force lockout on the device seam |
+| `20260829180000` | `allow_serial_only`, the honest answer to ADMS authentication |
+
+### The lockout, and the constraint that shaped it
+**A `RAISE` rolls back the transaction — including the failure counter written in the same call.**
+The seam signalled every rejection with `RAISE EXCEPTION`, so a naive lockout would have counted to
+one forever, and Postgres has no autonomous transactions to escape it. **Every rejection path now
+RETURNS `{success:false,error:CODE}` instead of raising.** `kiosk-punch` needed no change — it
+already branched on both `rpcError` and `data.success === false`.
+
+Two independent keys — `(serial,'')` for device-secret failures, `(serial,employee_ref)` for PIN
+failures — so one person mistyping cannot lock a shared kiosk for everyone. 5 failures in 15 minutes
+locks that key for 15 minutes; a success clears both. An unknown serial is rejected **without** being
+recorded, so nobody can inflate the table. The ledger has RLS on with **no policies**: unreachable
+from any API role, and deliberately invisible to HR too, since it would otherwise leak which
+employee codes are being probed.
+
+`doc/verification/b8_lockout_battery.sql` proves it live, including the assertion that catches a
+regression to raise-on-reject: **a rejection must leave its counter behind.**
+
+### ADMS: the authentication problem, answered explicitly
+A ZKTeco/eSSL push unit sends its serial and **no credential** — most firmware exposes only host and
+port. Rather than silently trusting a serial for every biometric device, `allow_serial_only` is
+per-device, defaults to **false**, is CHECK-constrained to biometric devices only (a kiosk has an
+issued secret, so it has no excuse), and stamps `auth_mode='serial_only'` onto every event it
+produces so the weaker provenance survives into any later dispute. A supplied secret is still always
+verified — the flag relaxes the requirement to *present* one, never makes a wrong one acceptable.
+
+**`functions/adms-cdata` is a wire-format translator and nothing else.** Protocol decisions:
+- **Plain-text responses.** A JSON body makes the device treat the exchange as failed and resend the
+  same logs forever.
+- **A partially-rejected batch still returns `OK`** — same reason, and the seam is idempotent.
+- **Status byte 1 is trusted; 0 is NOT.** Many cheap units emit 0 for *every* punch, so trusting it
+  would make every event an "in" and nobody would ever punch out. 0 falls through to the seam's
+  open-session inference, which is right for both well-behaved and lazy hardware.
+- Device timestamps are local wall clock with no offset, resolved against the tenant timezone in
+  **two passes** so the hour either side of a DST transition is not off by one.
+
+Proven against the deployed function with a simulated device: handshake returns the config block; an
+unknown serial is acknowledged and ingests nothing; a two-row ATTLOG batch landed at exactly
+`09:02:31` and `18:11:04` Asia/Kolkata; status 0 inferred `in` and status 1 gave `out`; both stamped
+`auth_mode=serial_only`; and **replaying the identical batch created no duplicates** (10 events
+before and after).
+
+⚠️ Two 2099-dated probe events remain in the log — `attendance_events` is append-only (D11), and a
+far-future date on the probe tenant cannot affect any real derivation.
+
+### The kiosk design pass
+Both design references converge on **restraint**: impeccable puts a kiosk in **Operate** mode
+(scanability, native expectations, precise details), and the Delight-Impact Curve makes punching the
+**highest-frequency action in the product**, so it earns micro-interactions and nothing theatrical.
+
+The real work was **polish, not motion** — the "dirty bathroom" rule, and the states were the weak
+part:
+- A **lockout rendered identically to a wrong PIN**, though they demand opposite reactions (wait vs
+  retype). Now four distinct kinds with their own icon, palette and hint.
+- A **dropped connection was indistinguishable from a server error.** A kiosk loses wifi routinely,
+  and "your punch was NOT recorded" is the one thing that person needs to know.
+- **Identity now leads the success card** — the thing to verify at a glance is that *your* punch
+  registered, not the previous person's. `line-clamp-2` + `break-words` for long names (Harden gate).
+- **The auto-reset was invisible**, so a queue would prod at the tablet. A bar drains over exactly
+  the reset delay — the only motion added, and it carries information.
+
+### What is left in attendance
+- **B7d** — the HR punch trail over `attendance_events`. Nothing in the product reads the log yet.
+- **B9** — HR tooling, including the screens to register a device and set a kiosk PIN. Those RPCs
+  exist and have no UI, so a kiosk cannot be provisioned from the app yet.
+- **B1** — scheduler. **`pg_cron` is installed**, which is very likely simpler than the edge-function
+  auth story that killed the earlier attempt: `attendance_derive_pass1/pass2` already run as
+  `project_admin` with no JWT problem.
