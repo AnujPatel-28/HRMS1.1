@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, Clock, Palmtree, Calendar, MessageSquare, Contact, GitBranch, ClipboardList, Gift, FileText, Wallet, Settings, Rss, FolderKanban, Receipt, Shield, Briefcase, ChevronDown, Menu, Columns, Layers, LayoutGrid, Network } from "lucide-react";
+import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, Clock, Palmtree, Calendar, MessageSquare, Contact, GitBranch, ClipboardList, Gift, FileText, Wallet, Settings, Rss, FolderKanban, Receipt, Shield, Briefcase, ChevronDown, Menu, Columns, Layers, LayoutGrid, Network, MonitorSmartphone } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
@@ -47,6 +47,7 @@ const allSections: readonly NavSection[] = [
     items: [
       { label: "Attendance", href: "/hr/attendance", icon: CalendarCheck, module: "attendance" },
       { label: "Shifts", href: "/hr/shifts", icon: Clock, module: "attendance" },
+      { label: "Devices", href: "/hr/devices", icon: MonitorSmartphone, module: "attendance" },
     ],
   },
   {

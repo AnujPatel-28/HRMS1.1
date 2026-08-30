@@ -30,6 +30,7 @@ import LeaveManagement from "./hr/LeaveManagement";
 import PolicyCenter from "./hr/PolicyCenter";
 import PolicyUpload from "./hr/PolicyUpload";
 import ShiftManagement from "./hr/ShiftManagement";
+import AttendanceDevices from "./hr/AttendanceDevices";
 import OfficeLocations from "./hr/OfficeLocations";
 import OrgStructureManagement from "./hr/OrgStructureManagement";
 import TaskManagement from "./hr/TaskManagement";
@@ -163,6 +164,7 @@ function TenantRoutes() {
           <Route path="offboarding" element={<OffboardingManagement />} />
           <Route path="attendance" element={<HRAttendance />} />
           <Route path="shifts" element={<ShiftManagement />} />
+          <Route path="devices" element={<AttendanceDevices />} />
           <Route path="leaves" element={<LeaveManagement />} />
           <Route path="tasks" element={<TaskManagement />} />
           <Route path="policies" element={<PolicyUpload />} />
