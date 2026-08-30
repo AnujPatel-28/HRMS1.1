@@ -53,12 +53,16 @@ const ERROR_MESSAGES = {
   MODULE_DISABLED: "Attendance is not enabled for this organization. Please contact HR.",
   EMPLOYEE_NOT_RESOLVED: "Employee code or PIN is incorrect.",
   SOURCE_NOT_ALLOWED: "Punching from this kiosk is not allowed for your shift. Please contact HR.",
+  // 20260829170000. Deliberately does NOT say whether the kiosk or the employee is locked, nor
+  // for how long: telling an attacker which key they tripped, and when it clears, hands them the
+  // schedule for their next attempt.
+  LOCKED_OUT: "Too many failed attempts. Please wait a few minutes and try again.",
 };
 
 function friendlyMessage(rawCode) {
   const text = typeof rawCode === "string" ? rawCode.trim() : "";
-  // Exact match first (the RPC raises bare codes with no extra text); fall back to a substring
-  // check in case the gateway/PostgREST wraps the raised message (e.g. with a "P0001:" prefix).
+  // Exact match first (the RPC returns bare codes with no extra text -- confirmed live against
+  // the deployed function); fall back to a substring check in case the gateway ever wraps them.
   if (ERROR_MESSAGES[text]) return ERROR_MESSAGES[text];
   const found = Object.keys(ERROR_MESSAGES).find((code) => text.includes(code));
   return found ? ERROR_MESSAGES[found] : "Unable to record punch. Please try again or contact HR.";
