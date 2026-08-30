@@ -123,12 +123,17 @@ Do not query the structural tree to find out if someone is "HR". HR privileges a
 The fastest way to check if the logged-in user is HR is to inspect their JWT metadata.
 
 ```typescript
-import { useAuth } from '../insforge/client';
+import { useAuth } from '../hooks/useAuth';
 
 // Inside a React component:
-const { session } = useAuth();
-const isHr = session?.user?.user_metadata?.role === 'hr';
+const { role, tenantId } = useAuth();
+const isHr = role === 'hr';
 ```
+
+> **Do not reach into the JWT yourself.** `AuthContext` already derives the role
+> (`user.metadata?.role ?? user.profile?.role`) and normalises it, so `role` is the single place
+> to read it. Supabase-style shapes like `session.user.user_metadata` do **not** exist here —
+> this is the InsForge SDK.
 
 ### B. Get a List of All HR Admins (For Notifications)
 If you need to send an in-app notification to all HR admins, use the secure backend RPC function. It bypasses RLS to safely return the list of IDs.

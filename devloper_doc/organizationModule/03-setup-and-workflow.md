@@ -39,15 +39,20 @@ The HR Administrator configures the system primarily through the UI (managed in 
 
 ## 2. Guardrails & Data Integrity
 
-The module has strict guardrails enforced directly in the database (verified via migrations and database constraints) to ensure the hierarchy doesn't break:
+Some guardrails are enforced by the **database** and cannot be bypassed. Others are only a **UI confirmation** and *can* be bypassed by any direct API call. The difference matters enormously when you write a new code path, so it is spelled out here.
 
-| User Action | System Enforcement |
-|---|---|
-| **Deactivate a unit with employees** | **Blocked.** HR must reassign employees first before deleting or deactivating a unit. |
-| **Deactivate a unit with children** | **Blocked.** This prevents entire sub-trees of the organisation from being accidentally orphaned. |
-| **Change a unit's parent** | **Allowed.** Employees move with the unit, and the materialized `path` is dynamically recomputed for the entire subtree. |
-| **Reporting cycle (A reports to B, B reports to A)** | **Rejected.** A database trigger explicitly prevents circular reporting lines. |
-| **Directly overwrite an employee's Unit** | **Rejected.** Database constraints force the application to write to `employee_unit_assignments` instead, automatically keeping effective-dated history. |
+| User Action | Enforced by | What actually happens |
+|---|---|---|
+| **Directly overwrite `employees.org_unit_id`** | **Database trigger** (`employees_org_unit_assignment_guard`) | **Rejected.** You are forced to write to `employee_unit_assignments`, which keeps effective-dated history. |
+| **Change a unit's parent** | **Database trigger** (`org_units_path_guard`, `org_units_resync_paths`) | **Allowed.** The materialized `path` is recomputed for the whole subtree automatically. |
+| **Change a unit type's `structural_role` after use** | **Database trigger** (`guard_org_unit_type_structural_role`) | **Rejected.** |
+| **Reporting cycle (A reports to B, B reports to A)** | **RPC only** — `update_employee_reporting_relationship()` | Rejected **if you go through the RPC**. ⚠️ There is **no trigger** on `employee_reporting_relationships`, so a direct table write is *not* checked. Always use the RPC. |
+| **Archive a unit / grade / title that is still in use** | **Frontend only** (`window.confirm`) | ⚠️ **Not blocked.** The UI warns *"referenced by N active employee(s)… existing records will remain unchanged"* and archives anyway if HR agrees. There is **no database guard at all** — a direct API call archives silently. |
+
+> **Do not read the last two rows as "the database protects me".** It does not. If you build a new screen or script that touches reporting lines or archives org entities, you must re-implement those checks yourself — or better, route through the RPC.
+
+### Why archiving is a warning and not a block
+Archiving is deliberately *soft*: it hides an entity from future selection lists while leaving existing employee records untouched. Blocking it would strand tenants who reorganise faster than they can reassign people. The risk is not the soft behaviour — it is assuming a hard guarantee that was never implemented.
 
 ---
 
