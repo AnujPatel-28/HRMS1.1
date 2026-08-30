@@ -80,6 +80,14 @@ export const functions = {
     invokeFunction(slug, options ? { ...options, body: withTenantMetadata(options.body) } : options),
 };
 
+// Unwrapped invoke: does NOT stamp a tenant_id onto the body. For callers where the tenant must
+// come from something other than this browser's session context -- e.g. the kiosk screen, whose
+// entire security model is that the tenant is derived server-side from the device, never from a
+// client-supplied value.
+export const rawFunctions = {
+  invoke: invokeFunction,
+};
+
 export const insforge = {
   ...baseInsforge,
   functions,

@@ -59,6 +59,7 @@ import AdminLayout from "./admin/AdminLayout";
 import AdminDashboard from "./admin/AdminDashboard";
 import AllCompanies from "./admin/AllCompanies";
 import AddCompany from "./admin/AddCompany";
+import Kiosk from "./kiosk/Kiosk";
 import type { EmployeeRole } from "./types";
 
 function LoadingScreen() {
@@ -261,6 +262,10 @@ export default function App() {
   return (
     <Routes>
       <Route path="/admin/*" element={<AdminRoutes />} />
+      {/* B8 kiosk adapter: a shared-tablet punch screen. Deliberately outside every auth
+          provider above -- the device (serial + secret) is the authenticated thing, not an
+          employee session, so it must not sit under RequireAuthTenant or any login gate. */}
+      <Route path="/kiosk" element={<Kiosk />} />
       <Route path="/*" element={<MainRoutes />} />
     </Routes>
   );
