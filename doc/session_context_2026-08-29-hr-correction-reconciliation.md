@@ -442,3 +442,62 @@ Two lessons worth carrying:
 ### Attendance write surface, final state
 `authenticated` on `public.attendance`: `SELECT` only. Every write — employee, HR, and derivation —
 goes through a `SECURITY DEFINER` RPC.
+
+---
+
+## 12. B8 — device ingest. Kiosk shipped, ADMS next.
+
+Applied head **`20260829160000`**. `kiosk-punch` **deployed** to
+`https://rq3qmu8y.function2.insforge.app`. Frontend committed, not pushed.
+
+### The insight that made B8 small
+**The canonical ingest already existed.** `attendance_event_ingest` already takes event_time,
+direction, source, source_ref, evidence, lat/lng, selfie_id, correlation_id **and an
+idempotency_key**; `attendance_events.source` already permitted `'kiosk'` and `'device'`; and
+`shifts.allowed_punch_sources` already existed. So B8 was never "build an ingestion pipeline" — it
+was "give a device an identity, resolve an employee from what that device can say, enforce the
+source policy, hand off". Check what B3 already built before designing anything else here.
+
+```
+        kiosk tablet ─┐
+                      ├─► device_ingest_punch() ─► attendance_event_ingest() ─► attendance_events
+  ZKTeco/eSSL ADMS ───┘        (B8, new)              (B3, already existed)
+```
+
+### Design decisions worth not re-litigating
+| | Decision |
+|---|---|
+| **`serial` is globally unique, not per-tenant** | An ADMS device posts its serial with no tenant context, so the serial is what resolves the tenant. Per-tenant uniqueness makes that ambiguous the first time two tenants own the same model |
+| **Tenant is derived FROM the device, never a parameter** | A device cannot be talked into writing into another tenant |
+| **Unknown serial and wrong secret raise the SAME error** | Otherwise serials are enumerable |
+| **Kiosk time is server-decided; biometric time is the device's** | A tablet clock is exactly the untrusted device clock B7b removed. A biometric unit's timestamp must be honoured or a three-day-late offline sync collapses onto the reconnect moment instead of landing on its true day (E15) |
+| **`device_ingest_punch` is `project_admin` only** | An adapter needs service credentials AND a valid device secret — two independent layers |
+| **`employees.attendance_device_id` uses Frappe HR's exact field name** | A tenant migrating from Frappe imports their mapping with no translation step |
+
+### Proven live
+`doc/verification/b8_device_ingest_battery.sql` (re-runnable, rolls itself back): wrong secret,
+unknown serial and wrong PIN are all rejected **and write nothing**; kiosk resolves by
+`employee_code` + PIN; biometric resolves by `attendance_device_id` and **keeps its own
+timestamp**; replaying an identical device log **collapses to one event** (E16). Population
+verified restored afterwards.
+
+Then against the **deployed** function: a bad-serial POST returned
+`{"success":false,"error":"This kiosk is not recognized. Please contact HR."}` — which settles the
+open question of whether the RPC's raised code survives InsForge's error normalization as a
+matchable string. It does. Counts unchanged (events 8, devices 0).
+
+### ⚠️ Follow-ups before this faces real employees
+- **No PIN brute-force protection.** `kiosk-punch` requires no caller auth by design, and a kiosk
+  PIN is 4–8 digits with no attempt limit or lockout. The device secret gates it — but that secret
+  lives in the tablet's `localStorage`, so a stolen or borrowed tablet reduces impersonating a
+  colleague to at most 10,000 tries. That is **buddy-punching, the exact thing an attendance system
+  exists to prevent.** Needs an attempt counter per (device, employee_code) with backoff, and
+  ideally rate limiting at the function.
+- **`hr_set_employee_kiosk_pin` is HR-gated**, so PINs cannot be seeded from the CLI — same
+  C3-shaped gap. Set one from the HR UI to test the kiosk end to end.
+- The HR screens to register a device and set a PIN **do not exist yet** — the RPCs do. That is the
+  next small piece of B9.
+
+### Next: ADMS
+Now a pure wire-format translator: parse ZKTeco/eSSL `key=value` bodies at `/iclock/cdata` and call
+the same seam. No attendance logic in it at all.
