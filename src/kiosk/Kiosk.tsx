@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle, LogIn, LogOut, Settings, XCircle } from "lucide-react";
+import { CheckCircle, Clock, LogIn, LogOut, Settings, WifiOff, XCircle } from "lucide-react";
 import { rawFunctions } from "../insforge/client";
 
 // B8 phase 2: kiosk adapter. No employee login is involved anywhere on this screen -- the tablet
@@ -31,12 +31,31 @@ function withTimeout(promise: Promise<any>, ms: number): Promise<any> {
   });
 }
 
+// One easing curve for every transition on this screen. A consistent signature is what makes
+// motion feel like it belongs to one physical world rather than several unrelated components.
+const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+
+// A punch can fail in ways that demand OPPOSITE reactions from the person at the tablet: a wrong
+// PIN means "type it again", a lockout means "stop typing and wait", a network drop means "this
+// is not your fault". Rendering all three as one red card is the difference between a screen that
+// works and one that leaves a queue of people guessing.
+type ResultKind = "success" | "locked" | "offline" | "error";
+
 type PunchResult = {
+  kind: ResultKind;
   success: boolean;
   message: string;
+  hint?: string;
   employeeName?: string | null;
   direction?: "in" | "out";
   occurredAt?: string;
+};
+
+const KIND_STYLES: Record<ResultKind, { border: string; bg: string; accent: string }> = {
+  success: { border: "border-emerald-700", bg: "bg-emerald-950", accent: "text-emerald-300" },
+  locked:  { border: "border-amber-700",   bg: "bg-amber-950",   accent: "text-amber-300" },
+  offline: { border: "border-slate-600",   bg: "bg-slate-800",   accent: "text-slate-200" },
+  error:   { border: "border-rose-700",    bg: "bg-rose-950",    accent: "text-rose-300" },
 };
 
 type ActiveField = "code" | "pin";
@@ -63,6 +82,9 @@ export default function Kiosk() {
   const [result, setResult] = useState<PunchResult | null>(null);
 
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Drives the drain bar on the result screen. Starts false so the width transition has
+  // something to animate FROM on the first frame.
+  const [drainStarted, setDrainStarted] = useState(false);
 
   const configured = Boolean(serial && secret);
 
@@ -70,7 +92,13 @@ export default function Kiosk() {
   // person in line can punch without anyone touching the tablet. This is the one behavior on
   // this screen that must never silently fail to fire.
   useEffect(() => {
-    if (!result) return;
+    if (!result) {
+      setDrainStarted(false);
+      return;
+    }
+    // Flip on the next frame so the card's entrance and the drain bar have a "from" state to
+    // animate out of. Without the rAF both would jump straight to their end value.
+    const raf = requestAnimationFrame(() => setDrainStarted(true));
     resetTimerRef.current = setTimeout(() => {
       setResult(null);
       setEmployeeCode("");
@@ -78,6 +106,7 @@ export default function Kiosk() {
       setActiveField("code");
     }, RESET_DELAY_MS);
     return () => {
+      cancelAnimationFrame(raf);
       if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
     };
   }, [result]);
@@ -134,7 +163,7 @@ export default function Kiosk() {
     const code = employeeCode.trim();
     const pinValue = pin.trim();
     if (!code || !pinValue) {
-      setResult({ success: false, message: "Enter your employee code and PIN." });
+      setResult({ kind: "error", success: false, message: "Enter your employee code and PIN." });
       return;
     }
 
@@ -148,20 +177,45 @@ export default function Kiosk() {
       );
 
       if (error || !data) {
-        setResult({ success: false, message: "Could not reach the server. Please try again." });
+        setResult({
+          kind: "offline",
+          success: false,
+          message: "No connection",
+          hint: "The kiosk could not reach the server. Your punch was not recorded - please try again.",
+        });
       } else if (data.success) {
         setResult({
+          kind: "success",
           success: true,
-          message: data.direction === "out" ? "Punched Out" : "Punched In",
+          message: data.direction === "out" ? "Punched out" : "Punched in",
           employeeName: data.employee_name,
           direction: data.direction,
           occurredAt: data.occurred_at,
         });
+      } else if (data.code === "LOCKED_OUT") {
+        // Deliberately no countdown and no cause: telling someone which key tripped, and exactly
+        // when it clears, hands an attacker the schedule for their next attempt.
+        setResult({
+          kind: "locked",
+          success: false,
+          message: "Too many attempts",
+          hint: "Please wait a few minutes before trying again, or ask HR for help.",
+        });
       } else {
-        setResult({ success: false, message: data.error || "Punch failed. Please try again." });
+        setResult({
+          kind: "error",
+          success: false,
+          message: data.error || "Punch failed. Please try again.",
+          hint: data.code === "EMPLOYEE_NOT_RESOLVED" ? "Check your employee code, then re-enter your PIN." : undefined,
+        });
       }
     } catch {
-      setResult({ success: false, message: "Could not reach the server. Please try again." });
+      setResult({
+        kind: "offline",
+        success: false,
+        message: "No connection",
+        hint: "The kiosk could not reach the server. Your punch was not recorded - please try again.",
+      });
     } finally {
       setSubmitting(false);
       setEmployeeCode("");
@@ -225,28 +279,63 @@ export default function Kiosk() {
   }
 
   // ── Result screen ─────────────────────────────────────────────────────────────
+  // This is the highest-frequency screen in the whole product -- every employee, twice a day --
+  // so per the Delight-Impact Curve it gets micro-interactions and NOTHING theatrical. The only
+  // motion here is a bar draining toward the auto-reset, which is not decoration: it tells the
+  // next person in the queue that the tablet is about to be ready, so nobody prods at it.
   if (result) {
+    const style = KIND_STYLES[result.kind];
+    const Icon =
+      result.kind === "success" ? CheckCircle
+      : result.kind === "locked" ? Clock
+      : result.kind === "offline" ? WifiOff
+      : XCircle;
+
     return (
       <main className="grid min-h-screen place-items-center bg-slate-900 p-4">
         <section
-          className={`w-full max-w-lg rounded-3xl border p-12 text-center shadow-lg ${
-            result.success ? "border-emerald-700 bg-emerald-950" : "border-rose-700 bg-rose-950"
-          }`}
+          className={`w-full max-w-lg overflow-hidden rounded-3xl border shadow-lg ${style.border} ${style.bg}`}
+          style={{
+            // Rises into place rather than cutting in, so the result reads as having come FROM
+            // the entry screen instead of replacing it. EASE is the screen's single signature.
+            opacity: drainStarted ? 1 : 0,
+            transform: drainStarted ? "translateY(0)" : "translateY(8px)",
+            transition: `opacity 220ms ${EASE}, transform 220ms ${EASE}`,
+          }}
         >
-          {result.success ? (
-            <CheckCircle className="mx-auto mb-4 h-24 w-24 text-emerald-400" />
-          ) : (
-            <XCircle className="mx-auto mb-4 h-24 w-24 text-rose-400" />
-          )}
-          <h1 className={`text-4xl font-bold ${result.success ? "text-emerald-300" : "text-rose-300"}`}>
-            {result.message}
-          </h1>
-          {result.success && result.employeeName ? (
-            <p className="mt-3 text-2xl font-semibold text-white">{result.employeeName}</p>
-          ) : null}
-          {result.success && result.occurredAt ? (
-            <p className="mt-2 text-lg text-slate-300">{formatTime(result.occurredAt)}</p>
-          ) : null}
+          <div className="p-12 text-center">
+            <Icon className={`mx-auto mb-4 h-24 w-24 ${style.accent}`} aria-hidden="true" />
+
+            {/* Identity leads on success: the one thing a person must verify at a glance is that
+                THEIR punch registered, not someone else's. break-words + line-clamp so a long
+                name wraps instead of bursting the card. */}
+            {result.kind === "success" && result.employeeName ? (
+              <p className="mx-auto line-clamp-2 max-w-full break-words text-3xl font-semibold text-white">
+                {result.employeeName}
+              </p>
+            ) : null}
+
+            <h1 className={`mt-2 break-words text-4xl font-bold ${style.accent}`}>{result.message}</h1>
+
+            {result.occurredAt ? (
+              <p className="mt-2 text-lg text-slate-300">{formatTime(result.occurredAt)}</p>
+            ) : null}
+
+            {result.hint ? (
+              <p className="mx-auto mt-4 max-w-sm text-base text-slate-300">{result.hint}</p>
+            ) : null}
+          </div>
+
+          {/* Drains to empty over exactly the reset delay. */}
+          <div className="h-1.5 w-full bg-black/30" aria-hidden="true">
+            <div
+              className={`h-full ${result.kind === "success" ? "bg-emerald-400" : "bg-slate-400"}`}
+              style={{
+                width: drainStarted ? "0%" : "100%",
+                transition: `width ${RESET_DELAY_MS}ms linear`,
+              }}
+            />
+          </div>
         </section>
       </main>
     );

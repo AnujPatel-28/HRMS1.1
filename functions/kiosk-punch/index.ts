@@ -59,6 +59,15 @@ const ERROR_MESSAGES = {
   LOCKED_OUT: "Too many failed attempts. Please wait a few minutes and try again.",
 };
 
+// The bare code behind a message, when we recognise it. The kiosk needs this to tell a lockout
+// apart from a wrong PIN -- they look the same to the server but demand opposite reactions from
+// the person at the tablet. Returns null rather than guessing when nothing matches.
+function rawCode(raw) {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (ERROR_MESSAGES[text]) return text;
+  return Object.keys(ERROR_MESSAGES).find((code) => text.includes(code)) || null;
+}
+
 function friendlyMessage(rawCode) {
   const text = typeof rawCode === "string" ? rawCode.trim() : "";
   // Exact match first (the RPC returns bare codes with no extra text -- confirmed live against
@@ -104,11 +113,11 @@ export default async function (request) {
 
     if (rpcError) {
       console.error("[kiosk-punch] device_ingest_punch error:", rpcError);
-      return json({ success: false, error: friendlyMessage(rpcError.message) });
+      return json({ success: false, error: friendlyMessage(rpcError.message), code: rawCode(rpcError.message) });
     }
 
     if (!data || data.success === false) {
-      return json({ success: false, error: friendlyMessage(data?.error) });
+      return json({ success: false, error: friendlyMessage(data?.error), code: rawCode(data?.error) });
     }
 
     // Best-effort display name for the kiosk screen. The punch already succeeded above, so a
