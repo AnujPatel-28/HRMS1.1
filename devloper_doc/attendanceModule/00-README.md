@@ -12,6 +12,7 @@ Start here. Read `01` first; the rest can be read in any order.
 | [06 - Devices & Ingestion](06-devices-and-ingestion.md) | Kiosk tablets or ZKTeco/eSSL biometric machines. |
 | [07 - Decisions & Gotchas](07-decisions-and-gotchas.md) | **Read before changing anything.** Every entry is here because something broke. |
 | [08 - Common Queries Cheatsheet](08-common-queries-cheatsheet.md) | You need a working snippet right now. |
+| [09 - Edge Functions](09-edge-functions.md) | You are writing, deploying or debugging an edge function. **Read §2 before choosing an auth pattern.** |
 
 ---
 
@@ -36,6 +37,8 @@ migrations/                        the schema and every server function
 functions/kiosk-punch/             kiosk HTTP boundary
 functions/adms-cdata/              ZKTeco / eSSL protocol translator
 functions/run-attendance-derivation/   the scheduled trigger
+functions/check-punch-out-gate/    punch-out pre-check (recovered orphan)
+functions/calculate-late-marks.ts  late-mark count vs the tenant threshold
 src/employee/PunchInOut.tsx        employee punch screen
 src/hr/Attendance.tsx              HR daily grid + punch trail
 src/hr/AttendanceDevices.tsx       device provisioning
