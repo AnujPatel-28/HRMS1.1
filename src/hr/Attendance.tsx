@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Calendar, ChevronLeft, ChevronRight, Download, Users, BarChart3, Clock, Pencil, Check, X, ClipboardList, MapPin, FileEdit, Camera } from "lucide-react";
+import { Calendar, ChevronLeft, ChevronRight, Download, Users, BarChart3, Clock, Pencil, Check, X, ClipboardList, MapPin, FileEdit, Camera, ListTree } from "lucide-react";
 import type { Attendance, Employee, Shift, EmployeeShift, AttendanceSelfie } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db, storage } from "../insforge/client";
@@ -7,6 +7,7 @@ import { useEmployee } from "../hooks/useEmployee";
 import { useAuditLog } from "../hooks/useAuditLog";
 import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
+import PunchTrailTray from "./components/PunchTrailTray";
 import { EmptyState } from "../shared/EmptyState";
 import { SelectDropdown } from "../shared/components/SelectDropdown";
 import LocationMap from "../shared/LocationMap";
@@ -384,6 +385,8 @@ export default function HRAttendance() {
   const [saving, setSaving] = useState(false);
   const [tenantSettings, setTenantSettings] = useState<Record<string, string>>({});
   const [selectedLocationRow, setSelectedLocationRow] = useState<AttendanceWithEmployee | null>(null);
+  // B7d: which day's punch trail is open. Nothing in the product read attendance_events before this.
+  const [trailRow, setTrailRow] = useState<AttendanceWithEmployee | null>(null);
   const [activeBreaks, setActiveBreaks] = useState<{ id: string; employee_id: string; break_type: string; started_at: string }[]>([]);
 
   const [empViewEmployee, setEmpViewEmployee] = useState<string>("");
@@ -1243,9 +1246,14 @@ export default function HRAttendance() {
                                   </button>
                                 </div>
                               ) : (
-                                <button onClick={() => startEdit(row)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-50 transition-colors shadow-sm">
-                                  <Pencil className="h-3 w-3" /> Edit
-                                </button>
+                                <div className="inline-flex items-center gap-2">
+                                  <button onClick={() => startEdit(row)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-50 transition-colors shadow-sm">
+                                    <Pencil className="h-3 w-3" /> Edit
+                                  </button>
+                                  <button onClick={() => setTrailRow(row)} title="Show the punch events behind this day" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-50 transition-colors shadow-sm">
+                                    <ListTree className="h-3 w-3" /> Trail
+                                  </button>
+                                </div>
                               )}
                             </div>
                           </div>
@@ -1338,9 +1346,14 @@ export default function HRAttendance() {
                               </button>
                             </div>
                           ) : (
-                            <button onClick={() => startEdit(row)} className="justify-center inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-brand-600 hover:bg-brand-50 transition-colors active:scale-95">
-                              <Pencil className="h-3.5 w-3.5" /> Edit
-                            </button>
+                            <div className="flex items-center justify-center gap-2">
+                              <button onClick={() => startEdit(row)} className="justify-center inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-brand-600 hover:bg-brand-50 transition-colors active:scale-95">
+                                <Pencil className="h-3.5 w-3.5" /> Edit
+                              </button>
+                              <button onClick={() => setTrailRow(row)} className="justify-center inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 transition-colors active:scale-95">
+                                <ListTree className="h-3.5 w-3.5" /> Trail
+                              </button>
+                            </div>
                           )}
                         </td>
                       </tr>
@@ -2488,6 +2501,18 @@ export default function HRAttendance() {
           </div>
         </div>
       )}
+      {trailRow ? (
+        <PunchTrailTray
+          open
+          onClose={() => setTrailRow(null)}
+          tenantId={tenantId}
+          employeeId={trailRow.employee_id}
+          employeeName={trailRow.employee?.full_name ?? "Employee"}
+          date={dailyDate}
+          attendanceId={trailRow.id || null}
+          derivationSource={(trailRow as { derivation_source?: string | null }).derivation_source ?? null}
+        />
+      ) : null}
     </section>
   );
 }
