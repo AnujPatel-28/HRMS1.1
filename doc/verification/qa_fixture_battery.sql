@@ -55,10 +55,15 @@ BEGIN
 
   -- A2. An employee with user_id NULL cannot log in at all -- that is how the module-mix
   -- fixture tenants are built, and exactly what this tenant must not be.
+  -- Scoped to the six FIXTURE employees, not the tenant. OM-12 has QA create an employee, and
+  -- a tenant-wide count would then fail on the tester's own test step.
   SELECT count(*) INTO v_n FROM public.employees
-   WHERE tenant_id = t AND status = 'active' AND user_id IS NOT NULL;
+   WHERE tenant_id = t AND status = 'active' AND user_id IS NOT NULL
+     AND id IN ('e0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000002',
+                'e0000000-0000-0000-0000-000000000003','e0000000-0000-0000-0000-000000000004',
+                'e0000000-0000-0000-0000-000000000005','e0000000-0000-0000-0000-000000000006');
   IF v_n <> 6 THEN
-    RAISE EXCEPTION 'A2 FAILED: expected 6 active auth-backed employees, got %', v_n;
+    RAISE EXCEPTION 'A2 FAILED: expected the 6 fixture employees active and auth-backed, got %', v_n;
   END IF;
   v_report := v_report || ('A2 PASS' || ': ' || '6 active employees, every one auth-backed')::text;
 
@@ -67,12 +72,17 @@ BEGIN
   -- 'owner' satisfies neither. Checking the metadata is the only check that predicts what a
   -- tester will actually see on screen.
   SELECT count(*) INTO v_n FROM public.employees e JOIN auth.users u ON u.id = e.user_id
-   WHERE e.tenant_id = t AND u.metadata->>'role' = 'hr';
-  IF v_n <> 1 THEN RAISE EXCEPTION 'A3 FAILED: expected exactly 1 metadata role=hr, got %', v_n; END IF;
+   WHERE e.tenant_id = t AND e.id IN ('e0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000002',
+                'e0000000-0000-0000-0000-000000000003','e0000000-0000-0000-0000-000000000004',
+                'e0000000-0000-0000-0000-000000000005','e0000000-0000-0000-0000-000000000006') AND u.metadata->>'role' = 'hr';
+  IF v_n <> 1 THEN RAISE EXCEPTION 'A3 FAILED: expected exactly 1 fixture employee with metadata role=hr, got %', v_n; END IF;
 
+  -- Scoped to the fixture: an employee QA creates in OM-12 would otherwise make this 6.
   SELECT count(*) INTO v_n FROM public.employees e JOIN auth.users u ON u.id = e.user_id
-   WHERE e.tenant_id = t AND u.metadata->>'role' = 'employee';
-  IF v_n <> 5 THEN RAISE EXCEPTION 'A3 FAILED: expected 5 metadata role=employee, got %', v_n; END IF;
+   WHERE e.tenant_id = t AND e.id IN ('e0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000002',
+                'e0000000-0000-0000-0000-000000000003','e0000000-0000-0000-0000-000000000004',
+                'e0000000-0000-0000-0000-000000000005','e0000000-0000-0000-0000-000000000006') AND u.metadata->>'role' = 'employee';
+  IF v_n <> 5 THEN RAISE EXCEPTION 'A3 FAILED: expected 5 fixture employees with metadata role=employee, got %', v_n; END IF;
 
   -- get_auth_tenant_id() reads metadata->>'tenant_id'; a NULL there makes the RESTRICTIVE
   -- tenant fence return 0 rows on every table, which looks exactly like a broken product.
@@ -96,13 +106,27 @@ BEGIN
   IF v_n <> 1 THEN RAISE EXCEPTION 'A5 FAILED: expected exactly 1 active default shift, got %', v_n; END IF;
 
   SELECT count(*) INTO v_n FROM public.employees e
-   WHERE e.tenant_id = t AND e.status = 'active'
+   WHERE e.tenant_id = t AND e.status = 'active' AND e.id IN ('e0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000002',
+                'e0000000-0000-0000-0000-000000000003','e0000000-0000-0000-0000-000000000004',
+                'e0000000-0000-0000-0000-000000000005','e0000000-0000-0000-0000-000000000006')
      AND NOT EXISTS (SELECT 1 FROM public.employee_shifts es WHERE es.employee_id = e.id AND es.tenant_id = t);
-  IF v_n <> 0 THEN RAISE EXCEPTION 'A5 FAILED: % active employees have no shift assignment; derivation skips them', v_n; END IF;
+  IF v_n <> 0 THEN RAISE EXCEPTION 'A5 FAILED: % fixture employees have no shift assignment; derivation skips them', v_n; END IF;
 
   SELECT count(*) INTO v_n FROM public.employees
-   WHERE tenant_id = t AND status = 'active' AND coalesce(employee_code,'') = '';
-  IF v_n <> 0 THEN RAISE EXCEPTION 'A5 FAILED: % active employees have no employee_code; the kiosk cannot resolve them', v_n; END IF;
+   WHERE tenant_id = t AND status = 'active' AND id IN ('e0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000002',
+                'e0000000-0000-0000-0000-000000000003','e0000000-0000-0000-0000-000000000004',
+                'e0000000-0000-0000-0000-000000000005','e0000000-0000-0000-0000-000000000006') AND coalesce(employee_code,'') = '';
+  IF v_n <> 0 THEN RAISE EXCEPTION 'A5 FAILED: % fixture employees have no employee_code; the kiosk cannot resolve them', v_n; END IF;
+
+  -- Employees QA created themselves are reported, never raised on -- a missing code on a
+  -- hand-created employee is a product observation for OM-12, not a broken fixture.
+  SELECT count(*) INTO v_n FROM public.employees
+   WHERE tenant_id = t AND status = 'active' AND id NOT IN ('e0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000002',
+                'e0000000-0000-0000-0000-000000000003','e0000000-0000-0000-0000-000000000004',
+                'e0000000-0000-0000-0000-000000000005','e0000000-0000-0000-0000-000000000006') AND coalesce(employee_code,'') = '';
+  IF v_n > 0 THEN
+    v_report := v_report || format('A5 FINDING: %s QA-created employee(s) have no employee_code and could not use a kiosk. Relevant to OM-12; not a fixture fault.', v_n)::text;
+  END IF;
   v_report := v_report || ('A5 PASS' || ': ' || '1 default shift, every employee assigned, every employee has a code')::text;
 
   -- A6. Leave prerequisites, including the ledger identity nothing in the schema enforces.
@@ -115,10 +139,13 @@ BEGIN
 
   SELECT count(*) INTO v_n
   FROM public.employees e CROSS JOIN public.leave_types lt
-  WHERE e.tenant_id = t AND e.status = 'active' AND lt.tenant_id = t AND lt.is_active
+  WHERE e.tenant_id = t AND e.status = 'active' AND e.id IN ('e0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000002',
+                'e0000000-0000-0000-0000-000000000003','e0000000-0000-0000-0000-000000000004',
+                'e0000000-0000-0000-0000-000000000005','e0000000-0000-0000-0000-000000000006')
+    AND lt.tenant_id = t AND lt.is_active
     AND NOT EXISTS (SELECT 1 FROM public.leave_balances lb
                      WHERE lb.employee_id = e.id AND lb.leave_type_id = lt.id AND lb.year = 2026);
-  IF v_n <> 0 THEN RAISE EXCEPTION 'A6 FAILED: % (employee, leave type) pairs have no 2026 balance row', v_n; END IF;
+  IF v_n <> 0 THEN RAISE EXCEPTION 'A6 FAILED: % (fixture employee, leave type) pairs have no 2026 balance row', v_n; END IF;
   v_report := v_report || ('A6 PASS' || ': ' || '4 leave types, complete 2026 ledger, arithmetic consistent')::text;
 
   -- A7. The default shift's numbers are the ones doc/qa/03's boundary cases are written

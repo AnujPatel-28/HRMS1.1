@@ -92,8 +92,10 @@ B2a/B2b together pin the boundary to the minute, which is why
 B7 is the guard behind [AT-18](03-attendance-tests.md): without it, every HR correction would be
 silently reverted by the next hourly run.
 
-All Part B writes rolled back; population restored to attendance 23, events 10, runs 110,
-leaves 3.
+All Part B writes rolled back, with the row counts for attendance, events, derivation runs and
+leaves each restored to the baseline taken before the run. The suite prints those four numbers on
+every run and raises if any of them moved, so the check is live rather than a figure recorded here
+that would go stale.
 
 ### Part C · Organisation invariants — 3 passed, 3 findings
 
@@ -166,6 +168,30 @@ as refusal would let a wide-open table pass.
 
 ---
 
+## Read, not run — the leave apply path
+
+Not a suite result. `employee_apply_leave_request` was read on 2026-08-31 because three leave
+test cases were about to assert behaviour nobody had checked. Two of the five settings HR can
+configure on a leave type turn out to be inert:
+
+| Setting on `leave_types` | Read by the apply path? |
+|---|---|
+| `min_notice_days` | **Yes** — and it takes the larger of this and a tenant-wide `leave_min_notice_days` |
+| `max_consecutive_days` | **Yes** — counted in **working days**, not calendar days |
+| `applicable_from_day` | **Yes** — this is what gates Earned Leave behind 90 days' service |
+| `probation_restricted` | **No.** Written by Policy Center, read by nothing |
+| `requires_document` | **No.** Same |
+
+`probation_restricted` appears in `src/hr/PolicyCenter.tsx` only, where HR sets it. No enforcement
+path reads it — not the RPC, not the employee apply screen.
+
+This is why [LV-05](04-shift-leave-task-tests.md) tells the tester to expect Earned Leave to be
+**refused** and Casual Leave probably **accepted**, rather than the obvious-looking "probation
+blocks restricted types". Writing it the obvious way would have produced a false bug report on
+the first run — the same shape of error the organisation-module doc audit found four of.
+
+---
+
 ## What these suites do NOT cover
 
 Listed plainly so nobody mistakes a green run for a tested product.
@@ -185,3 +211,6 @@ Listed plainly so nobody mistakes a green run for a tested product.
   *attendance* does with it. The application, approval and balance arithmetic are LV-01 to LV-10,
   and remain a human's job this round.
 - **Payroll.** Not built.
+- **Whether the two inert leave settings above are enforced anywhere else.** The RPC does not
+  read them; a client-side check in a screen not yet read could still exist. LV-05 and LV-12
+  exist to settle that from the outside.

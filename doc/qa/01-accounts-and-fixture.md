@@ -97,16 +97,23 @@ The two "(not real)" entries are fabricated for testing. Do not report them as w
 
 | Type | Code | Days/yr | Notes | Balance seeded for everyone |
 |---|---|---|---|---|
-| Casual Leave | CL | 12 | Max 3 consecutive; 1 day notice; blocked during probation | **12.0** |
-| Sick Leave | SL | 6 | Max 5 consecutive; **requires a document**; allowed during probation | **6.0** |
-| Earned Leave | EL | 15 | 7 days notice; carry-forward up to 10; encashable; only after 90 days' service; blocked during probation | **18.0** (15 + 3 carried forward) |
+| Casual Leave | CL | 12 | Max 3 working days per request; 1 day notice; flagged probation-restricted † | **12.0** |
+| Sick Leave | SL | 6 | Max 5 working days per request; flagged as requiring a document † | **6.0** |
+| Earned Leave | EL | 15 | 7 days notice; **only after 90 days' service** (enforced); carry-forward up to 10; encashable | **18.0** (15 + 3 carried forward) |
 | Leave Without Pay | LWP | 0 | **Unpaid** | 0.0 |
 
 Every balance is `2026`, with `used_days = 0` — you will be the first to move those numbers.
 **Balances do not grow over time** (see `00-README.md` §1).
 
-`QA Incomplete Onboarding` is the only employee still on probation, so it is the only account
-where the probation restrictions on CL and EL can be observed.
+† **Two of these settings are configured but not enforced.** The leave apply path was read on
+2026-08-31: it enforces `min_notice_days`, `max_consecutive_days` (counted in **working days**,
+not calendar days) and `applicable_from_day`, and it never reads `probation_restricted` or
+`requires_document` at all. HR can set either flag in Policy Center and nothing will act on it.
+[LV-05](04-shift-leave-task-tests.md) and LV-12 are written to confirm that from the UI side.
+
+`QA Incomplete Onboarding` joined 2026-08-25, so they are both the only employee on probation
+**and** the only one inside the 90-day window that gates Earned Leave — which makes them the one
+account where the enforced rule and the inert one can be told apart.
 
 ---
 
@@ -114,7 +121,10 @@ where the probation restrictions on CL and EL can be observed.
 
 Nothing below exists yet. Finding it empty is the starting state, not a bug.
 
-- Attendance records for the QA employees (2 stale rows aside), and all punches
+- **Punches.** The tenant holds 7 attendance rows and nothing else: 2 stale `present` rows from
+  an earlier session (2026-08-28 and 08-29), and 5 `weekly_off` rows for Sunday **2026-08-30**
+  that appeared when derivation was force-run over 2026-08-28..08-31 while preparing this plan.
+  No employee here has ever punched. Sunday rows with no punch times are normal
 - Kiosk PINs, and any registered attendance device
 - Leave requests
 - Tasks and projects (1 stale row of each)

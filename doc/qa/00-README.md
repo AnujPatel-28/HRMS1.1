@@ -136,6 +136,6 @@ time-dependent, and without those two nobody can reproduce you.
 | [`01-accounts-and-fixture.md`](01-accounts-and-fixture.md) | The six accounts, what each is for, and every piece of data seeded for you |
 | [`02-organisation-tests.md`](02-organisation-tests.md) | Organisation module — 18 cases with expected results |
 | [`03-attendance-tests.md`](03-attendance-tests.md) | Attendance module — 22 cases with expected results |
-| [`04-shift-leave-task-tests.md`](04-shift-leave-task-tests.md) | Shift, Leave, and Task/Project — 21 cases |
+| [`04-shift-leave-task-tests.md`](04-shift-leave-task-tests.md) | Shift, Leave, and Task/Project — 28 cases |
 | [`05-bug-report-template.md`](05-bug-report-template.md) | The report format, and one worked example |
 | [`06-agent-coverage.md`](06-agent-coverage.md) | What the automated suites already proved, and their results |

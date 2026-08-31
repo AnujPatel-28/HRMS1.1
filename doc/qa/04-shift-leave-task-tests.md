@@ -1,6 +1,6 @@
 # Shift, Leave, and Task/Project — QA test cases
 
-21 cases. These three modules get lighter coverage than Organisation and Attendance by
+28 cases (7 shift, 13 leave, 8 task/project). These three modules get lighter coverage than Organisation and Attendance by
 deliberate choice — they are the priority for this round. Depth here is the next round's work.
 
 ---
@@ -73,17 +73,26 @@ already taken.
 **Record what the balance shows** — pending days are tracked separately from used days, and
 whether the UI distinguishes them is exactly what is being checked.
 
-### LV-02 · The notice-period rule
+### LV-02 · The notice-period rule — *verified enforced*
 Apply for Casual Leave **starting today** (CL requires 1 day's notice), then for Earned Leave
 starting in 3 days (EL requires 7).
 
-**Expect:** both rejected with a message naming the notice requirement.
+**Expect:** both rejected with *"This leave requires at least N days notice"*.
+The apply path was read on 2026-08-31 and does enforce this. Note that the effective notice is
+the **larger** of the leave type's own `min_notice_days` and a tenant-wide
+`leave_min_notice_days` setting — so if the number in the message is bigger than the type's,
+that is correct, not a bug.
 **Report if:** either is accepted, or the message does not say how much notice is needed.
 
-### LV-03 · The consecutive-days cap
+### LV-03 · The consecutive-days cap — *verified enforced, counted in working days*
 Apply for **4 consecutive days** of Casual Leave (capped at 3).
 
-**Expect:** rejected, naming the 3-day cap. Then apply for exactly 3 — that must be accepted.
+**Expect:** rejected — *"Casual Leave allows a maximum of 3 working days per request"*.
+**Choose your dates carefully.** The cap counts **working days**, not calendar days, so a
+4-calendar-day range spanning a Sunday is only 3 working days and will correctly be **accepted**.
+Pick four dates that are all working days (remember Saturday is one). Then apply for exactly
+3 working days — that must be accepted.
+**Report if:** four working days are accepted, or the message counts calendar days.
 
 ### LV-04 · Applying for more than you have
 Apply for **10 days** of Sick Leave against a balance of 6.
@@ -92,13 +101,24 @@ Apply for **10 days** of Sick Leave against a balance of 6.
 **Report if it is accepted** — and check afterwards whether the balance went negative. A negative
 balance is a high-priority report: nothing in the database prevents it.
 
-### LV-05 · Probation restrictions — `onboarding-qa`
-Sign in as `onboarding-qa` (the only employee on probation). Apply for **Casual Leave** (which is
-probation-restricted) and then **Sick Leave** (which is not).
+### LV-05 · Probation and length-of-service restrictions — `onboarding-qa`
+Sign in as `onboarding-qa`, who joined **2026-08-25** and is the only employee on probation.
+Apply for **Earned Leave**, then **Casual Leave**, then **Sick Leave**.
 
-**Expect:** CL refused with a probation message; SL accepted.
-**Report if:** both are refused, both accepted, or the probation message appears for the wrong
-type.
+**Expect:**
+- **Earned Leave — rejected**, with *"Earned Leave is only available after 90 days of
+  employment"*. This rule (`applicable_from_day`) **is** enforced by the apply path, and
+  onboarding-qa is well short of 90 days.
+- **Casual Leave — probably accepted.** CL is configured `probation_restricted = true`, but the
+  apply path was read on 2026-08-31 and **does not read that column at all**. HR can set the
+  flag in Policy Center and nothing enforces it.
+- **Sick Leave — accepted.** Not restricted either way.
+
+**What to record:** whether CL is accepted or refused, and if refused, the exact message. An
+acceptance confirms a known gap — a configured setting that does nothing. A refusal means
+something *else* is enforcing it, which is worth knowing.
+**File this once** as "probation restriction on leave types is configurable but not enforced",
+with your CL result as the evidence. Do not file it per leave type.
 
 ### LV-06 · Approval moves the balance — `hr-qa`, `/hr/leaves`
 Approve the 2-day CL request from LV-01. Then re-check the employee's balance.
