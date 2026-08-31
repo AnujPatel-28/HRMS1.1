@@ -61,7 +61,16 @@ finding.
 
 ## 3. Setup
 
-1. **URL:** https://hrms.talentmeshsolutions.com
+1. **URL:** `https://qa-test.hrms.talentmeshsolutions.com`
+
+   > **This host must be published before testing can start.** Verified 2026-08-31: it does not
+   > resolve yet (`NXDOMAIN`). There is no wildcard domain — every tenant subdomain is added by
+   > hand in Vercel and GoDaddy. See §7.
+   >
+   > **Do not use `hrms.talentmeshsolutions.com`.** That is the super-admin/landing host. The app
+   > reads the tenant from the subdomain, and the bare host deliberately resolves to *no* tenant,
+   > so you would get a "not found" screen no matter which account you signed in with.
+
 2. **Accounts and password:** see [`01-accounts-and-fixture.md`](01-accounts-and-fixture.md).
    The password is **not** in this repository — ask the project owner for
    `doc/qa/CREDENTIALS.local.md`, which is deliberately git-ignored.
@@ -139,3 +148,36 @@ time-dependent, and without those two nobody can reproduce you.
 | [`04-shift-leave-task-tests.md`](04-shift-leave-task-tests.md) | Shift, Leave, and Task/Project — 28 cases |
 | [`05-bug-report-template.md`](05-bug-report-template.md) | The report format, and one worked example |
 | [`06-agent-coverage.md`](06-agent-coverage.md) | What the automated suites already proved, and their results |
+
+---
+
+## 7. Publishing the QA subdomain — for whoever sets this up, not the tester
+
+The tenant row already carries the subdomain **`qa-test`**. Two steps remain, the same two the
+Super Admin Console prints after creating any company:
+
+1. **Vercel** → Project → Settings → Domains → Add: `qa-test.hrms.talentmeshsolutions.com`
+2. **GoDaddy** → DNS for `talentmeshsolutions.com` → Add record:
+
+   | Field | Value |
+   |---|---|
+   | Type | `CNAME` |
+   | Name | `qa-test.hrms` |
+   | Value | `cname.vercel-dns.com` |
+   | TTL | 1 hour (default) |
+
+Confirm with `nslookup qa-test.hrms.talentmeshsolutions.com` before handing the URL to a tester.
+
+**Why not test locally instead.** A dev server would avoid the DNS step, but it cannot test the
+part of this module that matters most. Camera and GPS need a **secure context**: `localhost` gets
+a browser exception, but a phone reaching your machine over the LAN at `http://192.168.x.x:5173`
+does **not** — so `getUserMedia` and `geolocation` are blocked outright, and the entire punch-in
+flow with selfie and location becomes untestable on a phone. Attendance is a mobile feature.
+Local testing also runs Vite's dev server rather than the built bundle Vercel actually serves,
+and points at the same live backend regardless, so it isolates nothing.
+
+Local development still works for a developer reproducing something: run `npm run dev` and use
+`http://qa-test.localhost:5173` (Chrome resolves `*.localhost` on its own), or plain
+`http://localhost:5173` with `VITE_DEFAULT_TENANT_ID=da7a0000-7e57-4bca-95ba-c4ea7a6eca5e` —
+that env var is read **only** on localhost, by design, so the super-admin host can never quietly
+serve one tenant's portal.

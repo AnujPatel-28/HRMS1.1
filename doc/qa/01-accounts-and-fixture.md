@@ -1,7 +1,12 @@
 # QA accounts and the seeded fixture
 
-Tenant: **QA Testing Org** · `da7a0000-7e57-4bca-95ba-c4ea7a6eca5e` · status `active`, plan `pro`.
-All twelve modules are enabled, so every screen in the product is reachable from these logins.
+Tenant: **QA Testing Org** · `da7a0000-7e57-4bca-95ba-c4ea7a6eca5e` · subdomain **`qa-test`** ·
+status `active`, plan `pro`. All twelve modules are enabled, so every screen in the product is
+reachable from these logins.
+
+**Portal:** `https://qa-test.hrms.talentmeshsolutions.com` — **not yet published**; see
+[`00-README.md`](00-README.md) §7. The bare `hrms.talentmeshsolutions.com` is the super-admin
+host and resolves to no tenant at all.
 
 ---
 
