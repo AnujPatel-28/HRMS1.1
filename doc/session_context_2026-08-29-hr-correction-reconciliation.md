@@ -1,5 +1,9 @@
 # Session context — 2026-08-29. HR write paths reconciled. Deploy unblocked. B7b built.
 
+> **SUPERSEDED — read `doc/session_context_2026-08-31-attendance-complete.md` instead.**
+> That file is the consolidated handoff for this session. Sections 8–14 below are the same session
+> appended as it ran, and are kept for the detail.
+>
 > **Read §8 first.** §0–§7 were written in the morning, while the Vercel deploy was still blocked.
 > The block cleared later the same day and B7b was built; §8 is the current state and supersedes
 > every "deploy is not live" statement below.
