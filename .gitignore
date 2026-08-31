@@ -45,3 +45,6 @@ create_hr.js
 .roo
 .trae
 .windsurf
+
+# QA credentials -- the repo is public; the QA password must never be committed
+doc/qa/CREDENTIALS.local.md
