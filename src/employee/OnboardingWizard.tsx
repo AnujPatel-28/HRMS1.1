@@ -68,10 +68,14 @@ export default function OnboardingWizard() {
           .insert([{
             tenant_id: tenantId,
             employee_id: currentEmployee.id,
-            personal_details_completed: false,
-            bank_details_completed: false,
-            documents_completed: false,
-            emergency_contact_completed: false,
+            // These four are the ACTUAL column names. They were renamed from
+            // *_completed and this file kept writing the old ones, so every write here
+            // failed with: column "personal_details_completed" ... does not exist.
+            // They are `boolean DEFAULT false`, so these explicit falses are optional.
+            section_personal: false,
+            section_bank: false,
+            section_documents: false,
+            section_emergency: false,
           }])
           .select()
           .single();
@@ -150,7 +154,7 @@ export default function OnboardingWizard() {
       // 2. Update progress flag
       const { error: progErr } = await db
         .from("employee_onboarding_self")
-        .update({ personal_details_completed: true })
+        .update({ section_personal: true })
         .eq("employee_id", currentEmployee.id);
       if (progErr) throw progErr;
 
@@ -180,7 +184,7 @@ export default function OnboardingWizard() {
 
       const { error: progErr } = await db
         .from("employee_onboarding_self")
-        .update({ bank_details_completed: true })
+        .update({ section_bank: true })
         .eq("employee_id", currentEmployee.id);
       if (progErr) throw progErr;
 
@@ -247,7 +251,7 @@ export default function OnboardingWizard() {
 
       const { error: progErr } = await db
         .from("employee_onboarding_self")
-        .update({ documents_completed: true })
+        .update({ section_documents: true })
         .eq("employee_id", currentEmployee.id);
       if (progErr) throw progErr;
 
@@ -280,7 +284,7 @@ export default function OnboardingWizard() {
       const { error: progErr } = await db
         .from("employee_onboarding_self")
         .update({
-          emergency_contact_completed: true,
+          section_emergency: true,
           completed_at: new Date().toISOString()
         })
         .eq("employee_id", currentEmployee.id);

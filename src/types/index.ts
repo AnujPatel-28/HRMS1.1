@@ -221,10 +221,12 @@ export interface OnboardingSelfProgress {
   id: string;
   tenant_id: string;
   employee_id: string;
-  personal_details_completed: boolean;
-  bank_details_completed: boolean;
-  documents_completed: boolean;
-  emergency_contact_completed: boolean;
+  // Renamed in the database; the old *_completed names do not exist as columns. The type
+  // still declaring them is why every stale usage compiled cleanly and failed only at runtime.
+  section_personal: boolean;
+  section_bank: boolean;
+  section_documents: boolean;
+  section_emergency: boolean;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
