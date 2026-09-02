@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from "react";
+import { toLegacyEmploymentType } from "../utils/employmentType";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import type { Attendance, Employee, EmployeeGrade, EmployeeUnitAssignment, Leave, Task } from "../types";
 import { useTenant } from "../contexts/TenantContext";
@@ -166,7 +167,7 @@ export default function EmployeeDetail() {
       { value: "contract", label: "Contract", legacyValue: "contract" },
       { value: "intern", label: "Intern", legacyValue: "intern" },
     ];
-    const mapped = employmentTypes.map((type) => ({ value: type.id, label: type.name, legacyValue: type.code }));
+    const mapped = employmentTypes.map((type) => ({ value: type.id, label: type.name, legacyValue: toLegacyEmploymentType(type.code) }));
     return mapped.length > 0 ? mapped : legacy;
   }, [employmentTypes]);
 
