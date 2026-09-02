@@ -51,3 +51,30 @@ changes are unauthored.
 read existing department-scoped policy documents. Read
 `20260819120000_repoint-department-rls-to-org-units.NOTES.md` and run its review query before
 applying.
+
+## 20260902120000_create-employee-transaction-drop-vestigial-params.sql
+
+**Why it is parked here:** the InsForge CLI refuses it — `db migrations up` returns
+*"Query could not be parsed and was rejected for security reasons."* Ruled out by bisection:
+it is not the `DROP` (removing it still fails), not the dollar-quoting (4 tags, balanced,
+named), not CRLF (converted to LF, still fails), and there is no dynamic SQL in the body.
+Other migrations in this repo create SECURITY DEFINER functions and drop overloads happily,
+so the trigger is specific to this file and was not worth more launch time to isolate.
+
+**What it does:** drops `p_department` and `p_designation` from
+`create_employee_transaction`. Both columns were dropped in the org rebuild (06 §5 step 6)
+and the function body references neither — they are dead parameters kept only in the
+signature. The body in this file is byte-identical to the deployed one.
+
+**Why it matters:** PostgREST resolves an RPC by its exact NAMED ARGUMENT SET. The frontend
+had stopped sending those two names, so the call matched no overload and failed with
+*"Could not find the function … in the schema cache"* — which reads as a missing function
+rather than a signature mismatch. That was the last blocker on employee creation.
+
+**Interim fix, already shipped:** `EmployeeCreate.tsx` now sends `p_department: null` and
+`p_designation: null`. Safe because the body ignores both.
+
+**To apply:** paste this file into the InsForge dashboard SQL Editor (Database → SQL Editor).
+Then delete the two `p_department` / `p_designation` lines from `EmployeeCreate.tsx` — they
+are commented with a pointer to this file — and redeploy. Order matters: apply the SQL
+FIRST, deploy the frontend SECOND, or creation breaks in the gap.
