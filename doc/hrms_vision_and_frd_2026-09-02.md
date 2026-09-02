@@ -25,7 +25,7 @@ present.
 | Leave | `leave` | ❌ **NOT rebuilt** | `leave_balances` is still a mutable counter (`total_allocated, carried_forward, used_days, pending_days, balance`). No ledger table exists |
 | Tasks / Projects | `tasks` | ❌ **NOT rebuilt** | RLS has no manager branch — §6.4 |
 | Payroll | `payroll` | ❌ **Not started** (last, by decision) | `salary_structures` is still fixed columns (`ctc_annual, basic_percent, hra_percent, special_allowance, …`), not a component model |
-| Onboarding | `onboarding` | ⚠️ **Broken in production** | Employee creation is hard-blocked — §6.3 |
+| Onboarding | `onboarding` | ❌ **NOT rebuilt** — was impassable end to end | Five separate failures in series, each hiding the next; it still speaks the pre-rebuild vocabulary of the Organisation module. Fixed 2026-09-02; see §5.3a |
 | Offboarding | `offboarding` | Present, untested | `exit_requests`, `exit_clearances`, `exit_clearance_templates` |
 | Policy Center | `policy_center` (core) | Present | `hr_policies`, `employee_policy_acknowledgements` |
 | Expenses / Insurance | `expenses`, `insurance` | Present, untested | |
@@ -294,6 +294,71 @@ approval onto the approval engine. Everything else can wait.
   for offboarding. Checklists differ by role; today there is no template concept at all.
 - **A single employee timeline** — HROne's "Workforce" idea. One screen showing
   hire → confirm → transfer → promote → exit, reading from lifecycle events.
+### 5.3a Onboarding was never rebuilt — and that is why it broke everywhere
+
+**Added 2026-09-02, after driving employee creation end to end for the first time.** The
+diagnosis is the user's and it is correct: **Organisation and Attendance were rebuilt; Onboarding
+and Employee Create were not.** They still speak the vocabulary of the schema that Organisation
+replaced.
+
+Five separate failures in one afternoon, all the same root cause — a rebuilt module on one side of
+a seam and an un-rebuilt caller on the other:
+
+| # | Symptom | Actual cause |
+|---|---|---|
+| 1 | *"Rate limit exceeded"* on the first attempt | `check_rate_limit` lost its EXECUTE grant in the 2026-08-17 hardening pass and was never re-granted |
+| 2 | OTP never arrived | The admin-create path **suppresses** the verification email; nothing ever called `/api/auth/email/send-verification` |
+| 3 | *"permission denied for set_employee_password_by_hr"* | Same missing re-grant as #1 |
+| 4 | *"Could not find the function … in the schema cache"* | `employees.department` / `designation` were dropped and the form stopped sending them, but `create_employee_transaction` still **declares** both — PostgREST matches on the exact named-argument set |
+| 5 | *"violates check constraint employees_employment_type_check"* | The rebuild introduced `employment_types.code` (short: `FT`, `CON`, `INT`) while the legacy `employees.employment_type` column kept a CHECK expecting long forms (`full_time`, `contract`) |
+
+**Each one hid the next**, which is why the QA run found only the first: nobody had ever got far
+enough down the wizard to reach #2, and so on to #5. A module can look fine in isolation and be
+completely impassable end to end.
+
+### The pattern worth generalising
+
+**Failures 4 and 5 are the same shape, and it is the shape to watch for everywhere else:**
+the org rebuild replaced text columns with FK lookups (`department` → `org_unit_id`,
+`designation` → `job_title_id`, `employment_type` → `employment_type_id`) but kept the legacy
+text columns alive for compatibility. Every such **dual column is a live seam**, and it breaks in
+two directions:
+
+- **Drop the column but not the function parameter** → the caller stops sending it and the RPC
+  becomes unresolvable (#4).
+- **Keep the column but change the vocabulary feeding it** → the write violates a constraint that
+  the new lookup table knows nothing about (#5).
+
+> **Rule for the remaining rebuilds:** a dual column is not finished until *one* of these is true —
+> the legacy column is dropped along with every parameter that carries it, **or** exactly one
+> function owns the translation between the lookup and the legacy vocabulary. Leaving the mapping
+> implicit at each call site is what produced #5 in two different files.
+
+### Scope check — how far this spreads ✅
+
+Verified live rather than assumed:
+
+- `employees` has four CHECK constraints: `employment_type`, `work_mode`, `status`,
+  `probation_status`. Only **`employment_type`** is fed by a rebuilt lookup table, so it is the
+  only one exposed to #5. `work_mode`'s values are frontend literals that match its constraint.
+- The bad codes are **fixture-seeded, not product-generated**: only `QA Testing Org` holds
+  `FT` / `CON` / `INT`. Real tenants hold `full_time` / `intern`, because
+  `OrgStructureManagement.tsx:435` — the screen HR actually creates types on — already normalises
+  (`code.trim().toLowerCase().replace(/\s+/g, "_")`). The product could not produce the bad data;
+  the fixture did. **The defect is that the write path trusted `code` blindly**, which was only
+  ever safe by convention.
+- `hr_activate_draft_employee` also writes the legacy column, so the draft-activation path shares
+  the exposure. Not yet exercised.
+
+### What this means for the roadmap
+
+Add **Onboarding / Employee Create** to the list of modules that still need rebuilding, alongside
+Leave and Tasks (§0 above). It is not merely "untested" — it is actively mismatched
+with the Organisation module it depends on, and only end-to-end driving reveals it.
+
+**Cheap and worth doing before more of this surfaces:** grep every remaining `p_`-prefixed RPC
+signature against its caller's argument set, and every legacy text column against the lookup that
+now feeds it. Both classes are mechanical to find and silent until someone completes a flow.
 
 ### 5.4 Lifecycle events — new, and a payroll prerequisite
 

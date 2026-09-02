@@ -6,6 +6,7 @@ import { useTenant } from "../contexts/TenantContext";
 import { insforge, db } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
 import { useOrgStructure } from "../hooks/useOrgStructure";
+import { toLegacyEmploymentType } from "../utils/employmentType";
 import { validateManagerAssignment } from "../utils/managerCycleValidation";
 import { useJobTitleLabel } from "../contexts/OrgUnitsContext";
 
@@ -395,7 +396,7 @@ export default function EmployeeCreate() {
     const mappedTypes = employmentTypes.map((type) => ({
       value: type.id,
       label: type.name,
-      legacyValue: type.code,
+      legacyValue: toLegacyEmploymentType(type.code),
     }));
 
     return mappedTypes.length > 0
@@ -440,7 +441,7 @@ export default function EmployeeCreate() {
     setForm((prev) => ({
       ...prev,
       employment_type_id: employmentTypes.some((type) => type.id === value) ? value : "",
-      employment_type: selected?.legacyValue ?? value,
+      employment_type: selected?.legacyValue ?? toLegacyEmploymentType(value) ?? "",
     }));
   };
 
