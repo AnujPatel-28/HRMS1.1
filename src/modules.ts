@@ -15,6 +15,7 @@ export const MODULE_KEYS = [
   "expenses",
   "insurance",
   "policy_center",
+  "work_calendar",
   "chat",
   "connect",
   "onboarding",
@@ -32,8 +33,14 @@ export type ModuleKey = (typeof MODULE_KEYS)[number];
  * rules. Gated off, payroll and attendance silently fall back to hardcoded defaults (PF 15000,
  * ESI 21000, PT 0) with no UI anywhere to correct them. Settings that other modules depend on
  * cannot themselves be sellable. Keep this list in step with `modules.is_core` in the database.
+ *
+ * `work_calendar` is core as of 20260821180000 and for the same reason: it owns the holiday
+ * calendar and the per-employee working-day pattern that attendance derivation, leave day-counting
+ * and payroll's working-days divisor all read. Gated off, they do not go absent — they go WRONG.
+ * It was missing from this file until 20260902, which is why `/hr/holidays` was gated on `leave`
+ * and an attendance-only tenant could not reach the holiday screen its own derivation depends on.
  */
-export const CORE_MODULES: readonly ModuleKey[] = ["directory", "policy_center"];
+export const CORE_MODULES: readonly ModuleKey[] = ["directory", "policy_center", "work_calendar"];
 
 /**
  * Route prefix -> owning module. Longest prefix wins, so `/hr/policy-center` resolves to
@@ -48,8 +55,12 @@ const ROUTE_MODULES: ReadonlyArray<readonly [string, ModuleKey]> = [
   ["/employee/punch", "attendance"],
 
   ["/hr/leaves", "leave"],
-  ["/hr/holidays", "leave"],
   ["/employee/leaves", "leave"],
+
+  // The holiday calendar is core substrate, NOT part of Leave. Gating it on `leave` locked
+  // `QA Attendance Only` (leave disabled, attendance enabled) out of the very screen its
+  // attendance derivation reads.
+  ["/hr/holidays", "work_calendar"],
 
   ["/payroll", "payroll"],
   ["/hr/declarations", "payroll"],

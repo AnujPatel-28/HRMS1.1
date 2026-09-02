@@ -241,7 +241,13 @@ export interface Attendance {
   punch_in_ip: string | null;
   punch_out_ip: string | null;
   work_hours: number | null;
-  status: "present" | "absent" | "half_day" | "on_leave";
+  /**
+   * Every status attendance derivation can write. `weekly_off` is present in live data and
+   * was missing from this union until 20260902, so it rendered as a raw enum wherever a
+   * label map was keyed on the type. `no_record` is deliberately NOT here — it is a
+   * display-only sentinel for "no row exists", never a stored value.
+   */
+  status: "present" | "absent" | "half_day" | "on_leave" | "weekly_off" | "holiday" | "work_from_home";
   session_status: "open" | "closed";
   notes: string | null;
   created_at: string;

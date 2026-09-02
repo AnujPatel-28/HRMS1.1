@@ -208,7 +208,18 @@ export default async function (req) {
       p_window_interval: '1 hour'
     });
 
-    if (rateLimitErr || rateLimitOk === false) {
+    // A FAILED CHECK and a HIT LIMIT are different failures and must not share a message.
+    // Collapsing them is what disguised a missing EXECUTE grant on check_rate_limit as
+    // "Rate limit exceeded" and hid the fact that employee creation was hard-blocked from
+    // 2026-08-17 onward — HR read it as transient and retried forever.
+    if (rateLimitErr) {
+      return json({
+        message: `Rate limit check failed: ${rateLimitErr.message ?? String(rateLimitErr)}`,
+        error: "Internal Server Error",
+      }, 500);
+    }
+
+    if (rateLimitOk === false) {
       return json({ message: "Rate limit exceeded. Please try again later.", error: "Too Many Requests" }, 429);
     }
 

@@ -97,6 +97,12 @@ function formatTimeValue(value: string | null | undefined) {
   return value.slice(0, 5);
 }
 
+/** Turns an absent time — including formatTimeValue's "--:--" placeholder — back into null. */
+function normalizeTimeInput(value: string | null | undefined) {
+  if (!value || value === "--:--") return null;
+  return value;
+}
+
 function formatWorkingDays(days: number[]) {
   const sorted = [...days].sort((a, b) => a - b);
   if (sorted.length === 7 && sorted.every((day, index) => day === index)) return "All days";
@@ -556,7 +562,11 @@ export default function ShiftManagement() {
         p_start_time: form.start_time,
         p_end_time: form.end_time,
         p_working_days: form.working_days,
-        p_half_day_cutoff_override: form.half_day_cutoff_override || null,
+        // formatTimeValue() returns the DISPLAY placeholder "--:--" for a null cutoff, and the
+        // edit form is seeded from it (line ~114). "--:--" is truthy, so a bare `|| null` never
+        // fired and Postgres rejected it with 22007 — which made every shift with no custom
+        // cutoff (i.e. all of them) unsaveable. Create was unaffected because its form seeds "".
+        p_half_day_cutoff_override: normalizeTimeInput(form.half_day_cutoff_override),
         p_punch_in_opens_minutes_before: Number(form.punch_in_opens_minutes_before || 60),
         p_late_mark_grace_override: form.late_mark_grace_override ? Number(form.late_mark_grace_override) : null,
         p_is_default: form.is_default,

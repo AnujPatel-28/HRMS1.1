@@ -19,9 +19,16 @@ import { formatLocalDate } from "../utils/date";
 import { useDepartmentLabel, useUnitNames } from "../contexts/OrgUnitsContext";
 
 type ViewMode = "daily" | "employee" | "summary" | "overtime" | "corrections";
-type AttendanceStatus = "present" | "absent" | "half_day" | "on_leave";
+type AttendanceStatus =
+  | "present" | "absent" | "half_day" | "on_leave"
+  | "weekly_off" | "holiday" | "work_from_home"
+  /** Not a stored status. Marks a synthetic row for an employee with NO attendance record
+   *  on this date. The register must never assert an absence it cannot know about. */
+  | "no_record";
 
-interface AttendanceWithEmployee extends Attendance {
+interface AttendanceWithEmployee extends Omit<Attendance, "status"> {
+  /** A stored status, or the display-only "no_record" sentinel for a synthetic row. */
+  status: AttendanceStatus;
   is_late?: boolean | null;
   punch_in_lat?: number | string | null;
   punch_in_lng?: number | string | null;
@@ -97,12 +104,20 @@ function statusBadge(status: AttendanceStatus) {
     absent: "bg-rose-100 text-rose-700",
     half_day: "bg-amber-100 text-amber-700",
     on_leave: "bg-blue-100 text-blue-700",
+    weekly_off: "bg-slate-100 text-slate-600",
+    holiday: "bg-violet-100 text-violet-700",
+    work_from_home: "bg-teal-100 text-teal-700",
+    no_record: "bg-slate-50 text-slate-400",
   };
   const label: Record<AttendanceStatus, string> = {
     present: "Present",
     absent: "Absent",
     half_day: "Half Day",
     on_leave: "On Leave",
+    weekly_off: "Weekly Off",
+    holiday: "Holiday",
+    work_from_home: "Work From Home",
+    no_record: "No record",
   };
   return { cls: map[status] ?? "bg-slate-100 text-slate-600", label: label[status] ?? status };
 }
@@ -486,7 +501,12 @@ export default function HRAttendance() {
           punch_in_ip: null,
           punch_out_ip: null,
           work_hours: null,
-          status: "absent" as AttendanceStatus,
+          // NOT "absent". Derivation deliberately produces NO ROW for an unpunched day,
+          // because "nobody punched yet", "the module is off" and "they were absent" are
+          // three different facts. Fabricating one here contradicted the Summary tab on
+          // this same screen and showed a full roster of false absences every morning —
+          // on future dates, holidays, weekly offs and offboarded staff alike.
+          status: "no_record" as AttendanceStatus,
           session_status: "closed",
           notes: null,
           created_at: "",
@@ -755,7 +775,10 @@ export default function HRAttendance() {
     setEditId(row.employee_id);
     setEditPunchIn(row.punch_in ? new Date(row.punch_in).toTimeString().slice(0, 5) : "");
     setEditPunchOut(row.punch_out ? new Date(row.punch_out).toTimeString().slice(0, 5) : "");
-    setEditStatus(row.status as AttendanceStatus);
+    // "no_record" is a display sentinel, not a storable status. HR editing such a day is
+    // CREATING the record, so open the picker on the sensible default rather than a value the
+    // dropdown does not offer.
+    setEditStatus(row.status === "no_record" ? "present" : (row.status as AttendanceStatus));
   }
 
   const calendarDays = useMemo(() => {
@@ -974,7 +997,7 @@ export default function HRAttendance() {
       fmtTime(row.punch_in),
       fmtTime(row.punch_out),
       row.work_hours != null ? row.work_hours.toFixed(2) : "-",
-      row.status,
+      row.status === "no_record" ? "No record" : row.status,
     ]);
     exportCSV([header, ...rows], `attendance_${dailyDate}.csv`);
   }
@@ -1172,7 +1195,7 @@ export default function HRAttendance() {
                               </select>
                             ) : (
                               <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${cls}`}>
-                                <span className={`h-1.5 w-1.5 rounded-full ${row.status === 'present' ? 'bg-emerald-500' : row.status === 'absent' ? 'bg-rose-500' : row.status === 'half_day' ? 'bg-amber-500' : 'bg-blue-500'}`}></span>
+                                <span className={`h-1.5 w-1.5 rounded-full ${row.status === 'present' ? 'bg-emerald-500' : row.status === 'absent' ? 'bg-rose-500' : row.status === 'half_day' ? 'bg-amber-500' : row.status === 'no_record' ? 'bg-slate-300' : 'bg-blue-500'}`}></span>
                                 {label}
                               </span>
                             )}
@@ -1296,7 +1319,7 @@ export default function HRAttendance() {
                             </select>
                           ) : (
                             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${cls}`}>
-                              <span className={`h-1.5 w-1.5 rounded-full ${row.status === 'present' ? 'bg-emerald-500' : row.status === 'absent' ? 'bg-rose-500' : row.status === 'half_day' ? 'bg-amber-500' : 'bg-blue-500'}`}></span>
+                              <span className={`h-1.5 w-1.5 rounded-full ${row.status === 'present' ? 'bg-emerald-500' : row.status === 'absent' ? 'bg-rose-500' : row.status === 'half_day' ? 'bg-amber-500' : row.status === 'no_record' ? 'bg-slate-300' : 'bg-blue-500'}`}></span>
                               {label}
                             </span>
                           )}

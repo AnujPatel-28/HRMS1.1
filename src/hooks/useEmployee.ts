@@ -18,9 +18,14 @@ export function useEmployee() {
     }
 
     setLoading(true);
+    // PostgREST resolves the self-referencing FK on `employees` in the REVERSE direction: the
+    // embed `manager:employees!manager_id(full_name)` returns an ARRAY of the employee's DIRECT
+    // REPORTS, not their manager. `.full_name` on an array is undefined, so `|| null` fired for
+    // every row and the manager rendered as "—" everywhere. The `!employees_manager_id_fkey`
+    // constraint hint does NOT work here ("Could not find a relationship"). Resolve explicitly.
     const { data, error } = await db
       .from("employees")
-      .select("*, manager:employees!manager_id(full_name)")
+      .select("*")
       .eq("tenant_id", tenantId)
       .eq("user_id", user.id)
       .maybeSingle();
@@ -28,10 +33,18 @@ export function useEmployee() {
     if (!error) {
       if (data) {
         const empData = data as any;
-        setEmployee({
-          ...empData,
-          manager_name: empData.manager?.full_name || null
-        } as Employee);
+        // One row, so there is no sibling list to look the name up in. The directory view
+        // already exposes a working `manager_name` — use it rather than re-deriving one.
+        let managerName: string | null = null;
+        if (empData.manager_id) {
+          const { data: mgr } = await db
+            .from("employee_directory_public")
+            .select("full_name")
+            .eq("id", empData.manager_id)
+            .maybeSingle();
+          managerName = (mgr as { full_name?: string } | null)?.full_name ?? null;
+        }
+        setEmployee({ ...empData, manager_name: managerName } as Employee);
       } else {
         setEmployee(null);
       }
