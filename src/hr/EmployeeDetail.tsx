@@ -1703,6 +1703,10 @@ export default function EmployeeDetail() {
                 onChange={(event) => updateEmploymentType(event.target.value)}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 bg-white"
               >
+                {/* Same display-vs-state lie as the create form: the fallback is the LEGACY string
+                    "full_time" while the options are employment_type UUIDs, so an employee with no
+                    FK rendered as though a real type were selected. */}
+                <option value="">Select employment type</option>
                 {employmentTypeOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
