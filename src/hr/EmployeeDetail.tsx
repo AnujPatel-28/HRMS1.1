@@ -2146,10 +2146,10 @@ export default function EmployeeDetail() {
               </h3>
               <div className="grid gap-4 grid-cols-2 sm:grid-cols-4 bg-slate-50/50 rounded-2xl border border-slate-200 p-5">
                 {[
-                  { checked: onboardingSelf.personal_details_completed, label: "Personal Details" },
-                  { checked: onboardingSelf.bank_details_completed, label: "Bank & KYC Details" },
-                  { checked: onboardingSelf.documents_completed, label: "Uploaded Documents" },
-                  { checked: onboardingSelf.emergency_contact_completed, label: "Emergency Contact" }
+                  { checked: onboardingSelf.section_personal, label: "Personal Details" },
+                  { checked: onboardingSelf.section_bank, label: "Bank & KYC Details" },
+                  { checked: onboardingSelf.section_documents, label: "Uploaded Documents" },
+                  { checked: onboardingSelf.section_emergency, label: "Emergency Contact" }
                 ].map((item, idx) => (
                   <div key={idx} className={`flex flex-col p-3 rounded-xl border text-center transition ${
                     item.checked ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-slate-150/40 border-slate-200 text-slate-450"
