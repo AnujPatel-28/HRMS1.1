@@ -879,13 +879,19 @@ export default function EmployeeCreate() {
     }
   };
 
+  // The draft deliberately stores the password as "" (see the safeCredentials note above) --
+  // a plaintext password must never sit in sessionStorage. So after any draft round-trip it is
+  // gone, and copy/send then emitted an EMPTY password SILENTLY: HR would hand a new hire
+  // credentials that cannot work, with nothing on screen saying so.
+  const passwordAvailable = Boolean(credentials?.password);
+
   const copyCredentials = async () => {
-    if (!credentials) return;
+    if (!credentials || !passwordAvailable) return;
     const payload = `Email: ${credentials.email}\nPassword: ${credentials.password}`;
     await navigator.clipboard.writeText(payload);
   };
 
-  const sendViaEmailHref = credentials
+  const sendViaEmailHref = credentials && passwordAvailable
     ? `mailto:${credentials.email}?subject=${encodeURIComponent("Your TalentMesh HRMS Login Credentials")}&body=${encodeURIComponent(`Welcome to TalentMesh HRMS!\n\nYour login credentials:\nEmail: ${credentials.email}\nPassword: ${credentials.password}\n\nPlease sign in and change your password after first login.`)}`
     : "#";
 
@@ -1774,23 +1780,35 @@ export default function EmployeeCreate() {
           <div className="mt-3 rounded-lg bg-white p-3 text-sm border border-emerald-200">
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Login credentials</p>
             <p><span className="font-semibold">Email:</span> {credentials.email}</p>
-            <p><span className="font-semibold">Password:</span> {credentials.password}</p>
+            {passwordAvailable ? (
+              <p><span className="font-semibold">Password:</span> {credentials.password}</p>
+            ) : (
+              <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-amber-900">
+                <span className="font-semibold">Password not shown.</span> It is held in memory only
+                and this page was reloaded, so it cannot be recovered — it is stored hashed, never in
+                plain text. Open the employee and use <span className="font-semibold">Reset
+                Password</span> to set a new one you can share.
+              </p>
+            )}
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => { void copyCredentials(); }}
-              className="rounded-lg border border-emerald-300 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
+              disabled={!passwordAvailable}
+              className="rounded-lg border border-emerald-300 disabled:cursor-not-allowed disabled:opacity-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
             >
               Copy credentials
             </button>
-            <a
-              href={sendViaEmailHref}
-              className="rounded-lg border border-emerald-300 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
-            >
-              Send via mail client
-            </a>
+            {passwordAvailable && (
+              <a
+                href={sendViaEmailHref}
+                className="rounded-lg border border-emerald-300 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
+              >
+                Send via mail client
+              </a>
+            )}
             <button
               type="button"
               onClick={() => navigate("/hr/employees")}
