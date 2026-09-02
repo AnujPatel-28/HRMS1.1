@@ -1,36 +1,39 @@
 -- ============================================================================
--- APPLY THIS IN THE INSFORGE DASHBOARD -> Database -> SQL Editor
+-- APPLY IN THE INSFORGE DASHBOARD -> Database -> SQL Editor  (paste all, run)
 --
--- Paste the whole file and run it. It is a CREATE OR REPLACE on the EXISTING signature,
--- so nothing is dropped and no caller needs changing.
+-- Second and -- this time -- FULLY AUDITED pass at create_employee_transaction.
+-- CREATE OR REPLACE on the existing signature: nothing dropped, no redeploy needed.
 --
--- WHY BY HAND: the InsForge CLI refuses this file --
---   "Query could not be parsed and was rejected for security reasons."
--- Ruled out by bisection: not the DROP (removed it, still fails), not the dollar-quoting
--- (balanced, named tags), not CRLF (converted, still fails), no dynamic SQL in the body.
--- Other migrations here create SECURITY DEFINER functions happily, so it is specific to
--- this file. Passing it through `db query` hits the Windows command-line length limit.
+-- TWO FIXES, both the same shape as everything else this afternoon: the schema moved and
+-- this function did not.
 --
--- WHAT IT CHANGES: exactly one statement. The function inserted into
--- employee_onboarding_self naming four columns that were RENAMED and never updated here:
+--   1. column "timezone" does not exist
+--      It read `SELECT COALESCE(timezone,'UTC') FROM public.tenant_settings`. But
+--      tenant_settings is a KEY/VALUE store -- (id, tenant_id, key, value, updated_at) --
+--      and has no such column. The tenant timezone lives on `tenants`. Now reads
+--      `FROM public.tenants WHERE id = v_tenant_id`.
 --
---   personal_details_completed  -> section_personal
---   bank_details_completed      -> section_bank
---   documents_completed         -> section_documents
---   emergency_contact_completed -> section_emergency
+--   2. leave_balances has no `created_at`
+--      The INSERT named it; the table has only `updated_at`. Both the column and its
+--      now() value are removed. This one had NOT surfaced yet -- it sits after the
+--      timezone read, so you would have hit it on the very next attempt.
 --
--- so employee creation failed with:
---   column "personal_details_completed" of relation "employee_onboarding_self" does not exist
+-- WHY THIS SHOULD BE THE LAST ONE. Rather than fix the reported error and wait for the
+-- next, every column this function touches was validated against information_schema:
 --
--- The columns are omitted rather than renamed: all four are `boolean DEFAULT false`, which
--- is exactly what was being inserted. Fewer names to keep in step.
+--   * all 74 INSERT columns across employees, employee_onboarding_self,
+--     employee_reporting_relationships (x2), leave_balances and audit_logs (x2)
+--     -> ALL COLUMNS EXIST
+--   * every column read in its SELECTs (tenants, leave_types, employees) -> ALL EXIST
 --
--- The 33-parameter signature is DELIBERATELY UNCHANGED so the currently-deployed frontend
--- keeps working. Dropping the two vestigial parameters (p_department, p_designation) is a
--- SEPARATE, later change -- see migrations-pending-deploy/20260902130000_*.sql -- and it
--- must be applied BEFORE the frontend stops sending them, never after.
+-- Tables touched: audit_logs, employee_onboarding_self, employee_reporting_relationships,
+-- employees, leave_balances, leave_types, tenants.
 --
--- AFTER RUNNING: retry Confirm & Create. Nothing to redeploy for this change.
+-- STILL DELIBERATELY UNCHANGED: the 33-parameter signature, so the deployed frontend keeps
+-- working. Dropping p_department / p_designation remains a separate later change in
+-- migrations-pending-deploy/, and must land BEFORE the frontend stops sending them.
+--
+-- AFTER RUNNING: retry Confirm & Create. Nothing to redeploy.
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION public.create_employee_transaction(p_user_id uuid, p_full_name text, p_email text, p_phone text, p_date_of_birth date, p_gender text, p_address text, p_city text, p_state text, p_pincode text, p_department text, p_org_unit_id uuid, p_designation text, p_job_title_id uuid, p_employee_code text, p_date_of_joining date, p_employment_type text, p_employment_type_id uuid, p_aadhaar_number text, p_pan_number text, p_bank_name text, p_account_number text, p_ifsc_code text, p_emergency_contact_name text, p_emergency_contact_phone text, p_emergency_contact_relation text, p_work_mode text, p_grade text, p_work_location text, p_location_id uuid, p_manager_id uuid, p_secondary_manager_id uuid, p_probation_period integer)
@@ -254,10 +257,13 @@ BEGIN
     );
   END IF;
 
+  -- `tenant_settings` is a KEY/VALUE store (id, tenant_id, key, value, updated_at) and has no
+  -- `timezone` column; the tenant timezone lives on `tenants`. Reading the wrong table failed
+  -- with: column "timezone" does not exist.
   SELECT COALESCE(timezone, 'UTC')
   INTO v_tz
-  FROM public.tenant_settings
-  WHERE tenant_id = v_tenant_id;
+  FROM public.tenants
+  WHERE id = v_tenant_id;
 
   IF NOT FOUND THEN
     v_tz := 'UTC';
@@ -293,7 +299,7 @@ BEGIN
       used_days,
       carried_forward,
       balance,
-      created_at,
+      -- no `created_at` on leave_balances -- the table has only `updated_at`
       updated_at
     )
     VALUES (
@@ -305,7 +311,6 @@ BEGIN
       0,
       0,
       v_initial_balance,
-      now(),
       now()
     )
     ON CONFLICT (tenant_id, employee_id, leave_type_id, year)
