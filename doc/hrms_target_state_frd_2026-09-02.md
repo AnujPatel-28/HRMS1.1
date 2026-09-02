@@ -427,12 +427,13 @@ this configuration.
 | # | Item | Size | Why it is non-negotiable |
 |---|---|---|---|
 | 1 | Stabilisation sprint — vision doc §6.9 items 1–5, 7 | ~1 day | Employee creation, shift editing and the fabricated-absence screen are all broken |
-| 2 | **Employee creation end to end**, incl. the OTP decision | small | Recommend **showing the code on screen** — fastest path, no SMTP dependency (vision doc §8 #1) |
+| 2 | **Employee creation end to end** | ✅ **DONE 2026-09-02** | Three gates in series, each hiding the next: the `check_rate_limit` grant, the verification email never being sent (the admin-create path suppresses it — fixed by calling `/api/auth/email/send-verification`), and `set_employee_password_by_hr` missing EXECUTE. See §9A |
 | 3 | **Tenant seeding defaults** — one Mon–Sat shift, CL/SL/EL, national holidays | small | Otherwise every new customer is handed an inert system (§4.3 F2) |
 | 4 | **BUG-02** — route leave and the frontend through the holiday resolver | small–medium | Leave charges employees for company holidays |
 | 5 | **G1 minimum: unmarked-days view + bulk mark + range regularise** | medium | The month-end workflow. Without it HR cannot operate at 100+ people |
 | 6 | **Monthly CSV export of `payroll_period_input`** | small | **This is the product's reason to exist for a CA-served buyer.** Without it, attendance-only is a subset, not an offering |
 | 7 | **Human test of punch / selfie / GPS on real phones, and one real kiosk punch** | ~1 day | The flagship feature has never been exercised by a person. Not optional |
+| 8 | **"Forgot password?" link + reset screen** | small | Nearly free now that SMTP is live — `reset_password_method` is already `"code"` and InsForge exposes the endpoints. Without it, the first employee to forget a password phones HR, who then knows their new one too. See §9A.6 |
 
 ### 9.3 What V1 deliberately does not include
 
@@ -453,6 +454,124 @@ Cut, with the reason each is safe to cut:
 
 One real company, 50+ people, runs one **full month** of attendance on it and their CA accepts the
 export without a phone call. That single month will surface more than the 29 unrun QA cases.
+
+---
+
+---
+
+## 9A. Credentials and the invite flow — V1.1
+
+**Added 2026-09-02**, after getting the onboarding wizard working end to end and looking at what
+it actually asks people to do. All findings ✅ verified against the live backend and `src/`.
+
+### 9A.1 The flow as it works today
+
+```
+HR types name + email
+   ↓  clicks Verify
+InsForge emails a 6-digit code TO THE EMPLOYEE
+   ↓  ** the employee must read it back to HR **        ← synchronous phone call
+HR types the code, then TYPES THE EMPLOYEE'S PASSWORD
+   ↓
+HR shares that password with the employee
+```
+
+It works, and it has real merits: mailbox ownership is proven before an account exists, there is an
+audit trail, and HR controls who gets created. That is more rigour than most SMB HRMS bother with.
+
+### 9A.2 Three problems, in severity order
+
+**P1 — it requires the new hire to be reachable in real time.** The wizard's own text is
+*"Ask the employee to check their email and share the code with you."* HR cannot finish creating an
+employee until that person reads their inbox and reads six digits back. That is one phone call per
+hire. Onboarding twenty people on a Monday is twenty calls, and it fails outright for someone who
+has not started yet, is travelling, or gave a personal address they check twice a day.
+**This is the one that produces a support ticket in week one.**
+
+**P2 — HR knows every employee's password**, types it, and shares it over some channel. So HR can
+sign in as any employee — including to approve their own leave or edit their own attendance. Nothing
+in the system distinguishes the employee from HR-acting-as-employee. For a product whose value rests
+on a trustworthy attendance record, that is a live weakness, not a theoretical one.
+
+**P3 — the verification gates nothing.** The OTP proves the employee controls the mailbox, and then
+HR sets the credential anyway. It costs a phone call and buys very little.
+
+### 9A.3 What makes P2 permanent rather than temporary ✅
+
+Verified in `src/`: **there is no employee-facing change-password screen anywhere, and no
+forgot-password link on the login page.** `password` appears only in `AddCompany` (HR admin temp
+password), `AuthContext`, `EmployeeCreate` and `EmployeeDetail` (HR setting/resetting it), `Kiosk`
+(the PIN) and `Login` (signing in).
+
+Two consequences:
+
+- **An employee can never change the password HR gave them.** P2 is not a first-week window; it is
+  the permanent state.
+- **A forgotten password requires phoning HR**, who sets a new one — and now knows that one too.
+  The first employee to forget their password is a support call, on day one.
+
+Database side: no `must_change_password` / `password_changed_at` / `first_login` column exists
+anywhere, and `auth.users.metadata` carries only `role` and `tenant_id`. The only password RPCs are
+`set_employee_password_by_hr` (HR-fenced, correct) and `update_user_password(p_user_id, p_password)`
+— which takes an **arbitrary user id**, so it must never be granted to `authenticated`; a self-only
+variant would be needed.
+
+### 9A.4 Correction: forced password change is NOT the cheap fix
+
+I previously suggested forcing a password change on first login as a small pre-launch mitigation for
+P2. **Having checked, that was wrong** — it is not small, because the pieces it would sit on do not
+exist:
+
+| Piece | State | Work |
+|---|---|---|
+| A `must_change_password` flag | Does not exist | Migration. ⚠️ `set_employee_password_by_hr` **replaces** metadata wholesale (`jsonb_build_object('role', …, 'tenant_id', …)`), so it must be edited or it wipes the flag |
+| A `change_own_password` RPC | Does not exist | New SECURITY DEFINER RPC fenced to `auth.uid()`. **Cannot reuse `update_user_password`** — it takes an arbitrary user id |
+| A change-password screen | Does not exist | New screen + route |
+| A route gate | Does not exist | `RequirePasswordChange`, in the shape of `RequireModule` |
+| Server-side enforcement | — | The hard half. A UI-only gate is bypassable by calling the API directly, so it narrows HR's window rather than closing it |
+
+That is roughly a day, and it still leaves P1 and P3 untouched.
+
+### 9A.5 The decision: do the invite flow instead
+
+**The invite flow subsumes forced-password-change, and costs less than the sum of the parts.**
+
+```
+HR fills in employee details        → no auth interaction, no phone call
+System emails an invite link        → time-limited, single-use token
+Employee clicks and sets THEIR OWN  → HR never sees it
+  password, lands in the app
+```
+
+It resolves all three problems at once: **P1** disappears (HR finishes in one sitting, the employee
+responds whenever they like), **P2** disappears (HR never knows the password, so forced-change is
+unnecessary by construction), and **P3** disappears (the invite proves mailbox control *and* creates
+the credential in one step, so the OTP relay is deleted rather than fixed).
+
+**We are closer than it looks.** `employee_onboarding_self` (personal / bank / documents / emergency
+sections) and the `/employee/onboarding` wizard already exist ✅ — self-service data collection is
+built. What is missing is only the credential half.
+
+**Ship V1 on the current flow.** It works, and for the first two or three design partners HR is
+onboarding a handful of people they can phone. **Then make the invite flow the first item in V1.1,
+ahead of the statutory registers** — the moment a customer onboards a batch, P1 becomes the thing
+they complain about, and P2 is the first question a security-conscious buyer asks.
+
+### 9A.6 One thing worth doing before launch, because it is now nearly free ✅
+
+**Wire up self-service password reset.** It needs no new backend design:
+
+- `reset_password_method` is already `"code"` in the live auth config ✅
+- SMTP is now live, so reset mail can actually be delivered ✅ (this was the blocker, and it is gone)
+- InsForge already exposes `auth/email/send-reset-password`, `auth/email/exchange-reset-password-token`
+  and `auth/email/reset-password` ✅
+
+So it is a **"Forgot password?" link on `Login.tsx` plus a reset screen** — no migration, no RPC, no
+new security surface. It does not fix P1 or P2, but it removes the "first employee to forget their
+password phones HR" failure, which will otherwise happen in week one of the first real deployment.
+
+**Recommended V1.1 order:** invite flow → statutory registers → roster grid.
+**Recommended pre-launch addition:** the forgot-password link only.
 
 ---
 
