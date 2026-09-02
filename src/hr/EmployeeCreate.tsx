@@ -1241,6 +1241,12 @@ export default function EmployeeCreate() {
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                   required
                 >
+                  {/* REQUIRED. org_unit_id starts "", and a controlled <select> whose value matches
+                      no <option> falls back to DISPLAYING THE FIRST ONE while state stays empty.
+                      Without this placeholder the field showed a real department, HR reasonably
+                      left it alone, onChange never fired, and "Next" stayed disabled forever with
+                      the form insisting Department was missing. */}
+                  <option value="">Select department</option>
                   {departmentOptions.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
@@ -1298,6 +1304,10 @@ export default function EmployeeCreate() {
                   onChange={(event) => handleEmploymentTypeChange(event.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
                 >
+                  {/* Same display-vs-state lie as Department, one step quieter because this field
+                      is optional: the default is the LEGACY string "full_time" while the options
+                      are employment_type UUIDs, so it rendered a real type and saved no FK. */}
+                  <option value="">Select employment type</option>
                   {employmentTypeOptions.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
