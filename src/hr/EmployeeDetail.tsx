@@ -744,9 +744,13 @@ export default function EmployeeDetail() {
     setLoading(true);
     setError(null);
 
+    // PostgREST resolves the self-referencing FK on `employees` in the REVERSE direction: the
+    // embed `manager:employees!manager_id(full_name)` returned an ARRAY of this employee's DIRECT
+    // REPORTS, not their manager, so `.full_name` was undefined and "Reports To" rendered blank
+    // for everyone who had one. The `!employees_manager_id_fkey` hint does NOT work here.
     const employeeRes = await db
       .from("employees")
-      .select("*, manager:employees!manager_id(full_name)")
+      .select("*")
       .eq("tenant_id", tenantId)
       .eq("id", employeeId)
       .maybeSingle();
@@ -756,10 +760,20 @@ export default function EmployeeDetail() {
       return;
     }
 
-    const currentEmployee = {
-      ...(employeeRes.data as any),
-      manager_name: (employeeRes.data as any).manager?.full_name || null,
-    } as Employee;
+    const employeeRow = employeeRes.data as any;
+    // One row, so resolve the manager's name from the directory view, which already exposes a
+    // working `manager_name`/`full_name` pair.
+    let managerName: string | null = null;
+    if (employeeRow.manager_id) {
+      const { data: mgr } = await db
+        .from("employee_directory_public")
+        .select("full_name")
+        .eq("id", employeeRow.manager_id)
+        .maybeSingle();
+      managerName = (mgr as { full_name?: string } | null)?.full_name ?? null;
+    }
+
+    const currentEmployee = { ...employeeRow, manager_name: managerName } as Employee;
     setEmployee(currentEmployee);
     setEditForm(currentEmployee);
 

@@ -110,7 +110,16 @@ export default async function (request) {
       p_window_interval: '1 hour'
     });
 
-    if (rateLimitErr || rateLimitOk === false) {
+    // Same defect create-employee-user had: a FAILED check and a HIT limit are different
+    // failures and must not share a message. Collapsing them is what disguised a missing
+    // EXECUTE grant as "Rate limit exceeded" and hid a hard block for weeks.
+    if (rateLimitErr) {
+      return json({
+        error: `Rate limit check failed: ${rateLimitErr.message ?? String(rateLimitErr)}`,
+      }, 500);
+    }
+
+    if (rateLimitOk === false) {
       return json({ error: "Rate limit exceeded. Please try again later." }, 429);
     }
   }

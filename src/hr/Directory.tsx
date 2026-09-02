@@ -63,8 +63,13 @@ export default function Directory() {
 
     const fetchDirectory = async () => {
       try {
+        // PostgREST resolves the self-referencing FK on `employees` in the REVERSE direction: the
+        // embed `manager:employees!manager_id(full_name)` returns an ARRAY of the employee's DIRECT
+        // REPORTS, not their manager. `.full_name` on an array is undefined, so `|| null` fired for
+        // every row and the manager rendered as "—" everywhere. The `!employees_manager_id_fkey`
+        // constraint hint does NOT work here ("Could not find a relationship"). Resolve explicitly.
         const query = isHr
-          ? db.from("employees").select("*, manager:employees!manager_id(full_name)")
+          ? db.from("employees").select("*")
           : db.from("employee_directory_public").select("*");
 
         const { data, error } = await query
@@ -74,9 +79,13 @@ export default function Directory() {
         if (error) throw error;
 
         if (active && data) {
-          const mapped = (data as any[]).map((e) => ({
+          const rows = data as any[];
+          // The manager is another employee in the same result set, so this is a local lookup.
+          // The non-HR branch reads the view, which already carries a working `manager_name`.
+          const nameById = new Map<string, string>(rows.map((e) => [e.id, e.full_name]));
+          const mapped = rows.map((e) => ({
             ...e,
-            manager_name: e.manager_name || e.manager?.full_name || null,
+            manager_name: e.manager_name || (e.manager_id ? nameById.get(e.manager_id) ?? null : null),
           }));
           setEmployees(mapped);
         }

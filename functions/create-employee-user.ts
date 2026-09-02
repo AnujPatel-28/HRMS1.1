@@ -99,6 +99,42 @@ const deleteAuthUser = async (userId) => {
   return res.ok;
 };
 
+/**
+ * Ask InsForge to generate and email the 6-digit verification code.
+ *
+ * REQUIRED, and easy to miss: creating a user through the ADMIN API deliberately suppresses the
+ * verification email. The backend logs "Skipping verification email during admin user creation"
+ * and sends nothing — so before this call the wizard told HR a code had been sent while no email
+ * was ever attempted. Not an SMTP fault; SMTP was never reached.
+ *
+ * This endpoint is what actually generates the OTP that /api/auth/email/verify (called by
+ * verify-employee-code) later checks, so without it the whole verify step is unsatisfiable.
+ */
+const sendVerificationEmail = async (email) => {
+  try {
+    const res = await fetch(`${BASE_URL}/api/auth/email/send-verification`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${ADMIN_KEY}`,
+      },
+      body: JSON.stringify({ email }),
+    });
+
+    if (res.ok) {
+      console.log("[create-employee-user] Verification email requested for:", email);
+      return { ok: true };
+    }
+
+    const detail = await res.text().catch(() => "");
+    console.error(`[create-employee-user] send-verification failed ${res.status}:`, detail);
+    return { ok: false, status: res.status, detail };
+  } catch (err) {
+    console.error("[create-employee-user] send-verification threw:", String(err));
+    return { ok: false, status: 0, detail: String(err) };
+  }
+};
+
 const createAuthUser = async (email, password, name, tenantId) => {
   const res = await fetch(`${BASE_URL}/api/auth/users`, {
     method: "POST",
@@ -117,7 +153,9 @@ const createAuthUser = async (email, password, name, tenantId) => {
   const data = await res.json().catch(() => ({}));
 
   if (res.ok) {
-    console.log("[create-employee-user] Auth user created (OTP sent) for:", email);
+    // NOT "(OTP sent)" — the admin-create path suppresses the verification email. The code is
+    // requested separately by sendVerificationEmail().
+    console.log("[create-employee-user] Auth user created (verification email NOT sent yet) for:", email);
     return { ok: true, id: data.id };
   }
 
@@ -208,7 +246,18 @@ export default async function (req) {
       p_window_interval: '1 hour'
     });
 
-    if (rateLimitErr || rateLimitOk === false) {
+    // A FAILED CHECK and a HIT LIMIT are different failures and must not share a message.
+    // Collapsing them is what disguised a missing EXECUTE grant on check_rate_limit as
+    // "Rate limit exceeded" and hid the fact that employee creation was hard-blocked from
+    // 2026-08-17 onward — HR read it as transient and retried forever.
+    if (rateLimitErr) {
+      return json({
+        message: `Rate limit check failed: ${rateLimitErr.message ?? String(rateLimitErr)}`,
+        error: "Internal Server Error",
+      }, 500);
+    }
+
+    if (rateLimitOk === false) {
       return json({ message: "Rate limit exceeded. Please try again later.", error: "Too Many Requests" }, 429);
     }
 
@@ -281,6 +330,11 @@ export default async function (req) {
       return json({ message: createResult.err, error: createResult.err }, createResult.status ?? 500);
     }
 
+    // The admin-create path suppresses the verification email, so request it explicitly.
+    // Reported, never swallowed: if this fails the employee can never be verified, and HR must
+    // be told that rather than being left waiting for a code that is not coming.
+    const verificationSend = await sendVerificationEmail(email);
+
     let userId = null;
     for (let attempt = 0; attempt < 4; attempt++) {
       if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
@@ -325,7 +379,21 @@ export default async function (req) {
     );
 
     console.log(`[create-employee-user] Done: userId=${userId}, OTP sent to ${email}`);
-    return json({ userId });
+    // Report the verification-email outcome honestly. The employee exists either way, so this is
+    // not a failure of creation — but if no code was sent, HR needs to know now rather than
+    // waiting on an email that is never arriving.
+    if (!verificationSend.ok) {
+      return json({
+        userId,
+        verificationEmailSent: false,
+        message:
+          "Employee created, but the verification code could not be sent. " +
+          "Check the SMTP configuration, then use Resend code before continuing.",
+        verificationError: verificationSend.detail || `HTTP ${verificationSend.status}`,
+      });
+    }
+
+    return json({ userId, verificationEmailSent: true });
   } catch (err) {
     console.error("[create-employee-user] Uncaught exception:", err);
     return json({

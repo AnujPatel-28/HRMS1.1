@@ -1,0 +1,43 @@
+[auth]
+allowed_redirect_urls = []
+require_email_verification = true
+verify_email_method = "code"
+reset_password_method = "code"
+disable_signup = false
+
+[auth.password]
+min_length = 6
+require_number = false
+require_lowercase = false
+require_uppercase = false
+require_special_char = false
+
+# Resend SMTP relay. The account is shared with the ATS product; HRMS uses its OWN API key so
+# rotating or leaking one product's key cannot take the other down.
+#
+# The domain `mail.talentmeshsolutions.com` is already Verified in Resend (SPF/DKIM live in
+# GoDaddy). Resend authorises the EXACT domain, so senders must sit on the `mail.` subdomain —
+# `noreply@talentmeshsolutions.com` would NOT be authorised by this verification.
+#
+# The password is never a literal here. `env(RESEND_API_KEY)` resolves against the INSFORGE SECRET
+# STORE (`insforge secrets add RESEND_API_KEY "<value>"`) — NOT a local environment variable.
+# `config apply` fails with "no such secret exists" until the secret is created. That keeps this
+# file safe to commit and safe to share across environments.
+[auth.smtp]
+enabled = true
+host = "smtp.resend.com"
+port = 465
+username = "resend"
+password = "env(RESEND_API_KEY)"
+sender_email = "onboarding@mail.talentmeshsolutions.com"
+sender_name = "TalentMesh Onboarding"
+min_interval_seconds = 60
+
+[storage]
+max_file_size_mb = 50
+
+[realtime]
+retention_days = 0
+
+[schedules]
+retention_days = 7

@@ -33,18 +33,29 @@ export default function EmployeeList() {
 
     const fetchEmployees = async () => {
       try {
+        // NO self-referencing embed here. `select("*, manager:employees!manager_id(full_name)")`
+        // did not just fail to resolve the embed — it came back with `manager_id: null` on EVERY
+        // row, nulling the base column too, so the Manager column rendered "—" for everyone and
+        // "Reports To" was blank on employee detail. It failed silently, with no error.
+        //
+        // The manager is another employee in the same tenant and is therefore already in `data`,
+        // so the name is a local lookup: no embed, no second request, no view dependency.
         const { data, error } = await db
           .from("employees")
-          .select("*, manager:employees!manager_id(full_name)")
+          .select("*")
           .eq("tenant_id", tenantId)
           .order("created_at", { ascending: false });
 
         if (error) throw error;
 
         if (active) {
-          const mapped = (data as any[] ?? []).map((emp) => ({
+          const rows = (data as any[]) ?? [];
+          const nameById = new Map<string, string>(
+            rows.map((emp) => [emp.id as string, emp.full_name as string]),
+          );
+          const mapped = rows.map((emp) => ({
             ...emp,
-            manager_name: emp.manager?.full_name || null,
+            manager_name: emp.manager_id ? nameById.get(emp.manager_id) ?? null : null,
           }));
           setEmployees(mapped);
         }

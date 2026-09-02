@@ -231,6 +231,35 @@ export default function EmployeeCreate() {
     return true;
   }, [step, form, authStep]);
 
+  /**
+   * The human-readable reason `canMoveToNext` is false.
+   *
+   * Next is disabled with no explanation anywhere, and several required fields sit above the
+   * fold — so on a long step the button simply looks broken. Mirrors canMoveToNext exactly; if
+   * you add a condition there, add its label here or the two silently disagree.
+   */
+  const missingFields = useMemo(() => {
+    const missing: string[] = [];
+    if (step === 1) {
+      if (!form.full_name.trim()) missing.push("Full Name");
+      if (!form.email.trim()) missing.push("Email");
+      if (!form.phone.trim()) missing.push("Phone");
+      if (authStep !== "done") missing.push("Email verification and password");
+    } else if (step === 2) {
+      if (!form.org_unit_id) missing.push("Department");
+      if (!form.job_title_id) missing.push("Job Title");
+      if (!form.employee_code.trim()) missing.push("Employee ID");
+      if (!form.date_of_joining) missing.push("Date of Joining");
+    } else if (step === 3) {
+      if (!form.aadhaar_number.trim()) missing.push("Aadhaar Number");
+      if (!form.pan_number.trim()) missing.push("PAN Number");
+    } else if (step === 4) {
+      if (!form.emergency_contact_name.trim()) missing.push("Emergency Contact Name");
+      if (!form.emergency_contact_phone.trim()) missing.push("Emergency Contact Phone");
+    }
+    return missing;
+  }, [step, form, authStep]);
+
   useEffect(() => {
     if (justNavigated) {
       const timer = setTimeout(() => setJustNavigated(false), 400);
@@ -1655,6 +1684,18 @@ export default function EmployeeCreate() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
+            </div>
+          )}
+
+          {!canMoveToNext && missingFields.length > 0 && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <span className="font-semibold">Still required on this step:</span>{" "}
+              {missingFields.join(", ")}
+              {step === 2 && (
+                <span className="block mt-1 text-xs text-amber-700">
+                  Department and Job Title are near the top of this step — scroll up if you cannot see them.
+                </span>
+              )}
             </div>
           )}
 
