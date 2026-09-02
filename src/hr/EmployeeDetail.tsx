@@ -894,7 +894,7 @@ export default function EmployeeDetail() {
     setEditForm((current) => ({
       ...current,
       employment_type_id: employmentTypes.some((type) => type.id === value) ? value : null,
-      employment_type: selected?.legacyValue ?? value,
+      employment_type: selected?.legacyValue ?? toLegacyEmploymentType(value),
     }));
   };
 
@@ -962,7 +962,9 @@ export default function EmployeeDetail() {
       job_title_id: editForm.job_title_id || null,
       employee_code: editForm.employee_code,
       date_of_joining: editForm.date_of_joining,
-      employment_type: editForm.employment_type,
+      // Normalised at the WRITE, not just the handler: editForm can be seeded straight from a
+      // stored row that still holds a raw code (FT/CON/INT) from before normalisation existed.
+      employment_type: toLegacyEmploymentType(editForm.employment_type),
       employment_type_id: editForm.employment_type_id || null,
       aadhaar_number: editForm.aadhaar_number,
       pan_number: editForm.pan_number,
@@ -1164,7 +1166,7 @@ export default function EmployeeDetail() {
           org_unit_id: editForm.org_unit_id || null,
           date_of_joining: editForm.date_of_joining,
           employee_code: editForm.employee_code.trim(),
-          employment_type: editForm.employment_type || "full_time",
+          employment_type: toLegacyEmploymentType(editForm.employment_type) ?? "full_time",
           employment_type_id: editForm.employment_type_id || null,
           grade: editForm.grade?.trim() || null,
           work_location: editForm.work_location || null,

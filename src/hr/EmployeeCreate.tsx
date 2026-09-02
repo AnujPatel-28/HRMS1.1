@@ -576,7 +576,7 @@ export default function EmployeeCreate() {
                 job_title_id: empData.job_title_id || "",
                 employee_code: empData.employee_code || "",
                 date_of_joining: empData.date_of_joining || "",
-                employment_type: empData.employment_type || "full_time",
+                employment_type: toLegacyEmploymentType(empData.employment_type) ?? "full_time",
                 employment_type_id: empData.employment_type_id || "",
                 aadhaar_number: empData.aadhaar_number || "",
                 pan_number: empData.pan_number || "",
@@ -738,7 +738,11 @@ export default function EmployeeCreate() {
           p_job_title_id: form.job_title_id || null,
           p_employee_code: form.employee_code.trim(),
           p_date_of_joining: form.date_of_joining || null,
-          p_employment_type: form.employment_type,
+          // Normalised HERE, not just in the change handler. form.employment_type can arrive
+          // from a sessionStorage draft saved before this fix existed, or from any other path
+          // that writes state directly — the handler is not the only writer. This is the last
+          // point before the database, so it is the only place the guarantee actually holds.
+          p_employment_type: toLegacyEmploymentType(form.employment_type),
           p_employment_type_id: form.employment_type_id || null,
           p_aadhaar_number: form.aadhaar_number.trim(),
           p_pan_number: form.pan_number.trim(),
@@ -783,7 +787,7 @@ export default function EmployeeCreate() {
             job_title_id: form.job_title_id || null,
             employee_code: form.employee_code.trim(),
             date_of_joining: form.date_of_joining,
-            employment_type: form.employment_type,
+            employment_type: toLegacyEmploymentType(form.employment_type),
             employment_type_id: form.employment_type_id || null,
             aadhaar_number: form.aadhaar_number.trim(),
             pan_number: form.pan_number.trim(),
