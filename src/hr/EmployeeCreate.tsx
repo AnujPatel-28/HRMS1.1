@@ -721,6 +721,18 @@ export default function EmployeeCreate() {
           p_city: form.city.trim() || null,
           p_state: form.state.trim() || null,
           p_pincode: form.pincode.trim() || null,
+          // VESTIGIAL, and sent only to satisfy the signature. `employees.department` and
+          // `employees.designation` were dropped in the org rebuild (06 §5 step 6) and this form
+          // rightly stopped sending them — but create_employee_transaction still DECLARES both.
+          // PostgREST resolves an RPC by its exact NAMED ARGUMENT SET, so omitting two declared
+          // names matched no overload at all: "Could not find the function ... in the schema
+          // cache", which reads as though the function were missing entirely.
+          //
+          // Verified live: the function body references NEITHER parameter, so null is ignored.
+          // Remove these two lines once
+          // migrations-pending-deploy/20260902120000_…-drop-vestigial-params.sql is applied.
+          p_department: null,
+          p_designation: null,
           p_org_unit_id: form.org_unit_id || null,
           p_job_title_id: form.job_title_id || null,
           p_employee_code: form.employee_code.trim(),
