@@ -18,7 +18,17 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
 
   // Step 2: OTP verification
-  const [step, setStep] = useState<"credentials" | "otp">("credentials");
+  const [step, setStep] = useState<"credentials" | "otp" | "forgot" | "reset">("credentials");
+
+  // Password reset. Employees have no other way to recover an account: there is no
+  // change-password screen anywhere in the app, so without this the only route is phoning HR,
+  // who then sets — and therefore knows — the new password.
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetOtp, setResetOtp] = useState("");
+  const [resetPw, setResetPw] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetMsg, setResetMsg] = useState<string | null>(null);
   const [pendingEmail, setPendingEmail] = useState("");
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [otpError, setOtpError] = useState<string | null>(null);
@@ -139,6 +149,49 @@ export default function Login() {
   };
 
   // ════════════════════════════════════════════════════════════════════════════
+  async function handleForgotSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setResetError(null);
+    setResetMsg(null);
+    setResetBusy(true);
+
+    const { error: sendErr } = await auth.sendResetPasswordEmail({ email: resetEmail.trim().toLowerCase() });
+    setResetBusy(false);
+
+    if (sendErr) {
+      setResetError(sendErr.message ?? "Could not send the reset code. Please try again.");
+      return;
+    }
+
+    // Deliberately not confirming whether the address exists — that would let anyone probe for
+    // registered users. The backend answers the same way for both cases.
+    setResetMsg("If that email is registered, a 6-digit reset code is on its way.");
+    setStep("reset");
+  }
+
+  async function handleResetSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setResetError(null);
+    setResetBusy(true);
+
+    const { error: resetErr } = await auth.resetPassword({
+      otp: resetOtp.trim(),
+      newPassword: resetPw,
+    });
+    setResetBusy(false);
+
+    if (resetErr) {
+      setResetError(resetErr.message ?? "Could not reset the password. The code may have expired.");
+      return;
+    }
+
+    setResetOtp("");
+    setResetPw("");
+    setStep("credentials");
+    setError(null);
+    setResetMsg("Password updated. Sign in with your new password.");
+  }
+
   return (
     <main className="grid min-h-screen place-items-center p-4">
       <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-lg">
@@ -148,6 +201,9 @@ export default function Login() {
           <>
             <h1 className="mt-2 text-2xl font-bold text-slate-900">Sign In</h1>
             <p className="mt-1 text-sm text-slate-500">Use your HR or employee credentials.</p>
+            {resetMsg ? (
+              <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{resetMsg}</p>
+            ) : null}
 
             <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
               <label className="block text-sm">
@@ -198,6 +254,108 @@ export default function Login() {
                 className="w-full rounded-lg bg-brand-600 px-4 py-2 font-medium text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting ? "Signing in..." : "Sign In"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setResetEmail(email.trim());
+                  setResetError(null);
+                  setResetMsg(null);
+                  setStep("forgot");
+                }}
+                className="w-full text-center text-sm text-brand-600 hover:underline"
+              >
+                Forgot password?
+              </button>
+            </form>
+          </>
+        ) : step === "forgot" ? (
+          <>
+            <h1 className="mt-2 text-2xl font-bold text-slate-900">Reset Your Password</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Enter your work email and we will send you a 6-digit reset code.
+            </p>
+
+            <form className="mt-6 space-y-4" onSubmit={handleForgotSubmit}>
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-slate-700">Email</span>
+                <input
+                  type="email"
+                  required
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
+                  autoFocus
+                />
+              </label>
+
+              {resetError ? <p className="text-sm text-rose-600">{resetError}</p> : null}
+
+              <button
+                type="submit"
+                disabled={resetBusy || !resetEmail.trim()}
+                className="w-full rounded-lg bg-brand-600 px-4 py-2 font-medium text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {resetBusy ? "Sending..." : "Send Reset Code"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStep("credentials")}
+                className="w-full text-center text-sm text-slate-500 hover:text-slate-700"
+              >
+                ← Back to sign in
+              </button>
+            </form>
+          </>
+        ) : step === "reset" ? (
+          <>
+            <h1 className="mt-2 text-2xl font-bold text-slate-900">Enter Your New Password</h1>
+            {resetMsg ? <p className="mt-1 text-sm text-emerald-600">{resetMsg}</p> : null}
+
+            <form className="mt-6 space-y-4" onSubmit={handleResetSubmit}>
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-slate-700">6-digit code</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  required
+                  value={resetOtp}
+                  onChange={(e) => setResetOtp(e.target.value.replace(/\D/g, ""))}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-center text-lg font-bold tracking-widest outline-none ring-brand-600 focus:ring"
+                  autoFocus
+                />
+              </label>
+
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-slate-700">New password</span>
+                <input
+                  type="password"
+                  required
+                  value={resetPw}
+                  onChange={(e) => setResetPw(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-brand-600 focus:ring"
+                />
+              </label>
+
+              {resetError ? <p className="text-sm text-rose-600">{resetError}</p> : null}
+
+              <button
+                type="submit"
+                disabled={resetBusy || resetOtp.length !== 6 || !resetPw}
+                className="w-full rounded-lg bg-brand-600 px-4 py-2 font-medium text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {resetBusy ? "Updating..." : "Set New Password"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStep("forgot")}
+                className="w-full text-center text-sm text-slate-500 hover:text-slate-700"
+              >
+                ← Request a new code
               </button>
             </form>
           </>
