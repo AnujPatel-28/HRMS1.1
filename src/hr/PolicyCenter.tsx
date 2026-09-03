@@ -1344,10 +1344,12 @@ export default function PolicyCenter() {
                 The values below decide what a month's accumulated late marks cost.
               </p>
               <div className="grid gap-4 md:grid-cols-3">
-                <FieldLabel label="Grace period for HR corrections (minutes)">
-                  <input type="number" min={0} value={attendancePolicy.late_mark_grace_minutes} onChange={(event) => setAttendancePolicy((current) => ({ ...current, late_mark_grace_minutes: event.target.value }))} className={inputClass} />
-                  <p className="mt-1 text-xs text-slate-500">Applied only when HR approves an attendance correction. Day-to-day lateness uses the shift's own grace period — keep the two in step.</p>
-                </FieldLabel>
+                {shiftCount === 0 ? (
+                  <FieldLabel label="Grace period (minutes) — no-shift fallback">
+                    <input type="number" min={0} value={attendancePolicy.late_mark_grace_minutes} onChange={(event) => setAttendancePolicy((current) => ({ ...current, late_mark_grace_minutes: event.target.value }))} className={inputClass} />
+                    <p className="mt-1 text-xs text-slate-500">Used only because this organisation has no shifts. Create one and its own grace period takes over everywhere.</p>
+                  </FieldLabel>
+                ) : null}
                 <FieldLabel label="Monthly threshold">
                   <input type="number" min={0} value={attendancePolicy.late_mark_threshold} onChange={(event) => setAttendancePolicy((current) => ({ ...current, late_mark_threshold: event.target.value }))} className={inputClass} />
                   <p className="mt-1 text-xs text-slate-500">Number of late marks allowed before salary deduction begins</p>

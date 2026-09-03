@@ -700,3 +700,44 @@ separate RPC called when a selfie *upload* fails after the punch.)
 missing selfie is recorded as `office_verified`. And until this `PunchInOut` build ships, the old
 bundle still runs its own fence against the retired single point — harmless only because no tenant
 is in `strict` mode (`hrms-frontend-backend-deploy-skew`).
+
+### 9.9 Impossible-travel check — applied and verified
+
+`20260903121818` adds `attendance_check_impossible_travel(tenant, employee, lat, lng, at)`;
+`20260903121907` calls it from both punch paths and merges the result into
+`verification_snapshot.server_travel_check`.
+
+**Why this rather than waiting for better GPS.** Browser geolocation can be set to arbitrary
+coordinates from devtools in seconds — no accuracy improvement addresses that, and a native client
+is what finally allows mock-provider detection. This check needs no client cooperation at all: it
+compares two coordinates the server already stored, so it works against the web app, a kiosk, or a
+direct API call equally.
+
+**It flags; it does not block.** The inputs are noisy — a GPS glitch can jump hundreds of metres,
+and a genuine long-haul flight between two punches is legitimate. Blocking on a heuristic would lock
+real employees out of their own attendance, the exact failure mode this workstream keeps removing.
+
+**Threshold: 900 km/h, and only past 1km of separation** — above commercial cruise speed, so a flag
+means "no vehicle did this", not "this looked fast". A tighter, more useful threshold (a 30km hop in
+10 minutes is implausible on the ground but only 180 km/h) would have to become a tenant policy, and
+adding an inert setting is the pattern this audit exists to remove. Hardcoded until someone tunes it.
+
+**Verified** against a real prior punch (Surat, 2026-08-29):
+
+| Probe | Result |
+|---|---|
+| Same office, 1 min later | `within_noise_floor`, not flagged |
+| **London, 1 min later** | **`implausible: true`**, 612,699 km/h |
+| London, 3 days later | `implausible: false`, 97.4 km/h |
+
+Same distance, opposite verdicts — the elapsed time is doing the work, which is the property that
+makes it a spoof detector rather than a travel ban. Both safe paths also confirmed: no coordinates
+and no previous located punch each return `checked: false` rather than erroring.
+
+### 9.10 Policy Center — Group A item 4 closed
+
+The late-mark grace field now renders **only when the tenant has zero shifts**, labelled as the
+no-shift fallback. B-1 made the shift authoritative wherever one exists, so for 6 of 15 tenants the
+field was pure confusion; for the 9 with no shifts it is still the live value
+`hr_approve_attendance_correction` reads. Removing it outright would have frozen it at 0 for exactly
+the tenants that need it.
