@@ -149,7 +149,11 @@ hardcoded portals.
    to the holiday calendar its own derivation reads and could not see the link to it.
 2. ~~Add the persistent module switcher.~~ **DONE 2026-09-03** (`807a739`) — with a correction to
    this document's premise, see §4.5.
-3. **Decide `/select`** — remove or demote to first-run.
+3. ~~Decide `/select`.~~ **REMOVED 2026-09-03** (`ef01965`). It was a *product* chooser (HR /
+   Payroll / Employee) and nothing was left for it to choose: role decides the portal, and Payroll
+   became a sidebar section in step 1. Login now lands on the role's own portal.
+4. ~~Build the per-module workspaces.~~ **Attendance and Task & Project DONE 2026-09-04**
+   (`5b843e5`) — see §4.6. Payroll's waits for the payroll module.
 4. **Build the per-module workspaces** one at a time, starting with Attendance (its data is the most
    complete). This is the real work.
 5. **Merge `PayrollLayout` into the one shell**, so Payroll is a module workspace rather than a
@@ -195,3 +199,40 @@ for a tenant with one module or none.
 from the sketch and the `/select` screenshot without reading `HRLayout` closely. The remaining steps
 (especially §4.3, per-module workspaces) should be re-checked against what the shell already does
 before being built — three layout modes is a lot of existing surface to design against.
+
+---
+
+## 4.6 Workspaces as built — 2026-09-04
+
+`WorkspaceShell.tsx` is the shared frame (header, stat tiles with tone, sections, empty states) so
+the workspaces read as one system. Content differs per module, which is the point.
+
+**Attendance** (`/hr/attendance/overview`) — time-shaped. Derivation health with staleness and
+failure distinguished, who is punched in right now, shift coverage, corrections waiting, and devices
+that have stopped reporting. A tenant with no shifts gets the "attendance is not being derived"
+warning here as well as in the Policy Center, because this is where someone looks when it seems
+broken.
+
+**Task & Project** (`/hr/tasks/overview`) — board-shaped. A status pipeline across the five statuses
+the database enforces, overdue work, and what is waiting on approval. No calendar, no run health:
+the questions are different, so the layout is.
+
+**Two details worth keeping:**
+
+- **Shift coverage only counts uncovered employees when the tenant has no default shift.** A default
+  covers everyone without an explicit assignment, so counting unassigned employees naively reports a
+  gap that does not exist. Verified against `QA Testing Org` — 4 active shifts, 1 default, 7 active
+  employees, 6 explicit assignments — which correctly reads *Complete* rather than *1 uncovered*.
+- **The pipeline uses the enforced vocabulary**, not the observed one. The `tasks.status` CHECK
+  allows `assigned / in_progress / submitted / approved / rejected`; only two of those appear in
+  current data. Building the board from what happens to be in the table would have produced a
+  pipeline that silently gains columns later.
+
+**`Overview` is the first nav item in each module, and that is load-bearing** — the module switcher
+navigates to `section.items[0].href`, so this is what "go to Attendance" now means. Both routes are
+gated in `modules.ts` alongside their module, so the entitlement story stays single-sourced.
+
+**Not built: the Payroll workspace.** Its module is deferred, its statutory settings have no
+server-side reader yet, and its "working days source" switch (§7.2 of the settings inventory) does
+not exist — a workspace over that would be a frame around placeholders. It belongs with the payroll
+build, alongside folding `PayrollLayout` into the single shell.
