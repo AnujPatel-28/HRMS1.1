@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, Clock, Palmtree, Calendar, MessageSquare, Contact, GitBranch, ClipboardList, Gift, FileText, Wallet, Settings, Rss, FolderKanban, Receipt, Shield, Briefcase, ChevronDown, Menu, Columns, Layers, LayoutGrid, Network, MonitorSmartphone } from "lucide-react";
+import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, Clock, Palmtree, Calendar, MessageSquare, Contact, GitBranch, ClipboardList, Gift, FileText, Wallet, Settings, Rss, FolderKanban, Receipt, Shield, ChevronDown, Menu, Columns, Layers, LayoutGrid, Network, MonitorSmartphone } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
@@ -28,9 +28,19 @@ type NavSection = {
   items: readonly NavLinkItem[];
 };
 
+/**
+ * Grouped by the module that OWNS each screen, mirroring doc/Roughpicture.md: Organisation is the
+ * base every other module builds on, Attendance / Task & Project / Payroll & Finance are its three
+ * children, and Chat and Connect are optional add-ons rather than part of the core product.
+ *
+ * The previous grouping was functional -- "People", "HR Management", "Admin" -- which cut across
+ * modules: Leaves and Holidays sat under HR Management while Attendance and Shifts sat under
+ * Attendance, and Tasks and Projects had no home of their own. A section whose items are all gated
+ * off is dropped entirely, so a tenant sees only the modules it actually has.
+ */
 const allSections: readonly NavSection[] = [
   {
-    title: "People",
+    title: "Organisation",
     icon: Users,
     items: [
       { label: "Employees", href: "/hr/employees", icon: Users },
@@ -38,7 +48,6 @@ const allSections: readonly NavSection[] = [
       { label: "Org Chart", href: "/hr/org-chart", icon: GitBranch },
       { label: "Org Setup", href: "/hr/org-structure", icon: Network },
       { label: "Offboarding", href: "/hr/offboarding", icon: LogOut, module: "offboarding" },
-      { label: "Insurance", href: "/hr/insurance", icon: Shield, module: "insurance" },
     ],
   },
   {
@@ -47,37 +56,48 @@ const allSections: readonly NavSection[] = [
     items: [
       { label: "Attendance", href: "/hr/attendance", icon: CalendarCheck, module: "attendance" },
       { label: "Shifts", href: "/hr/shifts", icon: Clock, module: "attendance" },
-      { label: "Devices", href: "/hr/devices", icon: MonitorSmartphone, module: "attendance" },
-    ],
-  },
-  {
-    title: "HR Management",
-    icon: Briefcase,
-    items: [
       { label: "Leaves", href: "/hr/leaves", icon: Palmtree, module: "leave" },
-      { label: "Tasks", href: "/hr/tasks", icon: ClipboardList, module: "tasks" },
-      { label: "Projects", href: "/hr/pms", icon: FolderKanban, module: "tasks" },
-      { label: "Expenses", href: "/hr/expenses", icon: Receipt, module: "expenses" },
-      { label: "Holidays", href: "/hr/holidays", icon: Gift, module: "leave" },
+      // work_calendar, NOT leave. The holiday calendar is core substrate that attendance derivation
+      // and payroll's working-day divisor both read, and modules.ts already routes it that way --
+      // gating the LINK on `leave` hid the screen from an attendance-only tenant entitled to it,
+      // the same mistake 20260821180000 fixed for the route.
+      { label: "Holidays", href: "/hr/holidays", icon: Gift, module: "work_calendar" },
+      { label: "Devices", href: "/hr/devices", icon: MonitorSmartphone, module: "attendance" },
       { label: "Calendar", href: "/hr/calendar", icon: Calendar },
     ],
   },
   {
-    title: "Communication",
+    title: "Task & Project",
+    icon: FolderKanban,
+    items: [
+      { label: "Projects", href: "/hr/pms", icon: FolderKanban, module: "tasks" },
+      { label: "Tasks", href: "/hr/tasks", icon: ClipboardList, module: "tasks" },
+    ],
+  },
+  {
+    title: "Payroll & Finance",
+    icon: Wallet,
+    items: [
+      { label: "Payroll", href: "/payroll/hr/salaries", icon: Wallet, module: "payroll" },
+      { label: "IT Declarations", href: "/hr/declarations", icon: ClipboardList, module: "payroll" },
+      { label: "Expenses", href: "/hr/expenses", icon: Receipt, module: "expenses" },
+      { label: "Insurance", href: "/hr/insurance", icon: Shield, module: "insurance" },
+    ],
+  },
+  {
+    title: "Policy Center",
+    icon: Settings,
+    items: [
+      { label: "Policy Center", href: "/hr/policy-center", icon: Settings, module: "policy_center" },
+      { label: "Policies", href: "/hr/policies", icon: FileText, module: "policy_center" },
+    ],
+  },
+  {
+    title: "Add-ons",
     icon: MessageSquare,
     items: [
       { label: "Chat", href: "/hr/chat", icon: MessageSquare, module: "chat" },
       { label: "Connect", href: "/hr/connect", icon: Rss, module: "connect" },
-    ],
-  },
-  {
-    title: "Admin",
-    icon: Settings,
-    items: [
-      { label: "Policies", href: "/hr/policies", icon: FileText, module: "policy_center" },
-      { label: "Payroll", href: "/payroll/hr/salaries", icon: Wallet, module: "payroll" },
-      { label: "IT Declarations", href: "/hr/declarations", icon: ClipboardList, module: "payroll" },
-      { label: "Policy Center", href: "/hr/policy-center", icon: Settings, module: "policy_center" },
     ],
   },
 ];
