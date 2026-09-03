@@ -28,6 +28,8 @@ import HolidayList from "./hr/HolidayList";
 import HRLayout from "./hr/HRLayout";
 import LeaveManagement from "./hr/LeaveManagement";
 import PolicyCenter from "./hr/PolicyCenter";
+import AttendanceWorkspace from "./hr/AttendanceWorkspace";
+import TaskWorkspace from "./hr/TaskWorkspace";
 import PolicyUpload from "./hr/PolicyUpload";
 import ShiftManagement from "./hr/ShiftManagement";
 import AttendanceDevices from "./hr/AttendanceDevices";
@@ -160,10 +162,12 @@ function TenantRoutes() {
           <Route path="employees/create" element={<EmployeeCreate />} />
           <Route path="employees/:employeeId" element={<EmployeeDetail />} />
           <Route path="offboarding" element={<OffboardingManagement />} />
+          <Route path="attendance/overview" element={<AttendanceWorkspace />} />
           <Route path="attendance" element={<HRAttendance />} />
           <Route path="shifts" element={<ShiftManagement />} />
           <Route path="devices" element={<AttendanceDevices />} />
           <Route path="leaves" element={<LeaveManagement />} />
+          <Route path="tasks/overview" element={<TaskWorkspace />} />
           <Route path="tasks" element={<TaskManagement />} />
           <Route path="policies" element={<PolicyUpload />} />
           <Route path="holidays" element={<HolidayList />} />

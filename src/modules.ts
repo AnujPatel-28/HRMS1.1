@@ -50,6 +50,7 @@ export const CORE_MODULES: readonly ModuleKey[] = ["directory", "policy_center",
  */
 const ROUTE_MODULES: ReadonlyArray<readonly [string, ModuleKey]> = [
   ["/hr/attendance", "attendance"],
+  ["/hr/attendance/overview", "attendance"],
   ["/hr/shifts", "attendance"],
   ["/employee/attendance", "attendance"],
   ["/employee/punch", "attendance"],
@@ -67,6 +68,7 @@ const ROUTE_MODULES: ReadonlyArray<readonly [string, ModuleKey]> = [
   ["/employee/payslips", "payroll"],
 
   ["/hr/tasks", "tasks"],
+  ["/hr/tasks/overview", "tasks"],
   ["/hr/pms", "tasks"],
   ["/employee/tasks", "tasks"],
   ["/employee/pms", "tasks"],

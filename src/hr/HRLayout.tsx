@@ -56,6 +56,7 @@ const allSections: readonly NavSection[] = [
     title: "Attendance",
     icon: CalendarCheck,
     items: [
+      { label: "Overview", href: "/hr/attendance/overview", icon: LayoutGrid, module: "attendance" },
       { label: "Attendance", href: "/hr/attendance", icon: CalendarCheck, module: "attendance" },
       { label: "Shifts", href: "/hr/shifts", icon: Clock, module: "attendance" },
       { label: "Leaves", href: "/hr/leaves", icon: Palmtree, module: "leave" },
@@ -72,6 +73,7 @@ const allSections: readonly NavSection[] = [
     title: "Task & Project",
     icon: FolderKanban,
     items: [
+      { label: "Overview", href: "/hr/tasks/overview", icon: LayoutGrid, module: "tasks" },
       { label: "Projects", href: "/hr/pms", icon: FolderKanban, module: "tasks" },
       { label: "Tasks", href: "/hr/tasks", icon: ClipboardList, module: "tasks" },
     ],
