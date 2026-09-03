@@ -7,7 +7,8 @@ import { useAuditLog } from "../hooks/useAuditLog";
 import { Skeleton } from "../shared/Skeleton";
 import { useToast } from "../shared/ToastContext";
 import { getTenantDate, getTenantYear } from "../utils/date";
-import { validateAttendancePolicy, validateTaskPolicy, validateLeavePolicy, validateSalaryPolicy, validateLeaveType } from "../utils/policyValidation";
+import type { ModuleKey } from "../modules";
+import { validateAttendancePolicy, validateLeavePolicy, validateSalaryPolicy, validateLeaveType } from "../utils/policyValidation";
 
 type TabKey = "attendance" | "leave" | "salary" | "task" | "company";
 
@@ -23,16 +24,12 @@ type TenantForm = {
 };
 
 export type AttendancePolicyForm = {
-  late_mark_enabled: boolean;
   late_mark_grace_minutes: string;
   late_mark_threshold: string;
   late_mark_deduction_hours: string;
   overtime_enabled: boolean;
   overtime_rate: string;
   geofence_enabled: boolean;
-  office_lat: string;
-  office_lng: string;
-  geofence_radius_meters: string;
   geofence_mode: "warn" | "strict";
   regularization_enabled: boolean;
   regularization_window_days: string;
@@ -43,7 +40,6 @@ export type AttendancePolicyForm = {
   remote_work_handling: "disabled" | "hr_approved_exceptions" | "always_allowed";
   gps_verification_mode: "disabled" | "warn" | "strict";
   attendance_selfie_mode: "disabled" | "punch_in" | "punch_out" | "both";
-  selfie_retention_days: "30" | "90" | "180" | "365" | "forever";
   high_confidence_max: string;
   medium_confidence_max: string;
   low_confidence_max: string;
@@ -51,7 +47,6 @@ export type AttendancePolicyForm = {
 
 export type LeavePolicyForm = {
   leave_min_notice_days: string;
-  leave_carry_forward: boolean;
 };
 
 export type SalaryPolicyForm = {
@@ -64,8 +59,6 @@ export type SalaryPolicyForm = {
 
 export type TaskPolicyForm = {
   punch_out_gate_enabled: boolean;
-  task_eod_redmark_time: string;
-  task_grace_period_minutes: string;
 };
 
 type LeaveTypeRow = {
@@ -133,12 +126,21 @@ type SalaryTemplateForm = {
   esi_applicable: boolean;
 };
 
-const tabs: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { key: "attendance", label: "Attendance", icon: Clock },
-  { key: "leave", label: "Leave", icon: CalendarDays },
-  { key: "salary", label: "Salary", icon: IndianRupee },
-  { key: "task", label: "Task", icon: Check },
-  { key: "company", label: "Company", icon: Building2 },
+/**
+ * `module` is the module that OWNS the tab's settings — not the one the tab is named after. A tab
+ * whose module is disabled is not rendered at all, so an attendance-only tenant never sees a
+ * Salary tab it cannot act on. `null` means core (always shown).
+ *
+ * Presentation only, and here it has to be: unlike the module-gated tables, `tenant_settings` RLS
+ * carries no module check (it is `can_access_tenant()` + `is_hr()`), so the database will not gate
+ * these rows for us.
+ */
+const tabs: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }>; module: ModuleKey | null }[] = [
+  { key: "attendance", label: "Attendance", icon: Clock, module: "attendance" },
+  { key: "leave", label: "Leave", icon: CalendarDays, module: "leave" },
+  { key: "salary", label: "Salary", icon: IndianRupee, module: "payroll" },
+  { key: "task", label: "Task", icon: Check, module: "tasks" },
+  { key: "company", label: "Company", icon: Building2, module: null },
 ];
 
 const departments = ["sales", "dev", "marketing", "operations", "design", "other"] as const;
@@ -155,16 +157,12 @@ const defaultTenantForm: TenantForm = {
 };
 
 const defaultAttendancePolicy: AttendancePolicyForm = {
-  late_mark_enabled: false,
   late_mark_grace_minutes: "0",
   late_mark_threshold: "3",
   late_mark_deduction_hours: "0.5",
   overtime_enabled: false,
   overtime_rate: "1.5",
   geofence_enabled: false,
-  office_lat: "",
-  office_lng: "",
-  geofence_radius_meters: "500",
   geofence_mode: "warn",
   regularization_enabled: false,
   regularization_window_days: "7",
@@ -175,7 +173,6 @@ const defaultAttendancePolicy: AttendancePolicyForm = {
   remote_work_handling: "hr_approved_exceptions",
   gps_verification_mode: "warn",
   attendance_selfie_mode: "disabled",
-  selfie_retention_days: "forever",
   high_confidence_max: "50",
   medium_confidence_max: "150",
   low_confidence_max: "300",
@@ -183,7 +180,6 @@ const defaultAttendancePolicy: AttendancePolicyForm = {
 
 const defaultLeavePolicy: LeavePolicyForm = {
   leave_min_notice_days: "1",
-  leave_carry_forward: false,
 };
 
 const defaultSalaryPolicy: SalaryPolicyForm = {
@@ -196,8 +192,6 @@ const defaultSalaryPolicy: SalaryPolicyForm = {
 
 const defaultTaskPolicy: TaskPolicyForm = {
   punch_out_gate_enabled: true,
-  task_eod_redmark_time: "23:30",
-  task_grace_period_minutes: "0",
 };
 
 const defaultLeaveTypeForm: LeaveTypeForm = {
@@ -383,7 +377,7 @@ function SaveButton({ label, saving, onClick }: { label: string; saving: boolean
 }
 
 export default function PolicyCenter() {
-  const { tenantId, refreshTenant } = useTenant();
+  const { tenantId, refreshTenant, hasModule } = useTenant();
   const { logAction } = useAuditLog();
   const { success, error: toastError } = useToast();
 
@@ -403,6 +397,7 @@ export default function PolicyCenter() {
   const [leaveBalanceRows, setLeaveBalanceRows] = useState<LeaveBalanceRow[]>([]);
   const [activeEmployeeIds, setActiveEmployeeIds] = useState<string[]>([]);
   const [shiftCount, setShiftCount] = useState(0);
+  const [officeLocationCount, setOfficeLocationCount] = useState(0);
   const [customShiftEmployeeCount, setCustomShiftEmployeeCount] = useState(0);
   const [salaryTemplates, setSalaryTemplates] = useState<Record<string, SalaryTemplate>>({});
 
@@ -451,7 +446,7 @@ export default function PolicyCenter() {
     if (!tenantId) return;
     setLoading(true);
     try {
-      const [tenantRes, settingsRes, leaveTypesRes, shiftsRes, shiftAssignmentsRes, employeesRes, leaveBalancesRes] = await Promise.all([
+      const [tenantRes, settingsRes, leaveTypesRes, shiftsRes, shiftAssignmentsRes, employeesRes, leaveBalancesRes, officeLocationsRes] = await Promise.all([
         db.from("tenants").select(tenantColumns).eq("id", tenantId).maybeSingle(),
         db.from("tenant_settings").select("key,value,updated_at").eq("tenant_id", tenantId),
         db.from("leave_types").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: true }),
@@ -464,6 +459,7 @@ export default function PolicyCenter() {
           .or(`effective_to.is.null,effective_to.gte.${today}`),
         db.from("employees").select("id").eq("tenant_id", tenantId).eq("status", "active"),
         db.from("leave_balances").select("id,employee_id,leave_type_id,year").eq("tenant_id", tenantId),
+        db.from("office_locations").select("id").eq("tenant_id", tenantId).eq("is_active", true),
       ]);
 
       if (tenantRes.error) throw tenantRes.error;
@@ -473,6 +469,7 @@ export default function PolicyCenter() {
       if (shiftAssignmentsRes.error) throw shiftAssignmentsRes.error;
       if (employeesRes.error) throw employeesRes.error;
       if (leaveBalancesRes.error) throw leaveBalancesRes.error;
+      if (officeLocationsRes.error) throw officeLocationsRes.error;
 
       const tenantData = tenantRes.data as Partial<TenantForm> | null;
       const rawSettings = (settingsRes.data ?? []) as { key: string; value: string; updated_at?: string }[];
@@ -494,16 +491,12 @@ export default function PolicyCenter() {
         punch_out_gate_enabled: tenantData?.punch_out_gate_enabled ?? defaultTenantForm.punch_out_gate_enabled,
       };
       const nextAttendancePolicy: AttendancePolicyForm = {
-        late_mark_enabled: boolValue(settings.late_mark_enabled, defaultAttendancePolicy.late_mark_enabled),
         late_mark_grace_minutes: settings.late_mark_grace_minutes ?? defaultAttendancePolicy.late_mark_grace_minutes,
         late_mark_threshold: settings.late_mark_threshold ?? defaultAttendancePolicy.late_mark_threshold,
         late_mark_deduction_hours: settings.late_mark_deduction_hours ?? defaultAttendancePolicy.late_mark_deduction_hours,
         overtime_enabled: boolValue(settings.overtime_enabled, defaultAttendancePolicy.overtime_enabled),
         overtime_rate: settings.overtime_rate ?? defaultAttendancePolicy.overtime_rate,
         geofence_enabled: boolValue(settings.geofence_enabled, defaultAttendancePolicy.geofence_enabled),
-        office_lat: settings.office_lat ?? defaultAttendancePolicy.office_lat,
-        office_lng: settings.office_lng ?? defaultAttendancePolicy.office_lng,
-        geofence_radius_meters: settings.geofence_radius_meters ?? defaultAttendancePolicy.geofence_radius_meters,
         geofence_mode: (settings.geofence_mode as "warn" | "strict" | undefined) ?? defaultAttendancePolicy.geofence_mode,
         regularization_enabled: boolValue(settings.regularization_enabled, defaultAttendancePolicy.regularization_enabled),
         regularization_window_days: settings.regularization_window_days ?? defaultAttendancePolicy.regularization_window_days,
@@ -514,14 +507,12 @@ export default function PolicyCenter() {
         remote_work_handling: (settings.remote_work_handling as "disabled" | "hr_approved_exceptions" | "always_allowed" | undefined) ?? defaultAttendancePolicy.remote_work_handling,
         gps_verification_mode: (settings.gps_verification_mode as "disabled" | "warn" | "strict" | undefined) ?? defaultAttendancePolicy.gps_verification_mode,
         attendance_selfie_mode: (settings.attendance_selfie_mode as "disabled" | "punch_in" | "punch_out" | "both" | undefined) ?? defaultAttendancePolicy.attendance_selfie_mode,
-        selfie_retention_days: (settings.selfie_retention_days as "30" | "90" | "180" | "365" | "forever" | undefined) ?? defaultAttendancePolicy.selfie_retention_days,
         high_confidence_max: settings.high_confidence_max ?? defaultAttendancePolicy.high_confidence_max,
         medium_confidence_max: settings.medium_confidence_max ?? defaultAttendancePolicy.medium_confidence_max,
         low_confidence_max: settings.low_confidence_max ?? defaultAttendancePolicy.low_confidence_max,
       };
       const nextLeavePolicy: LeavePolicyForm = {
         leave_min_notice_days: settings.leave_min_notice_days ?? defaultLeavePolicy.leave_min_notice_days,
-        leave_carry_forward: boolValue(settings.leave_carry_forward, defaultLeavePolicy.leave_carry_forward),
       };
       const nextSalaryPolicy: SalaryPolicyForm = {
         lop_calculation_method: (settings.lop_calculation_method as SalaryPolicyForm["lop_calculation_method"] | undefined) ?? defaultSalaryPolicy.lop_calculation_method,
@@ -532,8 +523,6 @@ export default function PolicyCenter() {
       };
       const nextTaskPolicy: TaskPolicyForm = {
         punch_out_gate_enabled: tenantData?.punch_out_gate_enabled ?? defaultTaskPolicy.punch_out_gate_enabled,
-        task_eod_redmark_time: settings.task_eod_redmark_time ?? defaultTaskPolicy.task_eod_redmark_time,
-        task_grace_period_minutes: settings.task_grace_period_minutes ?? defaultTaskPolicy.task_grace_period_minutes,
       };
 
       const nextLeaveTypes = (leaveTypesRes.data ?? []) as LeaveTypeRow[];
@@ -566,6 +555,7 @@ export default function PolicyCenter() {
       setSettingUpdatedAtMap(newSettingUpdatedAtMap);
       setLeaveTypes(nextLeaveTypes);
       setShiftCount(shiftRows.length);
+      setOfficeLocationCount((officeLocationsRes.data ?? []).length);
       setCustomShiftEmployeeCount(new Set(customAssignments.map((assignment) => assignment.employee_id)).size);
       setActiveEmployeeIds(activeEmployees);
       setLeaveBalanceRows((leaveBalancesRes.data ?? []) as LeaveBalanceRow[]);
@@ -623,8 +613,18 @@ export default function PolicyCenter() {
     [salaryTemplates],
   );
 
+  const visibleTabs = useMemo(
+    () => tabs.filter((tab) => tab.module === null || hasModule(tab.module)),
+    [hasModule],
+  );
+
+  // Derived rather than corrected in an effect: entitlements load after the first render, so an
+  // effect would flash the panel of a module this tenant does not have before hiding it. `company`
+  // is core, so visibleTabs is never empty.
+  const effectiveTab = visibleTabs.some((tab) => tab.key === activeTab) ? activeTab : visibleTabs[0].key;
+
   function handleTabChange(nextTab: TabKey) {
-    if (nextTab !== activeTab && dirtyTabs.size > 0) {
+    if (nextTab !== effectiveTab && dirtyTabs.size > 0) {
       toastError(`Please save your changes in the ${Array.from(dirtyTabs).join(", ")} tab(s) before switching.`);
       setShowUnsavedBanner(true);
       return;
@@ -727,13 +727,12 @@ export default function PolicyCenter() {
     try {
       // Build expected setting versions map from the keys this RPC will write
       const attendanceSettingKeys = [
-        "late_mark_enabled", "late_mark_grace_minutes", "late_mark_threshold",
+        "late_mark_grace_minutes", "late_mark_threshold",
         "late_mark_deduction_hours", "overtime_enabled", "overtime_rate",
-        "geofence_enabled", "office_lat", "office_lng", "geofence_radius_meters",
-        "geofence_mode", "regularization_enabled", "regularization_window_days",
+        "geofence_enabled", "geofence_mode", "regularization_enabled", "regularization_window_days",
         "payroll_lock_date", "break_tracking_enabled", "break_deduction_mode",
         "short_break_limit_minutes", "remote_work_handling", "gps_verification_mode",
-        "attendance_selfie_mode", "selfie_retention_days", "high_confidence_max",
+        "attendance_selfie_mode", "high_confidence_max",
         "medium_confidence_max", "low_confidence_max",
       ];
       const expectedSettingVersions: Record<string, string> = {};
@@ -754,16 +753,12 @@ export default function PolicyCenter() {
             punch_in_cutoff: tenantForm.punch_in_cutoff,
             work_hours_per_day: tenantForm.work_hours_per_day || defaultTenantForm.work_hours_per_day,
             lunch_break_minutes: tenantForm.lunch_break_minutes || defaultTenantForm.lunch_break_minutes,
-            late_mark_enabled: String(attendancePolicy.late_mark_enabled),
             late_mark_grace_minutes: attendancePolicy.late_mark_grace_minutes || "0",
             late_mark_threshold: attendancePolicy.late_mark_threshold || "3",
             late_mark_deduction_hours: attendancePolicy.late_mark_deduction_hours || "0.5",
             overtime_enabled: String(attendancePolicy.overtime_enabled),
             overtime_rate: attendancePolicy.overtime_rate || "1.5",
             geofence_enabled: String(attendancePolicy.geofence_enabled),
-            office_lat: attendancePolicy.office_lat.trim(),
-            office_lng: attendancePolicy.office_lng.trim(),
-            geofence_radius_meters: attendancePolicy.geofence_radius_meters || "500",
             geofence_mode: attendancePolicy.geofence_mode,
             regularization_enabled: String(attendancePolicy.regularization_enabled),
             regularization_window_days: attendancePolicy.regularization_window_days || "7",
@@ -774,7 +769,6 @@ export default function PolicyCenter() {
             remote_work_handling: attendancePolicy.remote_work_handling,
             gps_verification_mode: attendancePolicy.gps_verification_mode,
             attendance_selfie_mode: attendancePolicy.attendance_selfie_mode,
-            selfie_retention_days: attendancePolicy.selfie_retention_days,
             high_confidence_max: attendancePolicy.high_confidence_max || "50",
             medium_confidence_max: attendancePolicy.medium_confidence_max || "150",
             low_confidence_max: attendancePolicy.low_confidence_max || "300",
@@ -823,7 +817,6 @@ export default function PolicyCenter() {
     try {
       await saveSettingRows([
         { key: "leave_min_notice_days", value: leavePolicy.leave_min_notice_days || "0" },
-        { key: "leave_carry_forward", value: String(leavePolicy.leave_carry_forward) },
       ], "leave-policy", "Leave policy saved", "leave");
     } catch (err) {
       console.error("saveLeavePolicy:", err);
@@ -859,32 +852,19 @@ export default function PolicyCenter() {
   async function saveTaskPolicy() {
     if (!tenantId) return;
 
-    const validation = validateTaskPolicy(taskPolicy);
-    if (!validation.valid) {
-      toastError(Object.values(validation.errors)[0]);
-      return;
-    }
-
     setSavingTab("task");
     try {
-      const taskSettingKeys = ["task_eod_redmark_time", "task_grace_period_minutes"];
-      const expectedSettingVersions: Record<string, string> = {};
-      for (const k of taskSettingKeys) {
-        if (settingUpdatedAtMap[k]) expectedSettingVersions[k] = settingUpdatedAtMap[k];
-      }
-
+      // The task tab now writes only the `tenants.punch_out_gate_enabled` column — the EOD
+      // red-mark settings it used to own were removed (nothing read them), so there are no
+      // tenant_settings keys left to version-check here.
       const { data: rpcData, error: rpcError } = await db.rpc(
         "save_task_policy_transaction",
         {
           p_tenant_id: tenantId,
           p_expected_tenant_updated_at: tenantUpdatedAt ?? null,
-          p_expected_setting_versions: Object.keys(expectedSettingVersions).length > 0
-            ? expectedSettingVersions
-            : null,
+          p_expected_setting_versions: null,
           p_policy: {
             punch_out_gate_enabled: String(taskPolicy.punch_out_gate_enabled),
-            task_eod_redmark_time: taskPolicy.task_eod_redmark_time || "23:30",
-            task_grace_period_minutes: taskPolicy.task_grace_period_minutes || "0",
           },
         }
       );
@@ -1258,13 +1238,13 @@ export default function PolicyCenter() {
       ) : null}
 
       <div className="flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-        {tabs.map(({ key, label, icon: Icon }) => (
+        {visibleTabs.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             type="button"
             onClick={() => handleTabChange(key)}
             className={`inline-flex min-w-fit flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
-              activeTab === key ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"
+              effectiveTab === key ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"
             }`}
           >
             <Icon className="h-4 w-4" />
@@ -1273,16 +1253,37 @@ export default function PolicyCenter() {
         ))}
       </div>
 
-      {activeTab === "attendance" ? (
+      {effectiveTab === "attendance" ? (
         <div className="space-y-4">
           <SectionCard title="Shift Management">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
-              <p className="text-sm font-medium text-slate-700">{shiftCount} shifts configured | {customShiftEmployeeCount} employees on custom shifts</p>
-              <Link to="/hr/shifts" className="text-sm font-semibold text-brand-700 hover:text-brand-800">Manage Shifts →</Link>
-            </div>
+            {shiftCount === 0 ? (
+              <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4">
+                <div className="flex gap-2">
+                  <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-900">No shifts configured — attendance will not be derived.</p>
+                    <p className="mt-1 text-xs text-amber-700">
+                      The hourly derivation run only processes tenants that have at least one active shift, so
+                      punches will be recorded but never turned into a day's attendance. Create a shift to start.
+                    </p>
+                  </div>
+                </div>
+                <Link to="/hr/shifts" className="shrink-0 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100">Create a shift →</Link>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
+                <p className="text-sm font-medium text-slate-700">{shiftCount} shifts configured | {customShiftEmployeeCount} employees on custom shifts</p>
+                <Link to="/hr/shifts" className="text-sm font-semibold text-brand-700 hover:text-brand-800">Manage Shifts →</Link>
+              </div>
+            )}
           </SectionCard>
 
-          <SectionCard title="Punch Rules">
+          <SectionCard title="Default punch rules">
+            <p className="mb-4 text-xs text-slate-500">
+              Fallback values, used <span className="font-semibold">only for employees with no shift assigned</span>.
+              Anyone on a shift takes their start time, half-day cutoff and expected hours from that shift instead.
+              Set these on the shift in <Link to="/hr/shifts" className="font-semibold text-brand-700 hover:text-brand-800">Shift Management</Link>.
+            </p>
             <div className="grid gap-4 md:grid-cols-2">
               <FieldLabel label="Punch-in opens at">
                 <input type="time" value={tenantForm.punch_in_start} onChange={(event) => setTenantForm((current) => ({ ...current, punch_in_start: event.target.value }))} className={inputClass} />
@@ -1334,28 +1335,29 @@ export default function PolicyCenter() {
             </div>
           </SectionCard>
 
-          <SectionCard title="Late Mark Rules">
+          <SectionCard title="Late marks and their payroll deduction">
             <div className="space-y-4">
-              <Toggle checked={attendancePolicy.late_mark_enabled} onChange={(checked) => setAttendancePolicy((current) => ({ ...current, late_mark_enabled: checked }))} label="Enable late mark tracking" />
-              {attendancePolicy.late_mark_enabled ? (
-                <div className="grid gap-4 md:grid-cols-3">
-                  <FieldLabel label="Grace period (minutes)">
-                    <input type="number" min={0} value={attendancePolicy.late_mark_grace_minutes} onChange={(event) => setAttendancePolicy((current) => ({ ...current, late_mark_grace_minutes: event.target.value }))} className={inputClass} />
-                    <p className="mt-1 text-xs text-slate-500">Minutes after shift start before marking as late (0 = strict)</p>
-                  </FieldLabel>
-                  <FieldLabel label="Monthly threshold">
-                    <input type="number" min={0} value={attendancePolicy.late_mark_threshold} onChange={(event) => setAttendancePolicy((current) => ({ ...current, late_mark_threshold: event.target.value }))} className={inputClass} />
-                    <p className="mt-1 text-xs text-slate-500">Number of late marks allowed before salary deduction begins</p>
-                  </FieldLabel>
-                  <FieldLabel label="Deduction per excess late mark">
-                    <input type="number" min={0} step="0.1" value={attendancePolicy.late_mark_deduction_hours} onChange={(event) => setAttendancePolicy((current) => ({ ...current, late_mark_deduction_hours: event.target.value }))} className={inputClass} />
-                    <p className="mt-1 text-xs text-slate-500">Hours deducted from salary for each late mark beyond threshold</p>
-                  </FieldLabel>
-                </div>
-              ) : null}
-              {attendancePolicy.late_mark_enabled ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{attendancePreviewText}</div>
-              ) : null}
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                <span className="font-semibold text-slate-600">Whether a day is marked late is set per shift</span>, not here —
+                see <span className="font-medium">Enable late entry marking</span> and its grace period in{" "}
+                <Link to="/hr/shifts" className="font-semibold text-brand-700 hover:text-brand-800">Shift Management</Link>.
+                The values below decide what a month's accumulated late marks cost.
+              </p>
+              <div className="grid gap-4 md:grid-cols-3">
+                <FieldLabel label="Grace period for HR corrections (minutes)">
+                  <input type="number" min={0} value={attendancePolicy.late_mark_grace_minutes} onChange={(event) => setAttendancePolicy((current) => ({ ...current, late_mark_grace_minutes: event.target.value }))} className={inputClass} />
+                  <p className="mt-1 text-xs text-slate-500">Applied only when HR approves an attendance correction. Day-to-day lateness uses the shift's own grace period — keep the two in step.</p>
+                </FieldLabel>
+                <FieldLabel label="Monthly threshold">
+                  <input type="number" min={0} value={attendancePolicy.late_mark_threshold} onChange={(event) => setAttendancePolicy((current) => ({ ...current, late_mark_threshold: event.target.value }))} className={inputClass} />
+                  <p className="mt-1 text-xs text-slate-500">Number of late marks allowed before salary deduction begins</p>
+                </FieldLabel>
+                <FieldLabel label="Deduction per excess late mark">
+                  <input type="number" min={0} step="0.1" value={attendancePolicy.late_mark_deduction_hours} onChange={(event) => setAttendancePolicy((current) => ({ ...current, late_mark_deduction_hours: event.target.value }))} className={inputClass} />
+                  <p className="mt-1 text-xs text-slate-500">Hours deducted from salary for each late mark beyond threshold</p>
+                </FieldLabel>
+              </div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{attendancePreviewText}</div>
             </div>
           </SectionCard>
 
@@ -1378,15 +1380,35 @@ export default function PolicyCenter() {
               <Toggle checked={attendancePolicy.geofence_enabled} onChange={(checked) => setAttendancePolicy((current) => ({ ...current, geofence_enabled: checked }))} label="Require location on punch-in" />
               {attendancePolicy.geofence_enabled ? (
                 <>
-                  <div className="flex items-center justify-between gap-4 rounded-xl border border-brand-200 bg-brand-50 p-4">
-                    <div>
-                      <p className="text-sm font-medium text-brand-900">Multi-branch Geo-fencing is active.</p>
-                      <p className="mt-1 text-xs text-brand-700">Employees can punch in from any active office location.</p>
+                  {officeLocationCount === 0 ? (
+                    <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                      <div className="flex gap-2">
+                        <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                        <div>
+                          <p className="text-sm font-semibold text-amber-900">No office locations configured.</p>
+                          <p className="mt-1 text-xs text-amber-700">
+                            The fence is made of your office locations, each with its own radius. Add at least
+                            one before enabling this — saving will be rejected until you do.
+                          </p>
+                        </div>
+                      </div>
+                      <Link to="/hr/office-locations" className="shrink-0 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100">
+                        Add an office location →
+                      </Link>
                     </div>
-                    <Link to="/hr/office-locations" className="shrink-0 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-brand-700 shadow-sm transition hover:bg-slate-50">
-                      Manage Office Locations →
-                    </Link>
-                  </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-4 rounded-xl border border-brand-200 bg-brand-50 p-4">
+                      <div>
+                        <p className="text-sm font-medium text-brand-900">
+                          Fencing against {officeLocationCount} office location{officeLocationCount === 1 ? "" : "s"}.
+                        </p>
+                        <p className="mt-1 text-xs text-brand-700">A punch inside any one of them counts as verified, using that location's own radius.</p>
+                      </div>
+                      <Link to="/hr/office-locations" className="shrink-0 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-brand-700 shadow-sm transition hover:bg-slate-50">
+                        Manage Office Locations →
+                      </Link>
+                    </div>
+                  )}
                   <div>
                     <p className="mb-2 text-xs font-semibold text-slate-600">Geo-fence mode</p>
                     <div className="grid gap-3 md:grid-cols-2">
@@ -1405,11 +1427,14 @@ export default function PolicyCenter() {
                       <ShieldAlert className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
                       <div>
                         <p className="font-semibold">Strict Geo-fencing Active</p>
-                        <p className="text-xs text-amber-700 mt-1">Strict enforcement will block all employees outside configured office branches from punching in. Ensure remote/hybrid employees are configured with correct WFH exceptions or locations.</p>
+                        <p className="text-xs text-amber-700 mt-1">Strict enforcement blocks employees outside the fence from punching in <span className="font-semibold">in the employee app</span>. Make sure remote and hybrid staff have approved WFH exceptions before turning this on.</p>
                       </div>
                     </div>
                   )}
-                  <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">Currently set to warn-only. Employees outside the fence can still punch in but their record is flagged for HR review.</p>
+                  <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                    Checked in the employee app only. Punches that arrive from a kiosk or a biometric
+                    device are not location-checked.
+                  </p>
                 </>
               ) : null}
             </div>
@@ -1417,6 +1442,11 @@ export default function PolicyCenter() {
 
           <SectionCard title="Attendance Verification Settings">
             <div className="space-y-6">
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                Every check on this card runs in the <span className="font-semibold text-slate-600">employee app</span>.
+                Punches ingested from a kiosk or a biometric device bypass all of them — restrict those per shift
+                using <span className="font-medium">Allowed punch sources</span> in Shift Management.
+              </p>
               <div>
                 <p className="mb-2 text-xs font-semibold text-slate-600">Remote Work Policy</p>
                 <div className="grid gap-3 md:grid-cols-3">
@@ -1490,21 +1520,6 @@ export default function PolicyCenter() {
                 )}
               </div>
 
-              <div>
-                <p className="mb-2 text-xs font-semibold text-slate-600">Selfie Retention Policy</p>
-                <select
-                  value={attendancePolicy.selfie_retention_days}
-                  onChange={(event) => setAttendancePolicy((current) => ({ ...current, selfie_retention_days: event.target.value as any }))}
-                  className={inputClass}
-                >
-                  <option value="30">30 Days</option>
-                  <option value="90">90 Days</option>
-                  <option value="180">180 Days</option>
-                  <option value="365">1 Year</option>
-                  <option value="forever">Forever</option>
-                </select>
-              </div>
-
               <div className="grid gap-4 md:grid-cols-3">
                 <FieldLabel label="High Confidence Limit (meters)">
                   <input type="number" min={5} value={attendancePolicy.high_confidence_max} onChange={(event) => setAttendancePolicy((current) => ({ ...current, high_confidence_max: event.target.value }))} className={inputClass} />
@@ -1525,7 +1540,7 @@ export default function PolicyCenter() {
               {attendancePolicy.regularization_enabled ? (
                 <FieldLabel label="Correction window (days)">
                   <input type="number" min={1} value={attendancePolicy.regularization_window_days} onChange={(event) => setAttendancePolicy((current) => ({ ...current, regularization_window_days: event.target.value }))} className={inputClass} />
-                  <p className="mt-1 text-xs text-slate-500">Employees can request corrections for punches within the last X days</p>
+                  <p className="mt-1 text-xs text-slate-500">Employees can request corrections for punches within the last X days. The window is applied in the employee app; HR approval does not re-check it.</p>
                 </FieldLabel>
               ) : null}
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">Correction requests appear in Attendance → Corrections tab for HR review.</p>
@@ -1545,7 +1560,7 @@ export default function PolicyCenter() {
         </div>
       ) : null}
 
-      {activeTab === "leave" ? (
+      {effectiveTab === "leave" ? (
         <div className="space-y-4">
           <SectionCard title="Leave Types Manager">
             <div className="flex gap-2 rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800 mb-4">
@@ -1627,9 +1642,10 @@ export default function PolicyCenter() {
               <FieldLabel label="Minimum notice days (global fallback, leave types can override)">
                 <input type="number" min={0} value={leavePolicy.leave_min_notice_days} onChange={(event) => setLeavePolicy((current) => ({ ...current, leave_min_notice_days: event.target.value }))} className={inputClass} />
               </FieldLabel>
-              <div>
-                <Toggle checked={leavePolicy.leave_carry_forward} onChange={(checked) => setLeavePolicy((current) => ({ ...current, leave_carry_forward: checked }))} label="Allow leave carry forward (global toggle)" />
-              </div>
+              <p className="self-end text-xs text-slate-500">
+                Carry-forward is recorded <span className="font-semibold text-slate-600">per leave type</span> above.
+                Note that no process applies it yet — year-end balances are not carried over automatically.
+              </p>
             </div>
           </SectionCard>
 
@@ -1637,7 +1653,7 @@ export default function PolicyCenter() {
         </div>
       ) : null}
 
-      {activeTab === "salary" ? (
+      {effectiveTab === "salary" ? (
         <div className="space-y-4">
           <SectionCard title="LOP Calculation Method">
             <FieldLabel label="How to calculate per-day salary for Loss of Pay">
@@ -1723,22 +1739,11 @@ export default function PolicyCenter() {
         </div>
       ) : null}
 
-      {activeTab === "task" ? (
+      {effectiveTab === "task" ? (
         <div className="space-y-4">
           <SectionCard title="Task Policy">
             <div className="space-y-4">
               <Toggle checked={taskPolicy.punch_out_gate_enabled} onChange={(checked) => { setTaskPolicy((current) => ({ ...current, punch_out_gate_enabled: checked })); setTenantForm((current) => ({ ...current, punch_out_gate_enabled: checked })); }} label="Require task approval before employees can punch out" />
-              <div className="grid gap-4 md:grid-cols-2">
-                <FieldLabel label="End-of-day auto red-mark time">
-                  <input type="time" value={taskPolicy.task_eod_redmark_time} onChange={(event) => setTaskPolicy((current) => ({ ...current, task_eod_redmark_time: event.target.value }))} className={inputClass} />
-                  <p className="mt-1 text-xs text-slate-500">Time at which incomplete tasks are marked as red on HR calendar</p>
-                  <p className="mt-1 text-xs text-slate-500">The daily edge function runs at this time to flag incomplete tasks.</p>
-                </FieldLabel>
-                <FieldLabel label="Task grace period (minutes)">
-                  <input type="number" min={0} value={taskPolicy.task_grace_period_minutes} onChange={(event) => setTaskPolicy((current) => ({ ...current, task_grace_period_minutes: event.target.value }))} className={inputClass} />
-                  <p className="mt-1 text-xs text-slate-500">Minutes after due time before task is considered overdue</p>
-                </FieldLabel>
-              </div>
               {taskPolicy.punch_out_gate_enabled && (
                 <div className="flex gap-2 rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800 mt-4">
                   <ShieldAlert className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
@@ -1755,7 +1760,7 @@ export default function PolicyCenter() {
         </div>
       ) : null}
 
-      {activeTab === "company" ? (
+      {effectiveTab === "company" ? (
         <div className="space-y-4">
           <SectionCard title="Company">
             <div className="grid gap-5 lg:grid-cols-[220px_1fr]">

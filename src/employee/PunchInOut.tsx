@@ -9,7 +9,7 @@ import { useEmployee } from "../hooks/useEmployee";
 import { useTenant } from "../contexts/TenantContext";
 import { useToast } from "../shared/ToastContext";
 import { Skeleton } from "../shared/Skeleton";
-import { checkGeofence, getCurrentPosition, type LocationStatus } from "../utils/geolocation";
+import { getCurrentPosition, type LocationStatus } from "../utils/geolocation";
 import { useEmployeeShift } from "../hooks/useEmployeeShift";
 import { formatLocalDate } from "../utils/date";
 import { BLOCKING_TASK_STATUSES } from "../utils/taskConstants";
@@ -226,7 +226,7 @@ export default function PunchInOut() {
     };
   }, [selfieModalOpen]);
 
-  const { success, error, info, toast } = useToast();
+  const { success, error, info } = useToast();
 
   const currentTime = new Date();
   const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
@@ -591,10 +591,6 @@ export default function PunchInOut() {
     const medConfMax = Number(tenantSettings["medium_confidence_max"] || 150);
     const lowConfMax = Number(tenantSettings["low_confidence_max"] || 300);
 
-    const officeLat = parseFloat(tenantSettings["office_lat"] || "0");
-    const officeLng = parseFloat(tenantSettings["office_lng"] || "0");
-    const radiusMeters = parseInt(tenantSettings["geofence_radius_meters"] || "500", 10);
-
     let lat: number | null = null;
     let lng: number | null = null;
     let accuracy: number | null = null;
@@ -639,45 +635,13 @@ export default function PunchInOut() {
       }
     }
 
-    if (!policy.geofenceRequired) {
-      status = "remote_approved";
-    } else {
-      if (gpsMode === "disabled") {
-        status = "office_verified";
-      } else if (!gpsCaptured) {
-        if (gpsMode === "strict") {
-          error("Punch blocked: Location access is required in strict mode.");
-          setActing(false);
-          setActionText("");
-          return;
-        } else {
-          status = gpsErrorReason === "denied" ? "gps_denied" : "gps_unavailable";
-        }
-      } else {
-        const fenceResult = checkGeofence(lat!, lng!, officeLat, officeLng, radiusMeters);
-        if (fenceResult.inside) {
-          status = "office_verified";
-        } else {
-          if (gpsMode === "strict") {
-            error(`Punch blocked: You are ${fenceResult.distanceMeters}m outside the designated office area.`);
-            void logAction("geofence_blocked", "attendance", null, {
-              reason: "outside_radius",
-              direction,
-              distance_meters: fenceResult.distanceMeters,
-              radius_meters: radiusMeters,
-              severity: "WARNING",
-            });
-            setActing(false);
-            setActionText("");
-            return;
-          } else {
-            status = "outside_geofence";
-            toast(`Recorded punch outside office area (${fenceResult.distanceMeters}m).`, "info");
-          }
-        }
-      }
-    }
-
+    // The fence decision is the SERVER's (attendance_evaluate_location, 20260903105835). This
+    // screen captures GPS and reports facts; it no longer decides whether a punch is allowed, and
+    // no longer computes a location_status -- punch_in_attendance / punch_out_attendance overwrite
+    // whatever is sent. A blocked punch comes back as GEOFENCE_BLOCKED and is surfaced below.
+    //
+    // The ONE status the client may still assert is `selfie_missing`: it is not a location verdict,
+    // and the server preserves it (20260903115418) because it can only make the record worse.
     const isSelfieMissing = policy.selfieRequired && !selfieBlob;
     if (isSelfieMissing) {
       status = "selfie_missing";
@@ -693,9 +657,6 @@ export default function PunchInOut() {
       exception_id: policy.remoteExceptionId,
       exception_type: policy.remoteExceptionType,
       geofence_required: policy.geofenceRequired,
-      office_lat: officeLat,
-      office_lng: officeLng,
-      geofence_radius: radiusMeters,
       gps_captured: gpsCaptured,
       gps_error_reason: gpsErrorReason,
     };
@@ -709,7 +670,15 @@ export default function PunchInOut() {
       }
     } catch (err) {
       console.error("Punch database error:", err);
-      error("Failed to complete punch.");
+      // The server owns the location decision now; surface its reason rather than a generic
+      // failure. GEOFENCE_BLOCKED carries the distance / cause in DETAIL.
+      const detail = (err as { details?: string; message?: string } | null)?.details;
+      const message = (err as { message?: string } | null)?.message ?? "";
+      if (message.includes("GEOFENCE_BLOCKED")) {
+        error(detail || "Punch blocked: you are outside the permitted location.");
+      } else {
+        error("Failed to complete punch.");
+      }
     } finally {
       setActing(false);
       setActionText("");

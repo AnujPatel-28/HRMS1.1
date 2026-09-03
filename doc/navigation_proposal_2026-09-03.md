@@ -1,0 +1,162 @@
+# Navigation proposal — module-shaped UI
+
+**Date:** 2026-09-03 · **Status:** proposal, nothing built.
+**Inputs:** `doc/Roughpicture.md` (target module tree), the current `/select` screen, `HRLayout`,
+`PayrollLayout`, and how Frappe HR solved the same problem.
+
+---
+
+## 0. The proposal in one line
+
+**Keep one shell. Replace the chooser page with a persistent module switcher, and give each module
+its own workspace.** Do not add a landing page per module — that is the specific thing Frappe built,
+measured, and removed.
+
+---
+
+## 1. What exists today
+
+| Piece | State |
+|---|---|
+| `/select` | Two cards — **HR Management** and **Payroll System** — each opening a separate portal |
+| `HRLayout` | Sidebar with five sections: **People · Attendance · HR Management · Communication · Admin** |
+| Module gating in the sidebar | **Already built.** Each nav item may declare `module`, items are filtered by `hasModule`, and a section that empties is dropped entirely |
+| `PayrollLayout` | A second shell for `/payroll/*` |
+| Policy Center tabs | Gated per module as of 2026-09-03 |
+
+So the mechanism is in place and correct. What is wrong is the **shape**: the groupings are
+functional ("HR Management", "Admin") rather than the module tree, and `/select` splits the product
+on an axis the target architecture does not use.
+
+## 2. Where today's shape disagrees with the sketch
+
+1. **`/select` splits HR vs Payroll.** The sketch has Payroll as **one of three peers** under
+   Organisation, not one half of the product. A tenant with attendance + tasks and no payroll sees a
+   two-card chooser where one card is wrong and the other is "everything else".
+2. **Sidebar sections are not modules.** `Leaves` and `Holidays` sit under *HR Management* while
+   `Attendance` and `Shifts` sit under *Attendance*, but the sketch puts leave and holidays **inside**
+   the attendance module. `Tasks` and `Projects` are under *HR Management* rather than being their own
+   Task & Project module.
+3. **There is no Organisation grouping.** Employees / Directory / Org Chart / Org Setup /
+   Onboarding / Offboarding are the sketch's base module, spread across *People* and *Admin* today.
+4. **No `organisation` module key exists.** The base is `directory` (core) + `onboarding` +
+   `offboarding` as three separate catalogue keys. Naming the sketch's base is a catalogue decision,
+   not a labelling one.
+
+## 3. What Frappe learned — the reason not to build chooser pages
+
+Frappe HR's sidebar used to nest workspaces under **HR** and **Payroll** heads: exactly the
+structure a per-module chooser produces. They removed it
+([frappe/hrms#2521](https://github.com/frappe/hrms/issues/2521), shipped via #2642). Two reasons
+stated in the issue:
+
+- the nested structure **"creates unnecessary landing pages"**, and
+- the top-level HR & Payroll workspace content was **"mostly redundant"** — it mostly re-listed what
+  the sidebar already showed.
+
+What replaced it: a **persistent app switcher** in the desk shell, with workspaces filtered by app
+in the sidebar, so context switching happens from anywhere instead of by navigating back out to a
+menu. Their v16 navigation work pushes further the same way — hover-expand sidebar, flyout
+submenus — all aimed at reducing clicks between modules, not adding them.
+
+**The lesson applied here:** the instinct ("UI should be module-shaped") is right; the mechanism
+("a select page, then a different UI") is the part they had to undo. A chooser is a toll booth you
+pay on every context switch.
+
+## 4. Proposed shape
+
+### 4.1 One shell, persistent switcher
+
+Replace `/select` with a **module switcher pinned in the app shell** (sidebar head or top bar),
+listing only the modules this tenant has. Same `hasModule` source already driving the sidebar and
+the Policy Center tabs — **one mechanism for routes, nav and tabs**.
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ [◇ TalentMesh]  [ Attendance ▾ ]              [user ▾]      │  ← switcher, always present
+├────────────┬───────────────────────────────────────────────┤
+│ ORGANISATION│                                              │
+│  Employees  │   ← module workspace content                 │
+│  Directory  │                                              │
+│  Org chart  │                                              │
+│  Onboarding │                                              │
+│  Offboarding│                                              │
+│            │                                               │
+│ ATTENDANCE  │                                              │
+│  Overview   │                                              │
+│  Shifts     │                                              │
+│  Holidays   │                                              │
+│  Leaves     │                                              │
+│  Devices    │                                              │
+│  Corrections│                                              │
+│            │                                               │
+│ ⚙ Policy    │                                              │
+│ 💬 Chat      │                                              │
+└────────────┴───────────────────────────────────────────────┘
+```
+
+### 4.2 Sidebar sections become the module tree
+
+Re-group the five functional sections into the sketch's tree. This is a re-grouping of existing
+`NavLinkItem` entries — no new screens.
+
+| Section | `module` gate | Items |
+|---|---|---|
+| **Organisation** *(base)* | core / `onboarding` / `offboarding` per item | Employees, Directory, Org Chart, Org Setup, Onboarding, Offboarding |
+| **Attendance** | `attendance` (Holidays: `work_calendar`, Leaves: `leave`) | Overview, Shifts, Holidays, Leaves, Devices, Corrections, Calendar |
+| **Task & Project** | `tasks` | Projects, Tasks, Goals, Workflows |
+| **Payroll & Finance** | `payroll` (Expenses: `expenses`, Insurance: `insurance`) | Salaries, Run Payroll, Payslips, IT Declarations, Expenses, Insurance *(later)* |
+| **Policy Center** | core | Policy Center, Policies |
+| **Add-ons** | `chat` / `connect` | Chat, Connect |
+
+Note Holidays stays gated on `work_calendar`, not `attendance` — it is core substrate that leave and
+payroll also read, and gating it on the wrong module locked an attendance-only tenant out of it once
+already.
+
+### 4.3 Each module owns its workspace, and they should differ
+
+This is the part of the request worth building. Landing on a module shows **that module's** working
+surface, not a generic dashboard:
+
+- **Attendance** — today's punch state, who is in/out, unresolved corrections, derivation health
+  (last run, failures), shift coverage warnings. Time-shaped: a day/week strip.
+- **Task & Project** — board or list of projects, tasks by status, overdue items, approvals waiting.
+  Work-shaped: kanban, not a calendar.
+- **Payroll & Finance** — the current period, run status, exceptions blocking a run, last payslip
+  batch. Period-shaped: a month selector and a run pipeline.
+
+Different layout primitives per module is correct and is the real answer to "different UI per
+module". A shared chooser page in front of them is not.
+
+### 4.4 What happens to `/select`
+
+Two options.
+
+| Option | Behaviour |
+|---|---|
+| **A — remove it** *(recommended)* | Land on the highest-priority module the tenant has; the switcher covers the rest. Matches Frappe's conclusion. |
+| **B — keep it as a first-run screen only** | Show once, remember the choice, never show again. Preserves the current "what would you like to do today?" welcome without taxing every switch. |
+
+Either way it should stop being a permanent gate, and if kept it should list **modules**, not two
+hardcoded portals.
+
+## 5. Sequencing
+
+1. **Re-group the sidebar sections into the module tree** — pure data change to the nav array in
+   `HRLayout`; the gating machinery is already there. Low risk, immediate alignment with the sketch.
+2. **Add the persistent module switcher** to the shell, driven by `hasModule`.
+3. **Decide `/select`** — remove or demote to first-run.
+4. **Build the per-module workspaces** one at a time, starting with Attendance (its data is the most
+   complete). This is the real work.
+5. **Merge `PayrollLayout` into the one shell**, so Payroll is a module workspace rather than a
+   second portal — do this during the payroll build, not before.
+
+## 6. Open decisions
+
+- **Does an `organisation` module key get created**, or does the sketch's base stay as
+  `directory` + `onboarding` + `offboarding`? Creating one is a catalogue migration and changes
+  what is sellable.
+- **`/select`: remove, or keep as first-run?** (§4.4)
+- **Does Payroll keep a separate shell** until it is rebuilt, or move into the single shell now?
+- **Leave stays its own module key** even if it is *presented* inside Attendance — merging the keys
+  would make `attendance without leave` inexpressible, and that mix has a QA fixture exercising it.

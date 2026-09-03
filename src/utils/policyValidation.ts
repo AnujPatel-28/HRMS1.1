@@ -1,4 +1,4 @@
-import type { AttendancePolicyForm, TaskPolicyForm, LeavePolicyForm, SalaryPolicyForm, LeaveTypeForm } from "../hr/PolicyCenter";
+import type { AttendancePolicyForm, LeavePolicyForm, SalaryPolicyForm, LeaveTypeForm } from "../hr/PolicyCenter";
 
 export type ValidationResult = {
   valid: boolean;
@@ -8,33 +8,19 @@ export type ValidationResult = {
 export function validateAttendancePolicy(policy: AttendancePolicyForm): ValidationResult {
   const errors: Record<string, string> = {};
 
-  if (policy.late_mark_enabled) {
-    if (Number(policy.late_mark_grace_minutes) < 0) {
-      errors.late_mark_grace_minutes = "Grace minutes cannot be negative.";
-    }
-    if (Number(policy.late_mark_threshold) < 0) {
-      errors.late_mark_threshold = "Late mark threshold cannot be negative.";
-    }
-    if (Number(policy.late_mark_deduction_hours) < 0) {
-      errors.late_mark_deduction_hours = "Deduction hours cannot be negative.";
-    }
+  if (Number(policy.late_mark_grace_minutes) < 0) {
+    errors.late_mark_grace_minutes = "Grace minutes cannot be negative.";
+  }
+  if (Number(policy.late_mark_threshold) < 0) {
+    errors.late_mark_threshold = "Late mark threshold cannot be negative.";
+  }
+  if (Number(policy.late_mark_deduction_hours) < 0) {
+    errors.late_mark_deduction_hours = "Deduction hours cannot be negative.";
   }
 
   if (policy.overtime_enabled) {
     if (Number(policy.overtime_rate) < 1.0) {
       errors.overtime_rate = "Overtime rate must be at least 1.0.";
-    }
-  }
-
-  if (policy.geofence_enabled) {
-    if (Number(policy.geofence_radius_meters) < 50) {
-      errors.geofence_radius_meters = "Geofence radius must be at least 50 meters.";
-    }
-    if (!policy.office_lat.trim() || isNaN(Number(policy.office_lat))) {
-      errors.office_lat = "Valid office latitude is required.";
-    }
-    if (!policy.office_lng.trim() || isNaN(Number(policy.office_lng))) {
-      errors.office_lng = "Valid office longitude is required.";
     }
   }
 
@@ -70,22 +56,6 @@ export function validateAttendancePolicy(policy: AttendancePolicyForm): Validati
   }
   if (!errors.medium_confidence_max && !errors.low_confidence_max && lowConf <= medConf) {
     errors.low_confidence_max = "Low confidence max must be greater than Medium confidence max.";
-  }
-
-  return {
-    valid: Object.keys(errors).length === 0,
-    errors,
-  };
-}
-
-export function validateTaskPolicy(policy: TaskPolicyForm): ValidationResult {
-  const errors: Record<string, string> = {};
-
-  if (Number(policy.task_grace_period_minutes) < 0) {
-    errors.task_grace_period_minutes = "Task grace period cannot be negative.";
-  }
-  if (Number(policy.task_grace_period_minutes) > 480) {
-    errors.task_grace_period_minutes = "Task grace period is unreasonably high.";
   }
 
   return {
