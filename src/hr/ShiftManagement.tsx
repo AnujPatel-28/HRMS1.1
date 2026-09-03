@@ -19,7 +19,6 @@ type ShiftFormState = {
   working_days: number[];
   half_day_cutoff_override: string;
   punch_in_opens_minutes_before: string;
-  late_mark_grace_override: string;
   is_default: boolean;
   // §5.3 policy fields (Phase 0) -- consumed by the derivation processor once it ships.
   working_hours_threshold_for_absent: string;
@@ -77,7 +76,6 @@ const defaultShiftForm: ShiftFormState = {
   working_days: [1, 2, 3, 4, 5, 6],
   half_day_cutoff_override: "",
   punch_in_opens_minutes_before: "60",
-  late_mark_grace_override: "",
   is_default: false,
   working_hours_threshold_for_absent: "0",
   working_hours_threshold_for_half_day: "0",
@@ -119,7 +117,6 @@ function toShiftForm(shift: Shift): ShiftFormState {
     working_days: Array.isArray(shift.working_days) ? shift.working_days.map(Number) : [1, 2, 3, 4, 5, 6],
     half_day_cutoff_override: formatTimeValue(shift.half_day_cutoff_override),
     punch_in_opens_minutes_before: String(shift.punch_in_opens_minutes_before ?? 60),
-    late_mark_grace_override: shift.late_mark_grace_override ? String(shift.late_mark_grace_override) : "",
     is_default: Boolean(shift.is_default),
     working_hours_threshold_for_absent: String(shift.working_hours_threshold_for_absent ?? 0),
     working_hours_threshold_for_half_day: String(shift.working_hours_threshold_for_half_day ?? 0),
@@ -144,7 +141,6 @@ function normalizeShift(raw: Shift): Shift {
     end_time: formatTimeValue(raw.end_time),
     half_day_cutoff_override: raw.half_day_cutoff_override ? formatTimeValue(raw.half_day_cutoff_override) : null,
     punch_in_opens_minutes_before: Number(raw.punch_in_opens_minutes_before ?? 60),
-    late_mark_grace_override: raw.late_mark_grace_override ? Number(raw.late_mark_grace_override) : null,
     working_days: Array.isArray(raw.working_days) ? raw.working_days.map(Number) : [1, 2, 3, 4, 5, 6],
     working_hours_threshold_for_absent: Number(raw.working_hours_threshold_for_absent ?? 0),
     working_hours_threshold_for_half_day: Number(raw.working_hours_threshold_for_half_day ?? 0),
@@ -232,17 +228,12 @@ function ShiftFormFields({
           placeholder="60"
         />
       </label>
-      <label className="block">
-        <span className="mb-1.5 block text-xs font-semibold text-slate-600">Late mark grace override (minutes)</span>
-        <input
-          type="number"
-          min="0"
-          value={form.late_mark_grace_override}
-          onChange={(event) => onChange({ ...form, late_mark_grace_override: event.target.value })}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring"
-          placeholder="Leave empty for default"
-        />
-      </label>
+      {/*
+        "Late mark grace override" was removed here: nothing ever read shifts.late_mark_grace_override.
+        The grace that actually decides lateness is `late_entry_grace_minutes` below, used by both
+        attendance_derive_pass1 and (since 20260903102438) HR correction approval. Offering a third
+        grace field that silently did nothing is the exact pattern the policy-center audit removed.
+      */}
       {form.end_time < form.start_time && (
         <div className="md:col-span-2 mb-2 flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" />
@@ -568,7 +559,10 @@ export default function ShiftManagement() {
         // cutoff (i.e. all of them) unsaveable. Create was unaffected because its form seeds "".
         p_half_day_cutoff_override: normalizeTimeInput(form.half_day_cutoff_override),
         p_punch_in_opens_minutes_before: Number(form.punch_in_opens_minutes_before || 60),
-        p_late_mark_grace_override: form.late_mark_grace_override ? Number(form.late_mark_grace_override) : null,
+        // Retired: nothing reads shifts.late_mark_grace_override. The parameter is still DECLARED on
+        // hr_save_shift, and omitting a declared param reads as "function not found" through
+        // PostgREST, so it is sent as an explicit null rather than dropped.
+        p_late_mark_grace_override: null,
         p_is_default: form.is_default,
         p_working_hours_threshold_for_absent: Number(form.working_hours_threshold_for_absent || 0),
         p_working_hours_threshold_for_half_day: Number(form.working_hours_threshold_for_half_day || 0),
@@ -591,7 +585,6 @@ export default function ShiftManagement() {
         start_time: form.start_time,
         end_time: form.end_time,
         punch_in_opens_minutes_before: form.punch_in_opens_minutes_before,
-        late_mark_grace_override: form.late_mark_grace_override,
         severity: "INFO",
       });
 

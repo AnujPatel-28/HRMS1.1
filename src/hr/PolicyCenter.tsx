@@ -376,6 +376,41 @@ function SaveButton({ label, saving, onClick }: { label: string; saving: boolean
   );
 }
 
+type LiveStatusRow = {
+  tone: "good" | "warn" | "bad" | "off";
+  label: string;
+  detail: string;
+};
+
+const statusTone: Record<LiveStatusRow["tone"], { dot: string; text: string }> = {
+  good: { dot: "bg-emerald-500", text: "text-slate-600" },
+  warn: { dot: "bg-amber-500", text: "text-amber-800" },
+  bad: { dot: "bg-rose-500", text: "text-rose-800" },
+  off: { dot: "bg-slate-300", text: "text-slate-500" },
+};
+
+/**
+ * "What is actually in force" — the answer this screen could not give before. Saving a policy here
+ * has never been the same thing as that policy taking effect, and the gap was invisible.
+ */
+function LivePolicyStatus({ rows }: { rows: LiveStatusRow[] }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">What is in force right now</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {rows.map((row) => (
+          <div key={row.label} className="flex items-start gap-2">
+            <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${statusTone[row.tone].dot}`} aria-hidden />
+            <p className={`text-xs ${statusTone[row.tone].text}`}>
+              <span className="font-semibold text-slate-700">{row.label}:</span> {row.detail}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function PolicyCenter() {
   const { tenantId, refreshTenant, hasModule } = useTenant();
   const { logAction } = useAuditLog();
@@ -398,6 +433,8 @@ export default function PolicyCenter() {
   const [activeEmployeeIds, setActiveEmployeeIds] = useState<string[]>([]);
   const [shiftCount, setShiftCount] = useState(0);
   const [officeLocationCount, setOfficeLocationCount] = useState(0);
+  const [lastDerivationRun, setLastDerivationRun] = useState<{ finished_at: string | null; status: string; error_count: number } | null>(null);
+  const [employeesWithoutShift, setEmployeesWithoutShift] = useState(0);
   const [customShiftEmployeeCount, setCustomShiftEmployeeCount] = useState(0);
   const [salaryTemplates, setSalaryTemplates] = useState<Record<string, SalaryTemplate>>({});
 
@@ -446,7 +483,7 @@ export default function PolicyCenter() {
     if (!tenantId) return;
     setLoading(true);
     try {
-      const [tenantRes, settingsRes, leaveTypesRes, shiftsRes, shiftAssignmentsRes, employeesRes, leaveBalancesRes, officeLocationsRes] = await Promise.all([
+      const [tenantRes, settingsRes, leaveTypesRes, shiftsRes, shiftAssignmentsRes, employeesRes, leaveBalancesRes, officeLocationsRes, derivationRunsRes] = await Promise.all([
         db.from("tenants").select(tenantColumns).eq("id", tenantId).maybeSingle(),
         db.from("tenant_settings").select("key,value,updated_at").eq("tenant_id", tenantId),
         db.from("leave_types").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: true }),
@@ -460,6 +497,12 @@ export default function PolicyCenter() {
         db.from("employees").select("id").eq("tenant_id", tenantId).eq("status", "active"),
         db.from("leave_balances").select("id,employee_id,leave_type_id,year").eq("tenant_id", tenantId),
         db.from("office_locations").select("id").eq("tenant_id", tenantId).eq("is_active", true),
+        db
+          .from("attendance_derivation_runs")
+          .select("finished_at,status,error_count")
+          .eq("tenant_id", tenantId)
+          .order("started_at", { ascending: false })
+          .limit(1),
       ]);
 
       if (tenantRes.error) throw tenantRes.error;
@@ -470,6 +513,8 @@ export default function PolicyCenter() {
       if (employeesRes.error) throw employeesRes.error;
       if (leaveBalancesRes.error) throw leaveBalancesRes.error;
       if (officeLocationsRes.error) throw officeLocationsRes.error;
+      // derivationRunsRes is deliberately NOT thrown on: the status panel is diagnostic, and a
+      // tenant that cannot read its run history must still be able to edit its policies.
 
       const tenantData = tenantRes.data as Partial<TenantForm> | null;
       const rawSettings = (settingsRes.data ?? []) as { key: string; value: string; updated_at?: string }[];
@@ -532,6 +577,7 @@ export default function PolicyCenter() {
       const customAssignments = ((shiftAssignmentsRes.data ?? []) as { employee_id: string; shift_id: string }[])
         .filter((assignment) => shiftMap.get(assignment.shift_id)?.is_default === false);
       const activeEmployees = ((employeesRes.data ?? []) as { id: string }[]).map((employee) => employee.id);
+      const assignedEmployeeIds = new Set(((shiftAssignmentsRes.data ?? []) as { employee_id: string }[]).map((row) => row.employee_id));
       const templateSettings = Object.entries(settings)
         .filter(([key]) => key.startsWith("salary_template_"))
         .reduce<Record<string, SalaryTemplate>>((acc, [key, value]) => {
@@ -556,6 +602,14 @@ export default function PolicyCenter() {
       setLeaveTypes(nextLeaveTypes);
       setShiftCount(shiftRows.length);
       setOfficeLocationCount((officeLocationsRes.data ?? []).length);
+      setLastDerivationRun(((derivationRunsRes.data ?? []) as { finished_at: string | null; status: string; error_count: number }[])[0] ?? null);
+      // A default shift covers everyone who has no explicit assignment, so "employees without a
+      // shift" only means anything when the tenant has no default.
+      setEmployeesWithoutShift(
+        shiftRows.some((shift) => shift.is_default)
+          ? 0
+          : activeEmployees.filter((id) => !assignedEmployeeIds.has(id)).length,
+      );
       setCustomShiftEmployeeCount(new Set(customAssignments.map((assignment) => assignment.employee_id)).size);
       setActiveEmployeeIds(activeEmployees);
       setLeaveBalanceRows((leaveBalancesRes.data ?? []) as LeaveBalanceRow[]);
@@ -617,6 +671,60 @@ export default function PolicyCenter() {
     () => tabs.filter((tab) => tab.module === null || hasModule(tab.module)),
     [hasModule],
   );
+
+  /**
+   * What is actually in force, as opposed to what is configured. Every finding of the 2026-09-02
+   * policy-center audit was of the same shape — a setting saved successfully while nothing acted
+   * on it — and none of it was visible from this screen. These rows are read from live state, not
+   * from the forms above.
+   */
+  const livePolicyStatus = useMemo<LiveStatusRow[]>(() => {
+    const rows: LiveStatusRow[] = [];
+
+    if (shiftCount === 0) {
+      rows.push({ tone: "bad", label: "Derivation", detail: "No shifts — attendance is never derived for this organisation." });
+    } else if (!lastDerivationRun) {
+      rows.push({ tone: "warn", label: "Derivation", detail: "Configured, but has never run." });
+    } else {
+      const finished = lastDerivationRun.finished_at ? new Date(lastDerivationRun.finished_at) : null;
+      const hoursAgo = finished ? (Date.now() - finished.getTime()) / 3_600_000 : null;
+      const failed = lastDerivationRun.status === "failed" || lastDerivationRun.error_count > 0;
+      const stale = hoursAgo !== null && hoursAgo > 3;
+      rows.push({
+        tone: failed ? "bad" : stale ? "warn" : "good",
+        label: "Derivation",
+        detail: failed
+          ? `Last run ${lastDerivationRun.status}${lastDerivationRun.error_count > 0 ? ` with ${lastDerivationRun.error_count} error(s)` : ""}.`
+          : hoursAgo === null
+            ? "A run is in progress."
+            : `Last run ${hoursAgo < 1 ? "under an hour" : `${Math.floor(hoursAgo)}h`} ago. Runs hourly.`,
+      });
+    }
+
+    if (employeesWithoutShift > 0) {
+      rows.push({
+        tone: "warn",
+        label: "Shift coverage",
+        detail: `${employeesWithoutShift} active employee${employeesWithoutShift === 1 ? "" : "s"} on no shift — they fall back to the default punch rules.`,
+      });
+    }
+
+    rows.push(
+      attendancePolicy.geofence_enabled
+        ? officeLocationCount === 0
+          ? { tone: "bad", label: "Geo-fence", detail: "Enabled with no office location — every punch is let through unchecked." }
+          : { tone: "good", label: "Geo-fence", detail: `${officeLocationCount} location${officeLocationCount === 1 ? "" : "s"}, ${attendancePolicy.geofence_mode === "strict" ? "strict" : "warn-only"}. App punches only; devices are not location-checked.` }
+        : { tone: "off", label: "Geo-fence", detail: "Off — punch location is recorded but never checked." },
+    );
+
+    rows.push(
+      attendancePolicy.attendance_selfie_mode === "disabled"
+        ? { tone: "off", label: "Selfie", detail: "Off." }
+        : { tone: "warn", label: "Selfie", detail: "Asked for in the employee app only — a kiosk or device punch is never prompted." },
+    );
+
+    return rows;
+  }, [attendancePolicy.attendance_selfie_mode, attendancePolicy.geofence_enabled, attendancePolicy.geofence_mode, employeesWithoutShift, lastDerivationRun, officeLocationCount, shiftCount]);
 
   // Derived rather than corrected in an effect: entitlements load after the first render, so an
   // effect would flash the panel of a module this tenant does not have before hiding it. `company`
@@ -1236,6 +1344,8 @@ export default function PolicyCenter() {
           You have unsaved changes in {Array.from(dirtyTabs).join(", ")}.
         </div>
       ) : null}
+
+      {hasModule("attendance") ? <LivePolicyStatus rows={livePolicyStatus} /> : null}
 
       <div className="flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
         {visibleTabs.map(({ key, label, icon: Icon }) => (

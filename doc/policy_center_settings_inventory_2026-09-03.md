@@ -741,3 +741,92 @@ no-shift fallback. B-1 made the shift authoritative wherever one exists, so for 
 field was pure confusion; for the 9 with no shifts it is still the live value
 `hr_approve_attendance_correction` reads. Removing it outright would have frozen it at 0 for exactly
 the tenants that need it.
+
+---
+
+## 10. Status panel + remaining Group B — 2026-09-03 (PARTIALLY VERIFIED)
+
+⚠️ **The auto-mode classifier went intermittently unavailable partway through this section**, which
+blocks `tsc`, `npm run build`, `db migrations up`, `git commit` and `git push`. Everything below is
+written and self-consistent, but **the frontend is NOT typechecked, NOT built, NOT committed**, and
+two migrations are **NOT applied**. Do not assume this section is live.
+
+### 10.1 Applied and verified (unchanged from §9)
+
+Database head is `20260903121907`. Everything through the impossible-travel check is applied,
+verified and deployed (commit `6a8fa9b`).
+
+### 10.2 Written, NOT applied
+
+| Migration | What |
+|---|---|
+| `20260903123252_attendance-hourly-housekeeping.sql` | Gives `expire_location_exceptions()` a runner |
+| `20260903123437_derive-device-verified-location-status.sql` | Pass 1 labels device-only days `device_verified` |
+
+**`expire_location_exceptions()` had no runner at all** — no trigger, no schedule, no caller — so
+approved WFH exceptions never expired. `attendance-derivation-hourly` is the *only* schedule this
+project has (pg_cron is installed but `project_admin` has no `USAGE` on the `cron` schema), so the
+hourly run is the only place a periodic job can live without new infrastructure. The call is wrapped
+in its own `EXCEPTION WHEN OTHERS` so housekeeping can never fail a derivation run that already did
+its work; the outcome is reported as `location_exceptions_expired` (1 ran, -1 raised).
+
+**`device_verified` corrects the framing of an earlier finding.** The audit said device punches
+"bypass every verification setting". A fixed terminal has no GPS to fence and no camera to prompt —
+its physical presence *is* the verification, and forcing the app's checks onto it would break the
+kiosk. What was genuinely missing is that such a day was **indistinguishable from an unverified
+one**: `device_ingest_punch` writes an *event*, derivation creates the row, and `location_status`
+was never set at all. Pass 1 now sets it when **every** event in the group came from a device or
+kiosk (`sources <@ ARRAY['device','kiosk']`). A mixed day is deliberately left NULL rather than
+claimed as either, and `COALESCE(v_loc_status, location_status)` means re-derivation never erases a
+status the punch path established.
+
+### 10.3 Frontend written, NOT typechecked or built
+
+**The live status panel** (`LivePolicyStatus` in `PolicyCenter.tsx`) — the thing that would have
+made this entire audit unnecessary. It renders above the tabs, gated on the `attendance` module, and
+reports **what is in force** rather than what is configured:
+
+| Row | Sourced from |
+|---|---|
+| Derivation | last `attendance_derivation_runs` row — never run / last run *N*h ago / failed with *N* errors, and "no shifts, never derived" when `shiftCount = 0` |
+| Shift coverage | active employees with no `employee_shifts` row, **only when the tenant has no default shift** (a default covers everyone) |
+| Geo-fence | on/off, branch count, strict vs warn, and that devices are not location-checked. Flags **enabled with zero branches** as a fail-open |
+| Selfie | mode, and that it is asked for in the employee app only |
+
+`attendance_derivation_runs` is fetched but its error is **deliberately not thrown** — the panel is
+diagnostic, and a tenant that cannot read run history must still be able to edit its policies. Known
+limitation: an RLS failure there is currently indistinguishable from "never run".
+
+**`shifts.late_mark_grace_override` retired from the UI.** Nothing ever read the column; the grace
+that decides lateness is `late_entry_grace_minutes`, used by both `attendance_derive_pass1` and (as
+of `20260903102438`) HR correction approval. Offering a third grace field that silently did nothing
+is the exact pattern this audit exists to remove. `p_late_mark_grace_override` is still sent to
+`hr_save_shift` as an explicit **null** rather than dropped — the parameter is still DECLARED, and
+omitting a declared parameter reads as "function not found" through PostgREST.
+
+### 10.4 Not started
+
+- **Dropping the `late_mark_grace_override` column**, and removing the parameter from
+  `hr_save_shift`. Per the column-drop playbook this must come *after* the frontend above is
+  deployed, not with it.
+- **Server-side selfie enforcement.** Worth stating plainly: it is not achievable in the current
+  shape. The selfie uploads *after* the punch, so at punch time the server has only the client's
+  claim — and a client that can lie about `selfie_captured` can lie about anything. Real enforcement
+  needs a two-phase flow (upload first, pass the returned id into the punch RPC). What *is* buildable
+  now is reconciliation: mark rows `selfie_missing` where policy required one and no
+  `attendance_selfies` row exists after a grace window, run from the same hourly job. That is
+  detection, not enforcement, and should be described as such.
+- **Binding a device to a fenced site.** `attendance_devices.location_id` references `locations`
+  (the org-module table, no coordinates) while the fence lives in `office_locations`. This is the
+  same table-convergence decision left open in §9.2 item 3.
+
+### 10.5 To resume
+
+```
+npx tsc --noEmit -p tsconfig.app.json && npm run build
+npx @insforge/cli db migrations up --all
+git add -A src migrations doc && git commit && git push origin main
+```
+
+Then verify: the hourly run's next payload should carry `location_exceptions_expired`, and a
+device-sourced day should derive with `location_status = 'device_verified'`.
