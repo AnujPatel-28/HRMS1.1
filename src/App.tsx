@@ -54,7 +54,6 @@ import { ManagerViewProvider } from "./hooks/useManagerView";
 import Login from "./shared/Login";
 import Connect from "./shared/pages/Connect";
 import OrgChart from "./shared/pages/OrgChart";
-import ProductSelector from "./shared/ProductSelector";
 import { ToastProvider } from "./shared/ToastContext";
 import AdminLayout from "./admin/AdminLayout";
 import AdminDashboard from "./admin/AdminDashboard";
@@ -146,7 +145,6 @@ function TenantRoutes() {
   return (
     <RequireAuthTenant>
       <Routes>
-        <Route path="/select" element={<ProductSelector />} />
 
         <Route
           path="/hr"

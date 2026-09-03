@@ -38,12 +38,12 @@ export default function Login() {
 
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
 
-  const getPostLoginPath = (userId: string, currentRole: typeof role) => {
+  // The /select chooser is gone: a role already determines the portal, and Payroll is a section of
+  // the HR sidebar rather than a separate product, so there was nothing left to choose.
+  const getPostLoginPath = (_userId: string, currentRole: typeof role) => {
     if (currentRole === "superadmin") return "/admin/dashboard";
-    const lastProduct = localStorage.getItem(`talentmesh_last_product_${userId}`);
-    if (currentRole === "hr" && lastProduct === "hr") return "/hr/dashboard";
-    if (currentRole === "employee" && lastProduct === "employee") return "/employee/dashboard";
-    return "/select";
+    if (currentRole === "hr") return "/hr/dashboard";
+    return "/employee/dashboard";
   };
 
   useEffect(() => {

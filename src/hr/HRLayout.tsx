@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, ArrowLeft, Clock, Palmtree, Calendar, MessageSquare, Contact, GitBranch, ClipboardList, Gift, FileText, Wallet, Settings, Rss, FolderKanban, Receipt, Shield, ChevronDown, Menu, Columns, Layers, LayoutGrid, Network, MonitorSmartphone } from "lucide-react";
+import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, Clock, Palmtree, Calendar, MessageSquare, Contact, GitBranch, ClipboardList, Gift, FileText, Wallet, Settings, Rss, FolderKanban, Receipt, Shield, ChevronDown, Menu, Columns, Layers, LayoutGrid, Network, MonitorSmartphone } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
@@ -631,10 +631,6 @@ export default function HRLayout() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Link to="/select" className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-brand-700 sm:inline-flex">
-                <ArrowLeft className="h-3.5 w-3.5" />
-                <span>Switch product</span>
-              </Link>
               <div className="w-px h-4 bg-slate-200" />
               
               {/* Layout Switcher Toggle Setting */}
@@ -818,11 +814,6 @@ export default function HRLayout() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <Link to="/select" className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-brand-700 transition-colors">
-                    <ArrowLeft className="h-3.5 w-3.5" />
-                    <span>Switch product</span>
-                  </Link>
-                  <div className="w-px h-4 bg-slate-200" />
 
                   {/* Layout Switcher Toggle Setting */}
                   <button
@@ -981,14 +972,6 @@ export default function HRLayout() {
             </button>
           </div>
           <div className="h-full space-y-4">
-            <Link
-              to="/select"
-              className={`mb-3 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${layoutStyle === 'dropdown' ? 'border border-slate-200 text-slate-600 hover:bg-black/5 hover:text-slate-800' : 'border border-white/10 text-slate-300 hover:bg-white/10 hover:text-white'}`}
-              onClick={() => setMobileOpen(false)}
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Switch product
-            </Link>
             <Sidebar open={true} animate={false}>
               <HRSidebarContent
                 sections={sections}

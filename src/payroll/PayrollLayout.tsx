@@ -176,7 +176,7 @@ export default function PayrollLayout() {
         </aside>
 
         <main className="min-w-0 flex-1">
-          <RequireModule to="/select">
+          <RequireModule to="/hr/dashboard">
             <Outlet />
           </RequireModule>
         </main>
