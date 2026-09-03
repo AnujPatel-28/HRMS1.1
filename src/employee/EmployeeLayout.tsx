@@ -356,7 +356,7 @@ export default function EmployeeLayout() {
   const deptLabel = useDepartmentLabel();
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout, tenantId } = useAuth();
+  const { logout, tenantId, user } = useAuth();
   const { employee } = useEmployee();
   const { hasModule } = useTenant();
   const { isManager, isManagerMode, toggleManagerMode, directReportIds } = useManagerView();
@@ -364,8 +364,13 @@ export default function EmployeeLayout() {
   const [showBanner, setShowBanner] = useState(true);
   const [unreadConnectCount, setUnreadConnectCount] = useState(0);
   const [hasProjects, setHasProjects] = useState(false);
-  const [layoutStyle, setLayoutStyle] = useState<'dropdown' | 'double_sidebar' | 'classic'>(() => {
-    return (localStorage.getItem('sidebar_layout_style') as 'dropdown' | 'double_sidebar' | 'classic') || 'double_sidebar';
+  // Two modes, matching the HR portal: `classic` flattened every section into one list, which hid
+  // the module structure the product is built on. Key scoped per user -- it had no user id, so on a
+  // shared machine one person's layout followed the next person.
+  const layoutKey = `sidebar_layout_style_${user?.id ?? 'anon'}`;
+  const [layoutStyle, setLayoutStyle] = useState<'dropdown' | 'double_sidebar'>(() => {
+    const stored = localStorage.getItem(layoutKey);
+    return stored === 'dropdown' || stored === 'double_sidebar' ? stored : 'double_sidebar';
   });
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [onboardingIncomplete, setOnboardingIncomplete] = useState(false);
@@ -386,16 +391,9 @@ export default function EmployeeLayout() {
   }, [employee?.id, tenantId]);
 
   const toggleLayout = () => {
-    let next: 'dropdown' | 'double_sidebar' | 'classic';
-    if (layoutStyle === 'dropdown') {
-      next = 'double_sidebar';
-    } else if (layoutStyle === 'double_sidebar') {
-      next = 'classic';
-    } else {
-      next = 'dropdown';
-    }
+    const next: 'dropdown' | 'double_sidebar' = layoutStyle === 'double_sidebar' ? 'dropdown' : 'double_sidebar';
     setLayoutStyle(next);
-    localStorage.setItem('sidebar_layout_style', next);
+    localStorage.setItem(layoutKey, next);
   };
 
   // Topbar profile card
@@ -438,12 +436,6 @@ export default function EmployeeLayout() {
     return result;
   }, [isManager, hasProjects, hasModule]);
 
-  const flatLinks = useMemo(() => {
-    return [
-      { label: "Dashboard", href: "/employee/dashboard", icon: LayoutDashboard },
-      ...sections.flatMap((s) => s.items),
-    ];
-  }, [sections]);
 
   const activeSection = sections.find((section) =>
     section.items.some(
@@ -561,69 +553,6 @@ export default function EmployeeLayout() {
         </div>
       </header>
 
-      {/* Classic Layout Desktop Top Header */}
-      {layoutStyle === 'classic' && (
-        <header className="hidden md:block sticky top-0 z-40 border-b border-slate-200 bg-white shadow-md pt-safe md:pt-0">
-          <div className="mx-auto flex max-w-7xl items-center justify-between px-safe py-3 md:px-4">
-            <div className="flex items-center gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">TalentMesh Solutions</p>
-                <h1 className="text-lg font-semibold text-slate-900">Employee Portal</h1>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              {isManager && (
-                <div
-                  onClick={toggleManagerMode}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full cursor-pointer text-xs font-semibold select-none transition-all duration-200 ${
-                    isManagerMode
-                      ? "bg-[#E24B4A] text-white hover:bg-[#c93e3d]"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  <span>{isManagerMode ? "Manager View" : "My View"}</span>
-                </div>
-              )}
-              
-              {/* Layout Switcher Toggle Setting */}
-              <button
-                onClick={toggleLayout}
-                className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-brand-700 hover:bg-slate-50 hover:border-slate-300 shadow-sm transition-all focus:outline-none shrink-0"
-                title="Switch to Dropdown Layout"
-                aria-label="Toggle layout style"
-              >
-                <Layers className="h-4 w-4" />
-              </button>
-              
-              <div className="w-px h-4 bg-slate-200" />
-              <NotificationBell />
-              
-              <div className="hidden items-center gap-3 sm:flex">
-                {employee?.profile_photo_url ? (
-                  <img src={employee.profile_photo_url} alt="" className="h-9 w-9 rounded-full object-cover ring-2 ring-brand-200" />
-                ) : (
-                  <div className="grid h-9 w-9 place-items-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
-                    {employee?.full_name?.slice(0, 2).toUpperCase() ?? "?"}
-                  </div>
-                )}
-                <div className="text-right">
-                  <p className="text-sm font-semibold text-slate-900">{employee?.full_name ?? "Employee"}</p>
-                  {deptLabel(employee, '') && (
-                    <span className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-600">
-                      {deptLabel(employee, '')}
-                    </span>
-                  )}
-                </div>
-              </div>
-              
-              <button onClick={handleLogout}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition">
-                <LogOut className="h-4 w-4" /> Logout
-              </button>
-            </div>
-          </div>
-        </header>
-      )}
 
       {/* Manager mode banner */}
       {isManagerMode && showBanner && (
@@ -638,76 +567,14 @@ export default function EmployeeLayout() {
         </div>
       )}
 
-      <div className={cn(
-        "w-full px-safe pb-24",
-        layoutStyle === 'classic'
-          ? "md:mx-auto md:max-w-7xl md:px-4 md:py-6 md:pb-24"
-          : "md:!px-0 md:!py-0"
-      )}>
+      <div className="w-full px-safe pb-24 md:!px-0 md:!py-0">
         {/* Mobile Overlay */}
         {mobileOpen && (
           <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm md:hidden" onClick={() => setMobileOpen(false)} />
         )}
 
-        {layoutStyle === 'classic' ? (
-          /* Desktop Classic Layout: Sidebar + Main Outlet side-by-side */
-          <div className="hidden md:flex md:gap-6 w-full">
-            {/* Sidebar (Desktop Classic) */}
-            <aside className="sticky top-24 z-30 w-56 self-start shrink-0">
-              <div className="h-[calc(100vh-180px)] flex flex-col rounded-xl border border-slate-200 bg-white p-3 shadow-xl -translate-y-1">
-                <div className="flex-1 overflow-y-auto space-y-1 pr-1 hide-scrollbar">
-                  {flatLinks.map(({ label, href, icon: Icon }) => {
-                    const isActive =
-                      location.pathname === href ||
-                      (href.includes("?") && location.pathname + location.search === href);
-                    const showBadge = label === "Connect" && unreadConnectCount > 0;
-                    return (
-                      <Link
-                        key={href}
-                        to={href}
-                        className={cn(
-                          "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium font-display transition hover:bg-slate-100",
-                          isActive
-                            ? "bg-brand-50 text-brand-700 font-semibold"
-                            : "text-slate-600"
-                        )}
-                      >
-                        <Icon className="h-4 w-4 shrink-0 text-slate-400 group-hover:text-slate-600" />
-                        <span className="flex-1 truncate">{label}</span>
-                        {showBadge && (
-                          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-bold text-white shadow-sm ring-2 ring-white animate-pulse">
-                            {unreadConnectCount}
-                          </span>
-                        )}
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            </aside>
-
-            {/* Main content (Desktop Classic) */}
-            <main className="min-w-0 flex-1 p-6">
-              {onboardingIncomplete && location.pathname !== "/employee/onboarding" && (
-                <div className="mb-4 flex items-center justify-between p-3.5 bg-brand-50 border border-brand-100 rounded-xl shadow-sm text-xs font-semibold text-brand-800 animate-in fade-in slide-in-from-top-2">
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-600 text-white font-bold text-[10px]">!</span>
-                    <span>Welcome! Please complete your onboarding profile details.</span>
-                  </div>
-                  <Link
-                    to="/employee/onboarding"
-                    className="px-3 py-1 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-lg transition"
-                  >
-                    Complete Onboarding →
-                  </Link>
-                </div>
-              )}
-              <RequireModule to="/employee/dashboard"><Outlet /></RequireModule>
-            </main>
-          </div>
-        ) : (
-          /* Desktop Unified Card Layout (dropdown / double_sidebar) */
-          <div className={cn("w-full hidden md:flex md:rounded-none md:border-none md:shadow-none overflow-hidden", (layoutStyle === 'double_sidebar' && activeSection) ? "bg-[#0e2246]" : (layoutStyle === 'dropdown' ? "bg-gradient-to-b from-brand-50/30 via-slate-50/50 to-slate-100/40" : "bg-[#0a1c3a]"))} style={{height: '100vh'}}>
+        {/* Desktop shell: a quiet ground, matching the HR portal. */}
+        <div className="w-full hidden md:flex md:rounded-none md:border-none md:shadow-none overflow-hidden bg-slate-50" style={{height: '100vh'}}>
             {/* Main Sidebar */}
             {layoutStyle === 'double_sidebar' ? (
               <Sidebar open={false}>
@@ -969,8 +836,7 @@ export default function EmployeeLayout() {
                 <RequireModule to="/employee/dashboard"><Outlet /></RequireModule>
               </div>
             </main>
-          </div>
-        )}
+        </div>
 
         {/* ── Mobile: just the outlet ── */}
         <main className="md:hidden min-w-0 flex-1 p-4 bg-slate-50 min-h-screen">

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, Clock, Palmtree, Calendar, MessageSquare, Contact, GitBranch, ClipboardList, Gift, FileText, Wallet, Settings, Rss, FolderKanban, Receipt, Shield, ChevronDown, Menu, Columns, Layers, LayoutGrid, Network, MonitorSmartphone } from "lucide-react";
+import { LogOut, X, Home, Users, CalendarCheck, MoreHorizontal, Clock, Palmtree, Calendar, MessageSquare, Contact, GitBranch, ClipboardList, Gift, FileText, Wallet, Settings, Rss, FolderKanban, Receipt, Shield, ChevronDown, Menu, Columns, LayoutGrid, Network, MonitorSmartphone } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
@@ -21,6 +21,8 @@ type NavLinkItem = {
   /** Hidden when this module is disabled for the tenant. Omit for always-visible items. */
   module?: ModuleKey;
 };
+
+type LayoutStyle = 'dropdown' | 'double_sidebar';
 
 type NavSection = {
   title: string;
@@ -377,7 +379,6 @@ function HRSidebarContent({
   );
 }
 
-const dashboardLink: NavLinkItem = { label: "Dashboard", href: "/hr/dashboard", icon: Home };
 
 /**
  * Step 2 of doc/navigation_proposal_2026-09-03.md: module context that is visible AND actionable
@@ -458,7 +459,7 @@ export default function HRLayout() {
   const deptLabel = useDepartmentLabel();
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout, tenantId } = useAuth();
+  const { logout, tenantId, user } = useAuth();
   const { employee } = useEmployee();
   const { hasModule } = useTenant();
 
@@ -475,29 +476,27 @@ export default function HRLayout() {
     [hasModule],
   );
 
-  const flatLinks = useMemo(
-    () => [dashboardLink, ...sections.flatMap((s) => s.items)],
-    [sections],
-  );
   const [mobileOpen, setMobileOpen] = useState(false);
   const [unreadConnectCount, setUnreadConnectCount] = useState(0);
   const [pendingExpensesCount, setPendingExpensesCount] = useState(0);
-  const [layoutStyle, setLayoutStyle] = useState<'dropdown' | 'double_sidebar' | 'classic'>(() => {
-    return (localStorage.getItem('sidebar_layout_style') as 'dropdown' | 'double_sidebar' | 'classic') || 'double_sidebar';
+  // `classic` was removed: it flattened every section into one list, so a user in that mode could
+  // not tell Attendance, Task & Project and Payroll apart -- the composition this product is built
+  // on was invisible in one of its three layouts. The two that remain are genuinely different
+  // answers to the same question and both keep the module grouping.
+  //
+  // Scoped per user: the key had no user id, so on a shared machine one person's choice followed
+  // the next person into their session.
+  const layoutKey = `sidebar_layout_style_${user?.id ?? 'anon'}`;
+  const [layoutStyle, setLayoutStyle] = useState<LayoutStyle>(() => {
+    const stored = localStorage.getItem(layoutKey);
+    return stored === 'dropdown' || stored === 'double_sidebar' ? stored : 'double_sidebar';
   });
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const toggleLayout = () => {
-    let next: 'dropdown' | 'double_sidebar' | 'classic';
-    if (layoutStyle === 'dropdown') {
-      next = 'double_sidebar';
-    } else if (layoutStyle === 'double_sidebar') {
-      next = 'classic';
-    } else {
-      next = 'dropdown';
-    }
+    const next: LayoutStyle = layoutStyle === 'double_sidebar' ? 'dropdown' : 'double_sidebar';
     setLayoutStyle(next);
-    localStorage.setItem('sidebar_layout_style', next);
+    localStorage.setItem(layoutKey, next);
   };
 
   // Topbar profile card
@@ -620,112 +619,19 @@ export default function HRLayout() {
         </div>
       </header>
 
-      {/* Classic Layout Desktop Top Header */}
-      {layoutStyle === 'classic' && (
-        <header className="hidden md:block sticky top-0 z-40 border-b border-slate-200 bg-white shadow-md pt-safe md:pt-0">
-          <div className="mx-auto flex max-w-7xl items-center justify-between px-safe py-3 md:px-4">
-            <div className="flex items-center min-w-0">
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-brand-700">TalentMesh Solutions</p>
-                <h1 className="truncate text-lg font-bold text-slate-900">HR Portal</h1>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="w-px h-4 bg-slate-200" />
-              
-              {/* Layout Switcher Toggle Setting */}
-              <button
-                onClick={toggleLayout}
-                className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-brand-700 hover:bg-slate-50 hover:border-slate-300 shadow-sm transition-all focus:outline-none shrink-0"
-                title="Switch to Dropdown Layout"
-                aria-label="Toggle layout style"
-              >
-                <Layers className="h-4 w-4" />
-              </button>
-              
-              <div className="w-px h-4 bg-slate-200" />
-              <NotificationBell />
-              <div className="hidden text-right sm:block">
-                <p className="text-[10px] text-slate-400">Logged in as</p>
-                <p className="text-sm font-semibold text-slate-900">{employee?.full_name ?? "HR User"}</p>
-              </div>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-              >
-                <LogOut className="h-4 w-4" />
-                Logout
-              </button>
-            </div>
-          </div>
-        </header>
-      )}
 
-      <div className={cn(
-        "w-full px-safe pb-24",
-        layoutStyle === 'classic'
-          ? "md:mx-auto md:max-w-7xl md:px-4 md:py-6 md:pb-24"
-          : "md:!px-0 md:!py-0"
-      )}>
+      <div className="w-full px-safe pb-24 md:!px-0 md:!py-0">
         {/* Mobile Overlay */}
         {mobileOpen && (
           <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm md:hidden" onClick={() => setMobileOpen(false)} />
         )}
 
-        {layoutStyle === 'classic' ? (
-          /* Desktop Classic Layout: Sidebar + Main Outlet side-by-side */
-          <div className="hidden md:flex md:gap-6 w-full">
-            {/* Sidebar (Desktop Classic) */}
-            <aside className="sticky top-24 z-30 w-56 self-start shrink-0">
-              <div className="h-[calc(100vh-180px)] flex flex-col rounded-xl border border-slate-200 bg-white p-3 shadow-xl -translate-y-1">
-                <div className="flex-1 overflow-y-auto space-y-1 pr-1 hide-scrollbar">
-                  {flatLinks.map(({ label, href, icon: Icon }) => {
-                    const isActive = location.pathname === href;
-                    const showBadge = label === "Connect" && unreadConnectCount > 0;
-                    const isExpensesBadge = label === "Expenses" && pendingExpensesCount > 0;
-                    return (
-                      <Link
-                        key={href}
-                        to={href}
-                        className={cn(
-                          "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-display transition-all duration-200 ease-in-out hover:translate-x-1",
-                          isActive
-                            ? "bg-brand-50 font-semibold text-brand-700 shadow-sm ring-1 ring-brand-100"
-                            : "text-slate-600 hover:bg-slate-50"
-                        )}
-                      >
-                        <Icon className={cn("h-4 w-4 shrink-0 transition-colors", isActive ? "text-brand-600" : "text-slate-400 group-hover:text-slate-600")} />
-                        <span className="flex-1 truncate">{label}</span>
-                        {showBadge && (
-                          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-bold text-white shadow-sm ring-2 ring-white animate-pulse">
-                            {unreadConnectCount}
-                          </span>
-                        )}
-                        {isExpensesBadge && (
-                          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white shadow-sm ring-2 ring-white">
-                            {pendingExpensesCount}
-                          </span>
-                        )}
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            </aside>
-
-            {/* Main content (Desktop Classic) */}
-            <main className="min-w-0 flex-1">
-              <RequireModule to="/hr/dashboard"><Outlet context={{ layoutStyle }} /></RequireModule>
-            </main>
-          </div>
-        ) : (
-          /* Desktop Unified Card Layout (dropdown / double_sidebar) */
-          <div className={cn("w-full hidden md:flex md:rounded-none md:border-none md:shadow-none overflow-hidden", (layoutStyle === 'dropdown' || layoutStyle === 'double_sidebar') ? "bg-gradient-to-b from-brand-50/30 via-slate-50/50 to-slate-100/40" : "bg-[#0a1c3a]")} style={{ height: '100vh' }}>
+        {/* Desktop shell: a quiet ground so the sidebar and its active states carry the colour. */}
+        <div className="w-full hidden md:flex md:rounded-none md:border-none md:shadow-none overflow-hidden bg-slate-50" style={{ height: '100vh' }}>
             {/* Main Sidebar */}
             {layoutStyle === 'double_sidebar' ? (
               <Sidebar open={false}>
-                <DesktopSidebar className="border-r border-slate-200/50 bg-gradient-to-b from-brand-50 via-slate-50 to-slate-100 pt-0 px-2.5 pb-3 shrink-0 rounded-tl-3xl" style={{ height: '100vh' }} showToggle={false}>
+                <DesktopSidebar className="border-r border-slate-200 bg-white pt-0 px-2.5 pb-3 shrink-0 rounded-tl-3xl" style={{ height: '100vh' }} showToggle={false}>
                   <HRSidebarContent
                     sections={sections}
                     location={location}
@@ -739,7 +645,7 @@ export default function HRLayout() {
               </Sidebar>
             ) : (
               <Sidebar>
-                <DesktopSidebar className="border-r border-slate-200/50 bg-gradient-to-b from-brand-50/50 via-slate-50/40 to-slate-100/50 pt-0 px-2.5 pb-3 shrink-0 rounded-tl-3xl" style={{ height: '100vh' }} showToggle={true}>
+                <DesktopSidebar className="border-r border-slate-200 bg-white pt-0 px-2.5 pb-3 shrink-0 rounded-tl-3xl" style={{ height: '100vh' }} showToggle={true}>
                   <HRSidebarContent
                     sections={sections}
                     location={location}
@@ -756,7 +662,7 @@ export default function HRLayout() {
             {/* Secondary sliding panel */}
             <div
               className={cn(
-                "h-full bg-gradient-to-b from-brand-50 via-slate-50 to-slate-100 border-r border-slate-200/80 transition-all duration-300 ease-in-out overflow-hidden flex flex-col shrink-0",
+                "h-full bg-slate-50 border-r border-slate-200 transition-all duration-300 ease-in-out overflow-hidden flex flex-col shrink-0",
                 layoutStyle === 'double_sidebar' && activeSection ? "w-52" : "w-0 border-r-0"
               )}
             >
@@ -819,22 +725,10 @@ export default function HRLayout() {
                   <button
                     onClick={toggleLayout}
                     className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-brand-700 hover:bg-slate-50 hover:border-slate-300 shadow-sm transition-all focus:outline-none shrink-0"
-                    title={
-                      layoutStyle === 'dropdown'
-                        ? "Switch to Double-Sidebar Layout"
-                        : layoutStyle === 'double_sidebar'
-                        ? "Switch to Classic Layout"
-                        : "Switch to Dropdown Layout"
-                    }
+                    title={layoutStyle === 'double_sidebar' ? "Switch to dropdown layout" : "Switch to double-sidebar layout"}
                     aria-label="Toggle layout style"
                   >
-                    {layoutStyle === 'dropdown' ? (
-                      <Columns className="h-4 w-4" />
-                    ) : layoutStyle === 'double_sidebar' ? (
-                      <LayoutGrid className="h-4 w-4" />
-                    ) : (
-                      <Layers className="h-4 w-4" />
-                    )}
+                    {layoutStyle === 'double_sidebar' ? <LayoutGrid className="h-4 w-4" /> : <Columns className="h-4 w-4" />}
                   </button>
 
                   {/* Dynamic sub-item dropdown (Option A) */}
@@ -952,8 +846,7 @@ export default function HRLayout() {
                 <RequireModule to="/hr/dashboard"><Outlet context={{ layoutStyle }} /></RequireModule>
               </div>
             </main>
-          </div>
-        )}
+        </div>
 
         {/* ── Mobile: just the outlet ── */}
         <main className="md:hidden min-w-0 flex-1">
@@ -961,7 +854,7 @@ export default function HRLayout() {
         </main>
 
         {/* Mobile Slide-over Drawer */}
-        <aside className={`fixed inset-y-0 left-0 z-50 w-[88vw] max-w-sm transform overflow-y-auto pb-24 ${layoutStyle === 'dropdown' ? "bg-gradient-to-b from-brand-50/90 via-slate-50/90 to-slate-100/90 border-r border-slate-200/50" : "bg-[#0a1c3a]"} p-4 shadow-xl transition-transform duration-300 ease-in-out md:hidden ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <aside className={`fixed inset-y-0 left-0 z-50 w-[88vw] max-w-sm transform overflow-y-auto pb-24 bg-white border-r border-slate-200 p-4 shadow-xl transition-transform duration-300 ease-in-out md:hidden ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
           <div className="mb-6 flex items-start justify-between gap-3">
             <div>
               <span className={`font-semibold ${layoutStyle === 'dropdown' ? 'text-slate-800' : 'text-white'}`}>Navigation</span>
@@ -980,7 +873,7 @@ export default function HRLayout() {
                 pendingExpensesCount={pendingExpensesCount}
                 onItemClick={() => setMobileOpen(false)}
                 employee={employee}
-                isLight={layoutStyle === 'dropdown'}
+                isLight={true}
               />
             </Sidebar>
             {/* Mobile Logout */}
