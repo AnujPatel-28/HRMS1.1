@@ -31,7 +31,6 @@ function normalizeShift(raw: Partial<Shift> | null, fallback?: Partial<Shift>): 
     is_default: source.is_default ?? true,
     is_active: source.is_active ?? true,
     punch_in_opens_minutes_before: source.punch_in_opens_minutes_before ?? null,
-    late_mark_grace_override: source.late_mark_grace_override ?? null,
     created_at: source.created_at,
     updated_at: source.updated_at,
   };

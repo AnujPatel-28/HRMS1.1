@@ -301,7 +301,6 @@ export interface Shift {
   working_days: number[];
   half_day_cutoff_override: string | null;
   punch_in_opens_minutes_before: number;
-  late_mark_grace_override: number | null;
   is_default?: boolean;
   is_active?: boolean;
   created_at?: string;

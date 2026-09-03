@@ -559,10 +559,6 @@ export default function ShiftManagement() {
         // cutoff (i.e. all of them) unsaveable. Create was unaffected because its form seeds "".
         p_half_day_cutoff_override: normalizeTimeInput(form.half_day_cutoff_override),
         p_punch_in_opens_minutes_before: Number(form.punch_in_opens_minutes_before || 60),
-        // Retired: nothing reads shifts.late_mark_grace_override. The parameter is still DECLARED on
-        // hr_save_shift, and omitting a declared param reads as "function not found" through
-        // PostgREST, so it is sent as an explicit null rather than dropped.
-        p_late_mark_grace_override: null,
         p_is_default: form.is_default,
         p_working_hours_threshold_for_absent: Number(form.working_hours_threshold_for_absent || 0),
         p_working_hours_threshold_for_half_day: Number(form.working_hours_threshold_for_half_day || 0),
