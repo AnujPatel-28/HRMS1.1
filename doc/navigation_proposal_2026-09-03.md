@@ -142,9 +142,13 @@ hardcoded portals.
 
 ## 5. Sequencing
 
-1. **Re-group the sidebar sections into the module tree** — pure data change to the nav array in
-   `HRLayout`; the gating machinery is already there. Low risk, immediate alignment with the sketch.
-2. **Add the persistent module switcher** to the shell, driven by `hasModule`.
+1. ~~Re-group the sidebar sections into the module tree.~~ **DONE 2026-09-03** (`1b6acb5`).
+   Organisation / Attendance / Task & Project / Payroll & Finance / Policy Center / Add-ons.
+   Also fixed a gate that disagreed with itself: the Holidays *link* was gated on `leave` while
+   `modules.ts` routes `/hr/holidays` to `work_calendar`, so an attendance-only tenant was entitled
+   to the holiday calendar its own derivation reads and could not see the link to it.
+2. ~~Add the persistent module switcher.~~ **DONE 2026-09-03** (`807a739`) — with a correction to
+   this document's premise, see §4.5.
 3. **Decide `/select`** — remove or demote to first-run.
 4. **Build the per-module workspaces** one at a time, starting with Attendance (its data is the most
    complete). This is the real work.
@@ -160,3 +164,34 @@ hardcoded portals.
 - **Does Payroll keep a separate shell** until it is rebuilt, or move into the single shell now?
 - **Leave stays its own module key** even if it is *presented* inside Attendance — merging the keys
   would make `attendance without leave` inexpressible, and that mix has a QA fixture exercising it.
+
+---
+
+## 4.5 Correction: a module switcher already existed, in one mode of three
+
+Written while implementing step 2. §4.1 above proposed adding a switcher as if the shell had none.
+That was wrong, and the correction is worth keeping because it changed the work.
+
+`HRLayout` has **three** layout modes behind a toggle — `dropdown`, `double_sidebar`, `classic` —
+and `double_sidebar` already renders a section rail plus a sliding panel of that section's items.
+With step 1's re-grouping, that rail *is* a module switcher: the sections it lists are now the
+modules.
+
+So the real gap was never a missing widget. It was that the other two modes printed the section name
+as **static breadcrumb text**, leaving no way to change module without navigating back out through
+a menu — the exact shape Frappe removed, present in two thirds of this app.
+
+**What shipped instead of a new widget:** the breadcrumb's section name *became* the switcher, in
+the top bar shared by all three modes. It names the current module and opens the list of the
+tenant's others, each jumping to that module's first screen. The `module / page` breadcrumb is
+preserved rather than replaced, and `double_sidebar` keeps its rail — this is a second route to the
+same place, not a competing concept.
+
+It renders `sections`, already filtered by `hasModule`, so it inherits gating from the same source
+as the sidebar and the Policy Center tabs rather than forming a second opinion, and it hides itself
+for a tenant with one module or none.
+
+**The lesson for the rest of this document:** §4.1's "keep one shell, add a switcher" was written
+from the sketch and the `/select` screenshot without reading `HRLayout` closely. The remaining steps
+(especially §4.3, per-module workspaces) should be re-checked against what the shell already does
+before being built — three layout modes is a lot of existing surface to design against.
