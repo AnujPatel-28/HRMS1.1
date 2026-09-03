@@ -746,10 +746,9 @@ the tenants that need it.
 
 ## 10. Status panel + remaining Group B — 2026-09-03 (PARTIALLY VERIFIED)
 
-⚠️ **The auto-mode classifier went intermittently unavailable partway through this section**, which
-blocks `tsc`, `npm run build`, `db migrations up`, `git commit` and `git push`. Everything below is
-written and self-consistent, but **the frontend is NOT typechecked, NOT built, NOT committed**, and
-two migrations are **NOT applied**. Do not assume this section is live.
+**Applied, built and deployed 2026-09-03** — database head `20260903123437`, commit `19c7744`.
+(This section was written during a tooling outage and briefly carried a "not applied" warning; that
+warning is resolved. Verification is recorded in §10.6.)
 
 ### 10.1 Applied and verified (unchanged from §9)
 
@@ -830,3 +829,42 @@ git add -A src migrations doc && git commit && git push origin main
 
 Then verify: the hourly run's next payload should carry `location_exceptions_expired`, and a
 device-sourced day should derive with `location_status = 'device_verified'`.
+
+### 10.6 Verified after apply — 2026-09-03
+
+Head `20260903123437`. Typecheck and build clean; deployed as `19c7744`.
+
+```
+attendance_run_scheduled_derivation: expires exceptions=true isolated=true passes intact=true
+attendance_derive_pass1            : device_verified=true no-clobber=true D5 guard=true
+```
+
+**The hourly job was run end-to-end rather than only inspected:**
+
+```json
+{"success": true, "tenants_processed": 6, "lookback_days": 1,
+ "location_exceptions_expired": 1, "runs": [ ...6 runs, "errors": 0 each... ]}
+```
+
+`location_exceptions_expired: 1` is the housekeeping firing for the first time — the function had
+existed with no caller since it was written. Six tenants derived with zero errors, so adding the
+call did not disturb the run it hangs off.
+
+### 10.7 What is still open
+
+- **Drop the `late_mark_grace_override` column** and remove the parameter from `hr_save_shift`. The
+  frontend that stopped writing it is now deployed, which is the precondition the column-drop
+  playbook requires. `src/types/index.ts` and `useEmployeeShift.ts` still *read* the column; they
+  must be cleaned in the same change as the drop.
+- **Selfie: reconciliation, not enforcement.** Enforcement is not achievable in the current shape —
+  the selfie uploads after the punch, so at punch time the server has only the client's claim, and a
+  client that can lie about `selfie_captured` can lie about anything. Real enforcement needs a
+  two-phase flow (upload first, pass the returned id into the punch RPC). Buildable now: mark rows
+  `selfie_missing` where policy required one and no `attendance_selfies` row exists after a grace
+  window, from the same hourly job. Describe it as detection.
+- **Bind a device to a fenced site.** `attendance_devices.location_id` references `locations` (no
+  coordinates) while the fence lives in `office_locations` — the convergence decision from §9.2.
+- **Payroll tab**, with the payroll module: the seven deferred controls, the dead
+  `salary_template_<dept>` editor, and the "working days source" switch from §7.2.
+- **`Settings.tsx`** — 669 lines, unrouted, raw upserts bypassing the concurrency guard. Remove it
+  with the navigation re-tab.
