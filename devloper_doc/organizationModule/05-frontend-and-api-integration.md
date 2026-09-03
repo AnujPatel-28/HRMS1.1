@@ -11,13 +11,13 @@ The configuration of the entire module happens primarily through one central int
 - **`src/hr/EmployeeDetail.tsx`**: Where individual employee data is managed, including handling their effective-dated unit transfers.
 
 **TypeScript Types:**
-All strict types (e.g., `OrgUnit`, `EmployeeGrade`, `JobTitle`) are centrally exported from **`src/types/index.ts`** (import it as `../types`).
+All strict types (e.g., `OrgUnit`, `EmployeeGrade`, `JobTitle`) are centrally exported from `src/types.ts`.
 
 ---
 
 ## 2. The RLS "Silent Failure" Trap (Critical Gotcha)
 
-When writing data using the InsForge/Supabase SDK, developers **must** use the `rowsOrThrow` pattern.
+When writing data using the InsForge SDK, developers **must** use the `rowsOrThrow` pattern.
 
 If Row Level Security (RLS) denies an `INSERT` or `UPDATE` (e.g., trying to edit a unit in a different tenant), PostgREST does **not** throw an HTTP 403 or 500 error. It simply returns a 200 OK with `0` rows affected. 
 
@@ -44,20 +44,14 @@ const savedRows = rowsOrThrow(result, "Write was rejected by RLS.");
 ### A. Materialized Paths (Querying Sub-trees)
 Because `org_units` uses a materialized `path` column (e.g., `/div-1/dept-3/team-9/`), you do not need recursive logic or multiple API calls to fetch an entire division.
 
-To get all units under a specific division, fetch that unit's `path` and match it as a **prefix**:
+To get all units under a specific division, use the `.like()` operator:
 ```typescript
-// 1. get the parent's path
-const { data: parent } = await db
-  .from('org_units').select('path').eq('id', divisionId).single();
-
-// 2. everything at or below it starts with that path
+const divisionId = 'div-1';
 const { data: subUnits } = await db
   .from('org_units')
   .select('*')
-  .like('path', `${parent.path}%`);   // PREFIX match
+  .like('path', `%${divisionId}%`); // Matches the ID anywhere in the path
 ```
-
-> **Use a prefix match, not `%id%`.** Matching the id *anywhere* in the path also returns units that merely have it as an ancestor fragment elsewhere, and in SQL `LIKE` the underscore `_` is a single-character wildcard, so ids containing `_` match more than you intended. The prefix form is the one used in `06-common-queries-cheatsheet.md` — they should always agree.
 
 ### B. Effective-Dated Queries
 The `employee_unit_assignments` and `employee_reporting_relationships` tables keep historical records. 
