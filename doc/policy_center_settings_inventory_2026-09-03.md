@@ -868,3 +868,49 @@ call did not disturb the run it hangs off.
   `salary_template_<dept>` editor, and the "working days source" switch from §7.2.
 - **`Settings.tsx`** — 669 lines, unrouted, raw upserts bypassing the concurrency guard. Remove it
   with the navigation re-tab.
+
+### 10.8 Selfie reconciliation — applied and verified
+
+`20260903170557_reconcile-missing-selfies.sql`. Runs from the hourly job alongside
+`expire_location_exceptions()`.
+
+**This is detection, not enforcement, and the UI should say so.** A selfie cannot be enforced at
+punch time in the current shape: it uploads *after* the punch, so the server has only the client's
+claim that one was taken — and a client that can lie about `selfie_captured` can lie about anything.
+Real enforcement needs a two-phase flow: upload first, pass the returned id into the punch RPC, and
+require it to be **fresh and single-use** — without single-use, one selfie is replayed forever, and
+that is the detail that decides whether two-phase is worth anything. That belongs with the native
+client, where camera-source can also be enforced.
+
+What this closes is the blind spot: HR turns selfies on, believes they are being collected, and has
+no way to see that they are not.
+
+**It does not repeat the bug in `mark_attendance_selfie_missing`**, which overwrites
+`location_status` unconditionally and so destroys the location verdict on the same row. Here the
+finding always lands in `verification_snapshot.server_selfie_check`, and `location_status` is only
+overwritten when it currently holds a *clean* verdict (`office_verified`, `remote_approved`,
+`device_verified`, or NULL) — never over `outside_geofence` or `gps_unavailable`, which are the more
+serious signals and must survive.
+
+**Verified on two rows that differ only in their existing status:**
+
+| Row (before) | After |
+|---|---|
+| `outside_geofence`, no selfie | **status unchanged**, finding recorded in the snapshot |
+| `office_verified`, no selfie | **`selfie_missing`**, finding also in the snapshot |
+
+Idempotent — a second run flagged `0`. Skips `is_locked` rows so an HR correction is never
+re-flagged. All test state was restored afterwards: `server_selfie_check` rows = 0,
+`selfie_missing` rows = 0, test setting removed.
+
+The hourly job now returns all three outcomes together:
+
+```json
+{"success": true, "tenants_processed": 6,
+ "location_exceptions_expired": 1,
+ "selfie_reconciliation": {"rows_flagged": 0, "tenants_affected": 0,
+                           "lookback_days": 2, "grace_minutes": 15}}
+```
+
+**Follow-up worth doing:** `mark_attendance_selfie_missing` still clobbers `location_status`. It is
+the employee-app path for a failed *upload*, and it should adopt the same rule as the reconciler.
