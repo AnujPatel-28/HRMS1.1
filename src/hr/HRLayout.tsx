@@ -379,6 +379,81 @@ function HRSidebarContent({
 
 const dashboardLink: NavLinkItem = { label: "Dashboard", href: "/hr/dashboard", icon: Home };
 
+/**
+ * Step 2 of doc/navigation_proposal_2026-09-03.md: module context that is visible AND actionable
+ * from anywhere, in every layout mode.
+ *
+ * `double_sidebar` already had a module rail, but the other two modes only printed the section name
+ * as static breadcrumb text, so switching module meant going back out through a menu. Frappe removed
+ * exactly that shape (frappe/hrms#2521) on the grounds that nesting "creates unnecessary landing
+ * pages"; the replacement is a switcher you can reach without leaving where you are.
+ *
+ * `sections` arrives already filtered by hasModule, so this lists only what the tenant owns — the
+ * same source that drives the sidebar and the Policy Center tabs.
+ */
+function ModuleSwitcher({
+  sections,
+  activeSection,
+  onNavigate,
+}: {
+  sections: readonly NavSection[];
+  activeSection: NavSection | undefined;
+  onNavigate: (href: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  // A section with no reachable items would be a dead entry; sections is pre-filtered, but a
+  // module whose every item is gated off can still arrive empty.
+  const targets = sections.filter((section) => section.items.length > 0);
+  if (targets.length <= 1) return null;
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-100 focus:outline-none"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        {activeSection ? activeSection.title : "Dashboard"}
+        <ChevronDown className={cn("h-3.5 w-3.5 text-slate-400 transition-transform duration-200", open && "rotate-180")} />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 mt-1.5 w-56 rounded-xl border border-slate-100 bg-white p-1.5 shadow-xl z-40">
+            {targets.map((section) => {
+              const SectionIcon = section.icon;
+              const isCurrent = section.title === activeSection?.title;
+              return (
+                <button
+                  key={section.title}
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    onNavigate(section.items[0].href);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium transition-colors",
+                    isCurrent
+                      ? "bg-brand-50 font-semibold text-brand-700"
+                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+                  )}
+                >
+                  <SectionIcon className="h-3.5 w-3.5 shrink-0" />
+                  <span>{section.title}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function HRLayout() {
   const deptLabel = useDepartmentLabel();
   const location = useLocation();
@@ -732,25 +807,15 @@ export default function HRLayout() {
               {/* In-content top bar */}
               <div className="flex items-center justify-between gap-3 px-6 h-16 border-b border-slate-100 bg-white shrink-0">
                 {/* Left page title / Breadcrumbs */}
-                {layoutStyle === 'double_sidebar' ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-slate-800">
-                      {activeItem ? activeItem.label : "Dashboard"}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-slate-800">
-                      {activeSection ? activeSection.title : "Dashboard"}
-                    </span>
-                    {activeItem && (
-                      <>
-                        <span className="text-slate-300">/</span>
-                        <span className="text-sm text-slate-500 font-medium">{activeItem.label}</span>
-                      </>
-                    )}
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  <ModuleSwitcher sections={sections} activeSection={activeSection} onNavigate={navigate} />
+                  {activeItem && (
+                    <>
+                      <span className="text-slate-300">/</span>
+                      <span className="text-sm font-medium text-slate-500">{activeItem.label}</span>
+                    </>
+                  )}
+                </div>
 
                 <div className="flex items-center gap-3">
                   <Link to="/select" className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-brand-700 transition-colors">
