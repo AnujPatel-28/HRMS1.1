@@ -101,8 +101,13 @@ export default async function (request) {
   }
 
   if (tenantId && actorId) {
-    const client = createClient({ baseUrl: BASE_URL, edgeFunctionToken: userToken });
-    const { data: rateLimitOk, error: rateLimitErr } = await client.database.rpc("check_rate_limit", {
+    // Runs on the SERVER client, not the caller's. 20260904120000 revoked EXECUTE on
+    // check_rate_limit from `authenticated` (only project_admin holds it), so calling it through
+    // the caller's token 500s. Do NOT re-grant: the function is caller-parameterised, so an
+    // authenticated caller could burn or reset another user's counter. actorId below is
+    // server-derived from the verified token above, not body input.
+    const serverClient = createClient({ baseUrl: BASE_URL, anonKey: ADMIN_KEY });
+    const { data: rateLimitOk, error: rateLimitErr } = await serverClient.database.rpc("check_rate_limit", {
       p_tenant_id: tenantId,
       p_user_id: actorId,
       p_endpoint: 'set-employee-password',

@@ -84,10 +84,17 @@ export default async function (request) {
     return json({ error: "Forbidden" }, 403);
   }
 
+  // Constructed BEFORE the rate-limit block on purpose — the limiter needs it (see below).
+  const adminClient = createClient({ baseUrl: BASE_URL, anonKey: ADMIN_KEY });
+
   // Rate limiting
   if (tenantId && actorId) {
-    const client = createClient({ baseUrl: BASE_URL, edgeFunctionToken: userToken });
-    const { data: rateLimitOk, error: rateLimitErr } = await client.database.rpc("check_rate_limit", {
+    // Runs on the SERVER client, not the caller's. 20260904120000 revoked EXECUTE on
+    // check_rate_limit from `authenticated` (only project_admin holds it), so calling it through
+    // the caller's token fails. Do NOT re-grant: the function is caller-parameterised, so an
+    // authenticated caller could burn or reset another user's counter. tenantId is checked against
+    // the caller's own metadata above, and actorId is server-derived from the verified token.
+    const { data: rateLimitOk, error: rateLimitErr } = await adminClient.database.rpc("check_rate_limit", {
       p_tenant_id: tenantId,
       p_user_id: actorId,
       p_endpoint: 'finalize-onboarding',
@@ -95,12 +102,19 @@ export default async function (request) {
       p_window_interval: '1 hour'
     });
 
-    if (rateLimitErr || rateLimitOk === false) {
+    // A FAILED check and a HIT limit are different failures and must not share a message.
+    // Collapsing them is exactly what disguised the missing EXECUTE grant as "Rate limit
+    // exceeded" and hid a hard block for weeks — twice.
+    if (rateLimitErr) {
+      return json({
+        error: `Rate limit check failed: ${rateLimitErr.message ?? String(rateLimitErr)}`,
+      }, 500);
+    }
+
+    if (rateLimitOk === false) {
       return json({ error: "Rate limit exceeded. Please try again later." }, 429);
     }
   }
-
-  const adminClient = createClient({ baseUrl: BASE_URL, anonKey: ADMIN_KEY });
 
   // Get auth user ID from email
   let targetAuthUserId = null;

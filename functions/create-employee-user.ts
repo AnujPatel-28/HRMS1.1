@@ -238,7 +238,14 @@ export default async function (req) {
     }
 
     // 0.5. Check Rate Limit
-    const { data: rateLimitOk, error: rateLimitErr } = await client.database.rpc("check_rate_limit", {
+    // Runs on the SERVER client, not the caller's. 20260904120000 revoked EXECUTE on
+    // check_rate_limit from `authenticated` (only project_admin holds it), so calling it through
+    // the caller's token 500s — that is what broke onboarding on 2026-09-04, and on 2026-08-17
+    // before that. Do NOT "fix" this by re-granting: check_rate_limit is caller-parameterised, so
+    // an authenticated caller could burn or reset another user's counter. Caller identity is
+    // already verified above, and p_user_id below is the server-derived user.id, not body input.
+    const serverClient = createClient({ baseUrl: BASE_URL, anonKey: ADMIN_KEY });
+    const { data: rateLimitOk, error: rateLimitErr } = await serverClient.database.rpc("check_rate_limit", {
       p_tenant_id: tenantId,
       p_user_id: user.id,
       p_endpoint: 'create-employee-user',
