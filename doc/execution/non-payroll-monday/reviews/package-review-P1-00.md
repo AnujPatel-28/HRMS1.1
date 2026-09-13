@@ -42,7 +42,7 @@ reverse any of them.
 | **AC2** correct run provisions/resets **only synthetic Company A/B personas** deterministically | **FAIL** | No personas exist. `seed.mjs` creates two tenants and module rows only; `reconciliation.md` §10 declares personas out of scope by design. `reset.mjs` is a whole-branch T0 rollback, not a fixture reset |
 | **AC3** no literal passwords, admin keys, schedule headers or personal data in harness/fixtures | **PASS** | Scanned `tests/` for `ik_*`, JWTs, password literals, anon keys and org e-mail: clean. `_target.mjs` is identifiers only. `.insforge` is git-ignored. Nothing in `tests/` imports `scratch/` |
 | **AC4** drift covers `public`, `storage`, `realtime` **and passes** on reproduced state | **FAIL** | Coverage extended correctly; the AC's second half is false. Reproduced independently: **50 of 293 untracked** |
-| **AC5** all live-only policies classified intended/stale; only reviewed intended definitions enter `179500` | **FAIL** | Enumerated, none classified. `migrations/20260912179500_m1m2_reproducibility_baseline.sql` does not exist |
+| **AC5** all live-only policies classified intended/stale; only reviewed intended definitions enter `179500` | **FAIL** | Enumerated, none classified. `migrations/20260912179500_m1m2-reproducibility-baseline.sql` does not exist |
 | **AC6** migration dispositions | **PASS** | Verified: `20260812140000` absent locally, both `migrations-pending-deploy/` files present and marked DEFER, `20260904120000` present-and-untracked and marked inherited/immutable. All four decisions given and sound |
 | **AC7** deployed-only bodies captured **and assessed for membership/tenant bypasses** | **FAIL** | Five bodies captured (line counts confirmed). No assessment written — and there are real bypasses to assess (B4) |
 | **AC8** `check-punch-out-gate` / `on-leave-reviewed` drift, authoritative side named | **FAIL** | No decision recorded anywhere in the package |
@@ -168,7 +168,7 @@ resolve this by widening its own file list or by inventing a persona path.
 
 ### B3 — AC5 has no artifact, and the untracked set is the tenant fence itself
 
-**What is wrong.** 50 policies classified: zero. `migrations/20260912179500_m1m2_reproducibility_baseline.sql`
+**What is wrong.** 50 policies classified: zero. `migrations/20260912179500_m1m2-reproducibility-baseline.sql`
 does not exist.
 
 **Evidence.** `node scripts/check-policy-drift.mjs` against the linked branch, reproduced by me:

@@ -102,7 +102,7 @@ P3-03 enforce them server-side. Omit those grants entirely — no empty arrays a
 
 ## 3. The server resolver
 
-Your migration is `migrations/20260912180000_m1m2_access_capability_contract.sql`. It creates:
+Your migration is `migrations/20260912180000_m1m2-access-capability-contract.sql`. It creates:
 
 1. **A capability resolver** returning the shape above for the *calling* user. In M1 it derives from
    the legacy sources that exist — `employees`, `employee_roles`, JWT metadata, `tenant_modules` —
@@ -172,7 +172,7 @@ src/hr/HRLayout.tsx
 src/hr/Directory.tsx
 src/payroll/PayrollLayout.tsx
 src/payroll/employee/EmployeePayrollLayout.tsx
-migrations/20260912180000_m1m2_access_capability_contract.sql   (new)
+migrations/20260912180000_m1m2-access-capability-contract.sql   (new)
 tests/m1m2/p1_capability_contract.mjs                           (new)
 ```
 

@@ -41,19 +41,28 @@ P1-00 records the exact `TB-M1M2` project ID without keys. The harness must comp
 
 These paths are reserved but not created. The integration lead rechecks local, `migrations-pending-deploy/`, remote history and `TB-M1M2` immediately before creating each file.
 
+**v0.5 erratum — all eleven names were renamed.** v0.4 reserved them with underscores in the name part
+(`..._m1m2_access_capability_contract.sql`). The InsForge CLI rejects that — `Migration file names
+must match <migration_version>_<migration-name>.sql` — and **110 of the repository's 111 existing
+migrations already use hyphens**, so the reservation table had invented a convention the repo does not
+use. Found by P1-01 the first time anyone actually ran the tool against one of these paths; four P6
+contract reviews and the P1-00 package review all read past it, because none of them ran a migration
+command. `reviews/contract-review-v0.4.md` still shows the old names — it is a dated record of what
+v0.4 said and is deliberately not rewritten. **The names in this table are authoritative.**
+
 | Version/path | Owner | Purpose |
 |---|---|---|
-| `migrations/20260912179500_m1m2_reproducibility_baseline.sql` | P1-00 | Reviewed public/storage/realtime policy and database-function baseline |
-| `migrations/20260912180000_m1m2_access_capability_contract.sql` | P1-01 | Frozen capability seam and shared no-self guard |
-| `migrations/20260912181000_m1m2_membership_grants_invites_ownership.sql` | P1-02 | Membership, grants, invite, audit and owner lifecycle |
-| `migrations/20260912182000_m1m2_shared_work_calendar_resolver.sql` | P2-01 | Shared dated calendar/schedule resolution |
-| `migrations/20260912183000_m1m2_dated_organization_transfer.sql` | P1-03 | Relationship scope, overlap and dated transfer |
-| `migrations/20260912184000_m1m2_attendance_correction_consistency.sql` | P2-02 | Attendance/correction and exclusive punch-out gate ownership |
-| `migrations/20260912185000_m1m2_device_kiosk_verification.sql` | P2-03 | Device/kiosk correction only if review proves necessary |
-| `migrations/20260912186000_m1m2_leave_approval_absence_coverage.sql` | P2-04 | Leave integrity and absence projection |
-| `migrations/20260912187000_m1m2_policy_privacy_versioning.sql` | P3-01 | Policy privacy/versioning |
-| `migrations/20260912188000_m1m2_project_members_task_lifecycle.sql` | P3-02 | Explicit project membership/task lifecycle |
-| `migrations/20260912189000_m1m2_communication_realtime_storage.sql` | P3-03 | Chat/Connect/notification realtime and storage |
+| `migrations/20260912179500_m1m2-reproducibility-baseline.sql` | P1-00 | Reviewed public/storage/realtime policy and database-function baseline |
+| `migrations/20260912180000_m1m2-access-capability-contract.sql` | P1-01 | Frozen capability seam and shared no-self guard |
+| `migrations/20260912181000_m1m2-membership-grants-invites-ownership.sql` | P1-02 | Membership, grants, invite, audit and owner lifecycle |
+| `migrations/20260912182000_m1m2-shared-work-calendar-resolver.sql` | P2-01 | Shared dated calendar/schedule resolution |
+| `migrations/20260912183000_m1m2-dated-organization-transfer.sql` | P1-03 | Relationship scope, overlap and dated transfer |
+| `migrations/20260912184000_m1m2-attendance-correction-consistency.sql` | P2-02 | Attendance/correction and exclusive punch-out gate ownership |
+| `migrations/20260912185000_m1m2-device-kiosk-verification.sql` | P2-03 | Device/kiosk correction only if review proves necessary |
+| `migrations/20260912186000_m1m2-leave-approval-absence-coverage.sql` | P2-04 | Leave integrity and absence projection |
+| `migrations/20260912187000_m1m2-policy-privacy-versioning.sql` | P3-01 | Policy privacy/versioning |
+| `migrations/20260912188000_m1m2-project-members-task-lifecycle.sql` | P3-02 | Explicit project membership/task lifecycle |
+| `migrations/20260912189000_m1m2-communication-realtime-storage.sql` | P3-03 | Chat/Connect/notification realtime and storage |
 
 Only the lead creates/applies migrations or changes the linked target. Writes are serialized. Applied migrations are immutable.
 
@@ -81,7 +90,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
   - `tests/m1m2/fixtures/reset.mjs` (new)
   - `tests/m1m2/fixtures/personas.mjs` (new, v0.5 — the P1-01 unblock; must not provision through `create-employee-user` / `create-hr-admin-user` / `set-employee-password`, which P1-02 is about to rewrite)
   - `doc/execution/non-payroll-monday/reconciliation.md` (new)
-  - `migrations/20260912179500_m1m2_reproducibility_baseline.sql` (new, only after classification/review)
+  - `migrations/20260912179500_m1m2-reproducibility-baseline.sql` (new, only after classification/review)
   - `functions/auth-signup/index.ts` (new local capture)
   - `functions/auth-session/index.ts` (new local capture)
   - `functions/auth-verify/index.ts` (new local capture)
@@ -125,7 +134,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
   - `src/hr/Directory.tsx`
   - `src/payroll/PayrollLayout.tsx`
   - `src/payroll/employee/EmployeePayrollLayout.tsx`
-  - `migrations/20260912180000_m1m2_access_capability_contract.sql` (new, lead-created)
+  - `migrations/20260912180000_m1m2-access-capability-contract.sql` (new, lead-created)
   - `tests/m1m2/p1_capability_contract.mjs` (new)
 - **Dependencies:** P1-00 harness/reconciliation **and `tests/m1m2/fixtures/personas.mjs`**; `contracts.md` v0.5; `TB-M1M2` (authorized). P1-01 owns and freezes the §6 concrete wire shape in `src/types/access.ts`; P1-02 must implement it and may not redefine it.
 - **Acceptance tests:**
@@ -146,7 +155,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 - **Model:** GPT-5.6 Sol high.
 - **Status:** BLOCKED on P1-00, P1-01 shared seam, credential hygiene and `TB-M1M2`.
 - **Exact allowed files:**
-  - `migrations/20260912181000_m1m2_membership_grants_invites_ownership.sql` (new, lead-created)
+  - `migrations/20260912181000_m1m2-membership-grants-invites-ownership.sql` (new, lead-created)
   - `functions/create-hr-admin-user/index.js`
   - `functions/create-employee-user.ts`
   - `functions/finalize-onboarding.ts`
@@ -186,7 +195,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 - **Model:** GPT-5.6 Sol high.
 - **Status:** BLOCKED on P1-00/P1-01/P1-02, P2-01 tenant-date primitive and dated-context review.
 - **Exact allowed files:**
-  - `migrations/20260912183000_m1m2_dated_organization_transfer.sql` (new, lead-created)
+  - `migrations/20260912183000_m1m2-dated-organization-transfer.sql` (new, lead-created)
   - `src/contexts/AuthContext.tsx` (sequential handoff from P1-01)
   - `src/contexts/OrgUnitsContext.tsx`
   - `src/hooks/useOrgStructure.ts`
@@ -216,7 +225,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 - **Model:** Sonnet 5 medium/high; fallback GPT-5.6 Sol high.
 - **Status:** BLOCKED on P1-00, P1-01 access contract and `TB-M1M2`.
 - **Exact allowed files:**
-  - `migrations/20260912182000_m1m2_shared_work_calendar_resolver.sql` (new, lead-created)
+  - `migrations/20260912182000_m1m2-shared-work-calendar-resolver.sql` (new, lead-created)
   - `src/hr/ShiftManagement.tsx`
   - `src/hr/Calendar.tsx`
   - `src/hr/HolidayList.tsx`
@@ -239,7 +248,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 - **Model:** Sonnet 5 high; fallback GPT-5.6 Sol high.
 - **Status:** BLOCKED on P1-00 drift decision, P1-01 guard, P1-03 and P2-01.
 - **Exact allowed files:**
-  - `migrations/20260912184000_m1m2_attendance_correction_consistency.sql` (new, lead-created)
+  - `migrations/20260912184000_m1m2-attendance-correction-consistency.sql` (new, lead-created)
   - `functions/run-attendance-derivation/index.ts`
   - `functions/check-punch-out-gate/index.ts`
   - `functions/calculate-late-marks.ts`
@@ -267,7 +276,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 - **Model:** Sonnet 5 medium/high; fallback GPT-5.6 Sol high.
 - **Status:** BLOCKED on P1-00, hardware identity, P2-01/P2-02.
 - **Exact allowed files:**
-  - `migrations/20260912185000_m1m2_device_kiosk_verification.sql` (new only if reviewed correction required)
+  - `migrations/20260912185000_m1m2-device-kiosk-verification.sql` (new only if reviewed correction required)
   - `functions/kiosk-punch/index.ts`
   - `functions/adms-cdata/index.ts`
   - `src/kiosk/Kiosk.tsx`
@@ -290,7 +299,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 - **Model:** Sonnet 5 high; fallback GPT-5.6 Sol high.
 - **Status:** BLOCKED on P1-00 drift/evidence decision, P1-01 guard, P1-03 and P2-01.
 - **Exact allowed files:**
-  - `migrations/20260912186000_m1m2_leave_approval_absence_coverage.sql` (new, lead-created)
+  - `migrations/20260912186000_m1m2-leave-approval-absence-coverage.sql` (new, lead-created)
   - `functions/on-leave-reviewed.ts`
   - `src/employee/MyLeaves.tsx`
   - `src/hr/LeaveManagement.tsx`
@@ -317,7 +326,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 - **Model:** Sonnet 5 medium; fallback GPT-5.6 Sol high.
 - **Status:** BLOCKED on P1-00 reproducible private storage and P1 access contract.
 - **Exact allowed files:**
-  - `migrations/20260912187000_m1m2_policy_privacy_versioning.sql` (new, lead-created)
+  - `migrations/20260912187000_m1m2-policy-privacy-versioning.sql` (new, lead-created)
   - `src/hr/PolicyCenter.tsx`
   - `src/hr/PolicyUpload.tsx`
   - `src/employee/Policies.tsx`
@@ -340,7 +349,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 - **Model:** Sonnet 5 medium; fallback GPT-5.6 Sol high.
 - **Status:** BLOCKED on P1-00/P1 capabilities, P1-03 and P2 availability.
 - **Exact allowed files:**
-  - `migrations/20260912188000_m1m2_project_members_task_lifecycle.sql` (new, lead-created)
+  - `migrations/20260912188000_m1m2-project-members-task-lifecycle.sql` (new, lead-created)
   - `src/hr/TaskWorkspace.tsx`
   - `src/hr/TaskManagement.tsx`
   - `src/hr/pms/ProjectList.tsx`
@@ -371,7 +380,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 - **Model:** Sonnet 5 high; fallback GPT-5.6 Sol high.
 - **Status:** BLOCKED on P1-00 policy baseline, P1 revocation and private storage/realtime access.
 - **Exact allowed files:**
-  - `migrations/20260912189000_m1m2_communication_realtime_storage.sql` (new, lead-created)
+  - `migrations/20260912189000_m1m2-communication-realtime-storage.sql` (new, lead-created)
   - `src/shared/Chat.tsx`
   - `src/employee/Chat.tsx`
   - `src/hr/Chat.tsx`
