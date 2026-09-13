@@ -166,6 +166,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
   - ~~`functions/auth-signup` / `auth-session` / `auth-verify` / `admin-auth-login`~~ — **REMOVED in v0.5.** P1-00 criterion 7 dispositioned all four **DELETE**: they are the sister ATS product's functions, no HRMS code calls any of them, and `admin-auth-login` grants `super_admin` from an e-mail domain with no tenant fence. P1-02 inherits no handoff. See `reconciliation.md` §11.
   - `src/hr/UsersAccess.tsx` (new)
   - `src/hooks/useAuditLog.ts`
+  - `tests/m1m2/fixtures/personas.mjs` (v0.5 — added so P1-02 can create the non-employee Owner and Company Admin that AC1, AC13 and AC14 require; P1-00 could not, because those principals are unrepresentable without this package's membership tables)
   - `src/App.tsx` (sequential handoff from P1-01)
   - `src/hr/HRLayout.tsx` (sequential handoff from P1-01)
   - `tests/m1m2/p1_membership_invitation_revocation.mjs` (new)
