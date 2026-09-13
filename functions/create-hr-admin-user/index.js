@@ -94,7 +94,10 @@ module.exports = async function (request) {
         name: name || email,
         autoConfirm: true,
         metadata: {
-          role: "hr",
+          // First-admin metadata is identity/navigation compatibility only. Authority is the
+          // server-owned Owner + Company Admin membership written below; "hr" would satisfy the
+          // broad legacy is_hr() gate and silently grant operational HR workflows.
+          role: "employee",
           tenant_id,
         },
       }),
@@ -109,26 +112,54 @@ module.exports = async function (request) {
       );
     }
 
-    const metadataRes = await fetch(`${baseUrl}/api/database/rpc/set_hr_user_metadata`, {
+    let createdUserId =
+      createData.id ||
+      createData.user?.id ||
+      createData.data?.id ||
+      createData.data?.user?.id;
+    if (!createdUserId) {
+      // Backend versions differ in whether admin-create returns the user object. Resolve the
+      // server-created identity by its unique email rather than trusting a response envelope.
+      const lookupRes = await fetch(`${baseUrl}/api/database/rpc/get_user_id_by_email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminKey}`,
+        },
+        body: JSON.stringify({ user_email: email }),
+      });
+      createdUserId = lookupRes.ok ? await lookupRes.json().catch(() => null) : null;
+    }
+    if (!createdUserId) {
+      return json({ error: "Created user response did not include an id." }, 500);
+    }
+
+    const bootstrapRes = await fetch(`${baseUrl}/api/database/rpc/bootstrap_first_tenant_admin`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${userToken}`,
       },
       body: JSON.stringify({
-        user_email: email,
-        tenant_uuid: tenant_id,
-        user_name: name || email,
+        p_tenant_id: tenant_id,
+        p_target_user_id: createdUserId,
       }),
     });
 
-    if (!metadataRes.ok) {
-      const errBody = await metadataRes.text().catch(() => "");
-      return json({ error: errBody || "Failed to set HR admin metadata" }, 500);
+    if (!bootstrapRes.ok) {
+      const errBody = await bootstrapRes.text().catch(() => "");
+      // Creation and membership provisioning cross two services. Compensate a failed bootstrap
+      // so retry cannot leave an orphan auth principal that looks provisioned.
+      await fetch(`${baseUrl}/api/auth/users`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminKey}` },
+        body: JSON.stringify({ userIds: [createdUserId] }),
+      }).catch(() => null);
+      return json({ error: errBody || "Failed to bootstrap tenant ownership and access" }, 500);
     }
 
-    const userId = await metadataRes.json().catch(() => null);
-    return json({ success: true, user_id: userId });
+    const access = await bootstrapRes.json().catch(() => null);
+    return json({ success: true, user_id: createdUserId, access });
   } catch (err) {
     return json({ error: String(err) }, 500);
   }

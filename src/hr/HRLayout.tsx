@@ -20,6 +20,8 @@ type NavLinkItem = {
   icon: React.ElementType;
   /** Hidden when this module is disabled for the tenant. Omit for always-visible items. */
   module?: ModuleKey;
+  /** Optional capability gate in addition to the tenant module gate. */
+  grant?: string;
 };
 
 type LayoutStyle = 'dropdown' | 'double_sidebar';
@@ -49,6 +51,7 @@ const allSections: readonly NavSection[] = [
       { label: "Directory", href: "/hr/directory", icon: Contact },
       { label: "Org Chart", href: "/hr/org-chart", icon: GitBranch },
       { label: "Org Setup", href: "/hr/org-structure", icon: Network },
+      { label: "Users & Access", href: "/hr/users-access", icon: Shield, grant: "access.manage" },
       { label: "Offboarding", href: "/hr/offboarding", icon: LogOut, module: "offboarding" },
     ],
   },
@@ -461,7 +464,7 @@ export default function HRLayout() {
   const deptLabel = useDepartmentLabel();
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout, tenantId, user, canAccessMyWork, canAccessTeam } = useAuth();
+  const { logout, tenantId, user, canAccessMyWork, canAccessTeam, hasGrant } = useAuth();
   const { employee } = useEmployee();
   const { hasModule } = useTenant();
 
@@ -472,7 +475,9 @@ export default function HRLayout() {
       const visibleSections = allSections
         .map((section) => ({
           ...section,
-          items: section.items.filter((item) => !item.module || hasModule(item.module)),
+          items: section.items.filter(
+            (item) => (!item.module || hasModule(item.module)) && (!item.grant || hasGrant(item.grant, "company")),
+          ),
         }))
         .filter((section) => section.items.length > 0);
 
@@ -487,7 +492,7 @@ export default function HRLayout() {
         ? [{ title: "Surfaces", icon: Home, items: composedItems }, ...visibleSections]
         : visibleSections;
     },
-    [canAccessMyWork, canAccessTeam, hasModule],
+    [canAccessMyWork, canAccessTeam, hasGrant, hasModule],
   );
 
   const [mobileOpen, setMobileOpen] = useState(false);

@@ -54,10 +54,10 @@ export default async function (request) {
   let actorId = null;
   let actorRole = "unknown";
   let actorTenant = null;
+  const callerClient = createClient({ baseUrl: BASE_URL, edgeFunctionToken: userToken });
   
   if (userToken) {
-    const client = createClient({ baseUrl: BASE_URL, edgeFunctionToken: userToken });
-    const { data: userData } = await client.auth.getCurrentUser();
+    const { data: userData } = await callerClient.auth.getCurrentUser();
     const user = userData?.user;
     if (user) {
       actorId = user.id;
@@ -80,7 +80,9 @@ export default async function (request) {
     return json({ error: "email and tenant_id are required" }, 400);
   }
 
-  if (actorRole !== "hr" || actorTenant !== tenantId) {
+  const { data: callerIsHr, error: callerIsHrError } = await callerClient.database.rpc("is_hr");
+  if (callerIsHrError) return json({ error: "HR authority check failed." }, 503);
+  if (callerIsHr !== true || actorTenant !== tenantId) {
     return json({ error: "Forbidden" }, 403);
   }
 

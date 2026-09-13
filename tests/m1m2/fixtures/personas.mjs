@@ -120,7 +120,25 @@ export const COMPANY_B_EMPLOYEE = Object.freeze({
   tenant: { id: COMPANY_B_TENANT_ID },
 });
 
-const ALL_PERSONAS = [COMPANY_A_EMPLOYEE, COMPANY_A_HR_EMPLOYEE, COMPANY_B_EMPLOYEE];
+/** Non-employee protected owner; Company Admin is assigned independently. */
+export const COMPANY_A_OWNER = Object.freeze({
+  authUserId: "a0000000-0000-4000-8004-000000000001",
+  email: "owner.a@m1m2.test",
+  fullName: "M1M2 Owner A",
+  tenant: { id: COMPANY_A_TENANT_ID },
+});
+
+/** Normal invitation-path Company Admin with deliberately no employee row. */
+export const COMPANY_A_COMPANY_ADMIN = Object.freeze({
+  authUserId: "a0000000-0000-4000-8005-000000000001",
+  email: "company-admin.a@m1m2.test",
+  fullName: "M1M2 Company Admin A",
+  tenant: { id: COMPANY_A_TENANT_ID },
+});
+
+const EMPLOYEE_PERSONAS = [COMPANY_A_EMPLOYEE, COMPANY_A_HR_EMPLOYEE, COMPANY_B_EMPLOYEE];
+const NON_EMPLOYEE_PERSONAS = [COMPANY_A_OWNER, COMPANY_A_COMPANY_ADMIN];
+const ALL_PERSONAS = [...EMPLOYEE_PERSONAS, ...NON_EMPLOYEE_PERSONAS];
 
 function sqlStr(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
@@ -135,14 +153,14 @@ const authUsersValues = ALL_PERSONAS.map(
     `('${p.authUserId}'::uuid, ${sqlStr(p.email)}, crypt(${sqlStr(PASSWORD)}, gen_salt('bf', 10)), true, ${metadataJson(p.tenant.id)}::jsonb)`,
 ).join(", ");
 
-const employeesValues = ALL_PERSONAS.map(
+const employeesValues = EMPLOYEE_PERSONAS.map(
   (p) => `('${p.employeeId}'::uuid, '${p.authUserId}'::uuid, '${p.tenant.id}'::uuid, ${sqlStr(p.fullName)}, ${sqlStr(p.email)})`,
 ).join(", ");
 
 const PRECHECK_SQL = `
 SELECT email, id FROM auth.users WHERE email IN (${ALL_PERSONAS.map((p) => sqlStr(p.email)).join(", ")}) AND id NOT IN (${ALL_PERSONAS.map((p) => `'${p.authUserId}'::uuid`).join(", ")})
 UNION ALL
-SELECT email, id FROM public.employees WHERE email IN (${ALL_PERSONAS.map((p) => sqlStr(p.email)).join(", ")}) AND id NOT IN (${ALL_PERSONAS.map((p) => `'${p.employeeId}'::uuid`).join(", ")});
+SELECT email, id FROM public.employees WHERE email IN (${ALL_PERSONAS.map((p) => sqlStr(p.email)).join(", ")}) AND id NOT IN (${EMPLOYEE_PERSONAS.map((p) => `'${p.employeeId}'::uuid`).join(", ")});
 `;
 
 const SEED_SQL = `
@@ -183,26 +201,119 @@ ins_role AS (
         scope_type = EXCLUDED.scope_type,
         is_active = true
   RETURNING id
+),
+ins_memberships AS (
+  INSERT INTO public.tenant_memberships (
+    tenant_id, user_id, employee_id, status, access_version, created_by, updated_by,
+    revoked_at, revoked_by, revoke_reason
+  )
+  SELECT
+    p.tenant_id,
+    p.user_id,
+    p.employee_id,
+    'active',
+    1,
+    p.user_id,
+    p.user_id,
+    NULL,
+    NULL,
+    NULL
+  FROM (VALUES
+    ('${COMPANY_A_EMPLOYEE.tenant.id}'::uuid, '${COMPANY_A_EMPLOYEE.authUserId}'::uuid, '${COMPANY_A_EMPLOYEE.employeeId}'::uuid),
+    ('${COMPANY_A_HR_EMPLOYEE.tenant.id}'::uuid, '${COMPANY_A_HR_EMPLOYEE.authUserId}'::uuid, '${COMPANY_A_HR_EMPLOYEE.employeeId}'::uuid),
+    ('${COMPANY_B_EMPLOYEE.tenant.id}'::uuid, '${COMPANY_B_EMPLOYEE.authUserId}'::uuid, '${COMPANY_B_EMPLOYEE.employeeId}'::uuid),
+    ('${COMPANY_A_OWNER.tenant.id}'::uuid, '${COMPANY_A_OWNER.authUserId}'::uuid, NULL::uuid),
+    ('${COMPANY_A_COMPANY_ADMIN.tenant.id}'::uuid, '${COMPANY_A_COMPANY_ADMIN.authUserId}'::uuid, NULL::uuid)
+  ) p(tenant_id,user_id,employee_id)
+  ON CONFLICT (tenant_id,user_id) DO UPDATE SET
+    employee_id=EXCLUDED.employee_id,
+    status='active',
+    access_version=GREATEST(public.tenant_memberships.access_version,1),
+    updated_by=EXCLUDED.updated_by,
+    updated_at=clock_timestamp(),
+    revoked_at=NULL,
+    revoked_by=NULL,
+    revoke_reason=NULL
+  RETURNING id
+),
+ins_employee_templates AS (
+  INSERT INTO public.membership_template_assignments (membership_id,tenant_id,template_key,assigned_by)
+  SELECT md5(p.tenant_id::text || ':' || p.user_id::text)::uuid,p.tenant_id,'employee',p.user_id
+  FROM (VALUES
+    ('${COMPANY_A_EMPLOYEE.tenant.id}'::uuid, '${COMPANY_A_EMPLOYEE.authUserId}'::uuid),
+    ('${COMPANY_A_HR_EMPLOYEE.tenant.id}'::uuid, '${COMPANY_A_HR_EMPLOYEE.authUserId}'::uuid),
+    ('${COMPANY_B_EMPLOYEE.tenant.id}'::uuid, '${COMPANY_B_EMPLOYEE.authUserId}'::uuid)
+  ) p(tenant_id,user_id)
+  ON CONFLICT (membership_id,template_key) DO UPDATE SET
+    is_active=true,revoked_at=NULL,revoked_by=NULL,revoke_reason=NULL
+  RETURNING membership_id
+),
+ins_hr_template AS (
+  INSERT INTO public.membership_template_assignments (membership_id,tenant_id,template_key,assigned_by)
+  VALUES (
+    md5('${COMPANY_A_HR_EMPLOYEE.tenant.id}' || ':' || '${COMPANY_A_HR_EMPLOYEE.authUserId}')::uuid,
+    '${COMPANY_A_HR_EMPLOYEE.tenant.id}'::uuid,'hr_admin','${COMPANY_A_HR_EMPLOYEE.authUserId}'::uuid
+  )
+  ON CONFLICT (membership_id,template_key) DO UPDATE SET
+    is_active=true,revoked_at=NULL,revoked_by=NULL,revoke_reason=NULL
+  RETURNING membership_id
+),
+ins_admin_templates AS (
+  INSERT INTO public.membership_template_assignments (membership_id,tenant_id,template_key,assigned_by)
+  SELECT md5(p.tenant_id::text || ':' || p.user_id::text)::uuid,p.tenant_id,'company_admin',p.user_id
+  FROM (VALUES
+    ('${COMPANY_A_OWNER.tenant.id}'::uuid, '${COMPANY_A_OWNER.authUserId}'::uuid),
+    ('${COMPANY_A_COMPANY_ADMIN.tenant.id}'::uuid, '${COMPANY_A_COMPANY_ADMIN.authUserId}'::uuid)
+  ) p(tenant_id,user_id)
+  ON CONFLICT (membership_id,template_key) DO UPDATE SET
+    is_active=true,revoked_at=NULL,revoked_by=NULL,revoke_reason=NULL
+  RETURNING membership_id
+),
+ins_owner AS (
+  INSERT INTO public.tenant_ownerships (tenant_id,membership_id,started_by)
+  SELECT
+    '${COMPANY_A_OWNER.tenant.id}'::uuid,
+    md5('${COMPANY_A_OWNER.tenant.id}' || ':' || '${COMPANY_A_OWNER.authUserId}')::uuid,
+    '${COMPANY_A_OWNER.authUserId}'::uuid
+  WHERE NOT EXISTS (
+    SELECT 1 FROM public.tenant_ownerships o
+    WHERE o.tenant_id='${COMPANY_A_OWNER.tenant.id}'::uuid AND o.ended_at IS NULL
+  )
+  RETURNING id
 )
 SELECT (SELECT count(*) FROM ins_users) AS users_written,
        (SELECT count(*) FROM ins_employees) AS employees_written,
-       (SELECT count(*) FROM ins_role) AS role_rows_written;
+       (SELECT count(*) FROM ins_role) AS role_rows_written,
+       (SELECT count(*) FROM ins_memberships) AS memberships_written,
+       (SELECT count(*) FROM ins_owner) AS owners_written;
 `;
 
 const VERIFY_SQL = `
 SELECT
-  e.email,
-  e.tenant_id,
+  u.email,
+  (u.metadata->>'tenant_id')::uuid AS tenant_id,
   (u.password = crypt(${sqlStr(PASSWORD)}, u.password)) AS password_matches,
-  (u.metadata->>'tenant_id')::uuid = e.tenant_id AS metadata_tenant_matches,
+  m.tenant_id = (u.metadata->>'tenant_id')::uuid AS metadata_tenant_matches,
+  EXISTS (SELECT 1 FROM public.employees e WHERE e.user_id=u.id) AS has_employee_row,
+  m.id AS membership_id,
+  m.id = md5(m.tenant_id::text || ':' || m.user_id::text)::uuid AS membership_id_matches,
   EXISTS (
     SELECT 1 FROM public.employee_roles r
-    WHERE r.employee_id = e.id AND r.role = 'hr_admin' AND r.is_active
-  ) AS has_hr_admin_role
-FROM public.employees e
-JOIN auth.users u ON u.id = e.user_id
-WHERE e.id IN (${ALL_PERSONAS.map((p) => `'${p.employeeId}'::uuid`).join(", ")})
-ORDER BY e.email;
+    JOIN public.employees e ON e.id=r.employee_id
+    WHERE e.user_id=u.id AND r.role = 'hr_admin' AND r.is_active
+  ) AS has_hr_admin_role,
+  EXISTS (
+    SELECT 1 FROM public.membership_template_assignments a
+    WHERE a.membership_id=m.id AND a.template_key='company_admin' AND a.is_active
+  ) AS has_company_admin_template,
+  EXISTS (
+    SELECT 1 FROM public.tenant_ownerships o
+    WHERE o.membership_id=m.id AND o.ended_at IS NULL
+  ) AS is_owner
+FROM auth.users u
+JOIN public.tenant_memberships m ON m.user_id=u.id AND m.tenant_id=(u.metadata->>'tenant_id')::uuid
+WHERE u.id IN (${ALL_PERSONAS.map((p) => `'${p.authUserId}'::uuid`).join(", ")})
+ORDER BY u.email;
 `;
 
 function rowsOf(result) {
@@ -253,6 +364,12 @@ try {
           `${row.email}: auth.users metadata.tenant_id does not match employees.tenant_id; RLS would deny this persona everything.`,
         );
       }
+      if (!row.membership_id || row.membership_id_matches !== true) {
+        throw new HarnessBlockedError(
+          "PERSONA_MEMBERSHIP_ID_MISMATCH",
+          `${row.email}: membership id does not match the frozen md5 formula.`,
+        );
+      }
       const expectHr = row.email === COMPANY_A_HR_EMPLOYEE.email;
       if (row.has_hr_admin_role !== expectHr) {
         throw new HarnessBlockedError(
@@ -260,14 +377,37 @@ try {
           `${row.email}: hr_admin role state is ${row.has_hr_admin_role}, expected ${expectHr}.`,
         );
       }
+      const expectEmployee = EMPLOYEE_PERSONAS.some((persona) => persona.email === row.email);
+      if (row.has_employee_row !== expectEmployee) {
+        throw new HarnessBlockedError(
+          "PERSONA_EMPLOYEE_ASSOCIATION_MISMATCH",
+          `${row.email}: employee association is ${row.has_employee_row}, expected ${expectEmployee}.`,
+        );
+      }
+      const expectCompanyAdmin = row.email === COMPANY_A_OWNER.email || row.email === COMPANY_A_COMPANY_ADMIN.email;
+      if (row.has_company_admin_template !== expectCompanyAdmin) {
+        throw new HarnessBlockedError(
+          "PERSONA_COMPANY_ADMIN_MISMATCH",
+          `${row.email}: Company Admin state is ${row.has_company_admin_template}, expected ${expectCompanyAdmin}.`,
+        );
+      }
+      if (row.is_owner !== (row.email === COMPANY_A_OWNER.email)) {
+        throw new HarnessBlockedError(
+          "PERSONA_OWNER_MISMATCH",
+          `${row.email}: owner state is ${row.is_owner}.`,
+        );
+      }
     }
 
     for (const row of verification) {
-      console.log(`  ${row.email}: password ok, tenant metadata ok, hr_admin=${row.has_hr_admin_role}.`);
+      console.log(
+        `  ${row.email}: password/tenant/membership ok, employee=${row.has_employee_row}, ` +
+          `hr_admin=${row.has_hr_admin_role}, company_admin=${row.has_company_admin_template}, owner=${row.is_owner}.`,
+      );
     }
     console.log(
-      `M1M2 synthetic personas: 3 login-capable personas present on ${verified.projectName} ` +
-        `(${COMPANY_A_EMPLOYEE.email}, ${COMPANY_A_HR_EMPLOYEE.email} [hr_admin], ${COMPANY_B_EMPLOYEE.email}).`,
+      `M1M2 synthetic personas: 5 login-capable personas present on ${verified.projectName}; ` +
+        `Owner and Company Admin deliberately have no employee row.`,
     );
   });
 } catch (error) {

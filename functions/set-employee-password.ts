@@ -81,6 +81,12 @@ export default async function (request) {
     }
   }
 
+  if (!actorId) return json({ error: "Unauthorized" }, 401);
+  const callerClient = createClient({ baseUrl: BASE_URL, edgeFunctionToken: userToken });
+  const { data: callerIsHr, error: callerIsHrError } = await callerClient.database.rpc("is_hr");
+  if (callerIsHrError) return json({ error: "HR authority check failed." }, 503);
+  if (callerIsHr !== true) return json({ error: "Forbidden. Only HR may set employee passwords." }, 403);
+
   let body;
   try {
     body = await request.json();

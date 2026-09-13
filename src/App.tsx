@@ -35,6 +35,7 @@ import ShiftManagement from "./hr/ShiftManagement";
 import AttendanceDevices from "./hr/AttendanceDevices";
 import OfficeLocations from "./hr/OfficeLocations";
 import OrgStructureManagement from "./hr/OrgStructureManagement";
+import UsersAccess from "./hr/UsersAccess";
 import TaskManagement from "./hr/TaskManagement";
 import ProjectList from "./hr/pms/ProjectList";
 import ProjectDetail from "./hr/pms/ProjectDetail";
@@ -192,6 +193,7 @@ function TenantRoutes() {
           <Route path="policy-center" element={<PolicyCenter />} />
           <Route path="office-locations" element={<OfficeLocations />} />
           <Route path="org-structure" element={<OrgStructureManagement />} />
+          <Route path="users-access" element={<UsersAccess />} />
           <Route path="directory" element={<Directory />} />
           <Route path="org-chart" element={<OrgChart />} />
           <Route path="connect" element={<Connect />} />

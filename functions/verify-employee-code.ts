@@ -62,10 +62,11 @@ export default async function (req) {
   let actorId = null;
   let actorRole = "unknown";
   let tenantId = null;
+  let callerClient = null;
 
   if (callerToken) {
-    const client = createClient({ baseUrl: BASE_URL, edgeFunctionToken: callerToken });
-    const { data: userData } = await client.auth.getCurrentUser();
+    callerClient = createClient({ baseUrl: BASE_URL, edgeFunctionToken: callerToken });
+    const { data: userData } = await callerClient.auth.getCurrentUser();
     const user = userData?.user;
     if (user) {
       actorId = user.id;
@@ -76,6 +77,27 @@ export default async function (req) {
 
   if (!email || !otp) {
     return json({ error: "email and otp are required" }, 400);
+  }
+
+  if (!actorId || !tenantId || !callerClient) return json({ error: "Unauthorized" }, 401);
+  const { data: callerIsHr, error: callerIsHrError } = await callerClient.database.rpc("is_hr");
+  if (callerIsHrError) return json({ error: "HR authority check failed." }, 503);
+  if (callerIsHr !== true) return json({ error: "Forbidden. Only HR may verify employee codes." }, 403);
+
+  let targetAuthUserId = null;
+  try {
+    const targetRes = await fetch(`${BASE_URL}/api/database/rpc/get_auth_user_details_by_email_v2`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${ADMIN_KEY}` },
+      body: JSON.stringify({ user_email: email }),
+    });
+    const targetRows = await targetRes.json().catch(() => []);
+    const target = Array.isArray(targetRows) ? targetRows[0] : null;
+    if (!target?.id) return json({ error: "Employee account not found." }, 404);
+    if (target.tenant_id !== tenantId) return json({ error: "Forbidden. Cross-tenant target." }, 403);
+    targetAuthUserId = target.id;
+  } catch {
+    return json({ error: "Employee account lookup failed." }, 503);
   }
 
   if (tenantId && actorId) {
@@ -136,20 +158,6 @@ export default async function (req) {
     if (tenantId) {
       const client = createClient({ baseUrl: BASE_URL, anonKey: ADMIN_KEY });
       
-      // We must first get the auth user ID from the email so we can update the onboarding state
-      let targetAuthUserId = null;
-      try {
-        const authUsersRes = await fetch(`${BASE_URL}/api/database/rpc/get_auth_user_details_by_email`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${ADMIN_KEY}` },
-          body: JSON.stringify({ user_email: email })
-        });
-        const authData = await authUsersRes.json();
-        if (Array.isArray(authData) && authData.length > 0) targetAuthUserId = authData[0].id;
-      } catch (e) {
-        console.error("Failed to get auth user ID for onboarding status update");
-      }
-
       if (targetAuthUserId) {
         try {
           await client.database.from("employee_onboarding")

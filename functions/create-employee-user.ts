@@ -230,7 +230,14 @@ export default async function (req) {
     const callerRole = user.metadata?.role || user.user_metadata?.role || user.app_metadata?.role;
     const callerTenant = user.metadata?.tenant_id || user.user_metadata?.tenant_id || user.app_metadata?.tenant_id;
 
-    if (callerRole !== "hr") {
+    // Re-evaluate current server authority on every call. This recognizes an employee-bound
+    // hr_admin template through is_hr(), preserves the legacy metadata seam, and fails closed for
+    // revoked memberships because get_auth_tenant_id() becomes NULL immediately.
+    const { data: callerIsHr, error: callerIsHrError } = await client.database.rpc("is_hr");
+    if (callerIsHrError) {
+      return json({ message: "HR authority check failed.", error: "AUTHORITY_UNAVAILABLE" }, 503);
+    }
+    if (callerIsHr !== true) {
       return json({ message: "Forbidden. Only HR can create employee users.", error: "Forbidden" }, 403);
     }
     if (callerTenant !== tenantId) {

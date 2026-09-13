@@ -15,6 +15,12 @@ export function useAuditLog() {
     details?: any
   ) => {
     try {
+      // Protected access audit is written exactly once inside the server transaction. A browser
+      // must never be able to supply its actor, action, subject, or attribution fields.
+      if (action.startsWith("access.")) {
+        console.error("Protected access audit events must be written by the server.");
+        return;
+      }
       // For failed login, we might not have a user or tenant context
       let currentActorId = user?.id;
       let currentRole = role;
@@ -31,16 +37,6 @@ export function useAuditLog() {
       // If we still don't have an actor_id and this is not a failed login, we might skip
       // But for login.failed, actor_id is allowed to be null.
       
-      // Get IP
-      let ip_address: string | null = null;
-      try {
-        const res = await fetch("https://api.ipify.org?format=json");
-        const data = await res.json();
-        ip_address = data.ip;
-      } catch (e) {
-        // ignore IP error
-      }
-
       // If no tenantId is available (e.g. failed login without tenant context), we'll try to find it if we have an email in details
       if (!currentTenantId && details?.email) {
         const { data: empData } = await db
@@ -77,7 +73,8 @@ export function useAuditLog() {
         target_type: targetType || null,
         target_id: targetId || null,
         details: enrichedDetails,
-        ip_address
+        // Client-observed IP addresses are neither authoritative nor required for this trail.
+        ip_address: null
       }]);
     } catch (err) {
       // Silently catch errors so audit logging never breaks the main flow
