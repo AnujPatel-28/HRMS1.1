@@ -14,7 +14,7 @@
  * Usage:  node scripts/check-policy-drift.mjs
  * CI:     needs the InsForge admin key available to the CLI (.insforge/project.json or env).
  */
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,23 +22,37 @@ import { fileURLToPath } from "node:url";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const migrationsDir = join(repoRoot, "migrations");
 
+const POLICY_SCHEMAS = ["public", "storage", "realtime"];
 const SQL =
-  "SELECT tablename, policyname FROM pg_policies WHERE schemaname='public' ORDER BY tablename, policyname";
+  "SELECT schemaname, tablename, policyname FROM pg_policies " +
+  "WHERE schemaname IN ('public','storage','realtime') " +
+  "ORDER BY schemaname, tablename, policyname";
+
+const parseCliJson = (raw) => {
+  const objectStart = raw.indexOf("{");
+  if (objectStart < 0) throw new Error("InsForge CLI returned no JSON object");
+  return JSON.parse(raw.slice(objectStart));
+};
 
 let rows;
 try {
-  // Shell form (not execFileSync) so this works on Windows, where npx is a .cmd shim.
-  // SQL is a fixed literal below — no interpolation, nothing user-supplied.
-  const raw = execSync(`npx --yes @insforge/cli db query "${SQL}" --json`, {
+  // Run the locally pinned CLI's entrypoint with node, argv-array, no shell.
+  // Not `npx`: it resolved a stale 0.1.73 from cache here, and Node 20+ refuses to spawn the
+  // `.cmd` shim without `shell: true` — which would mean hand-quoting this SQL for cmd.exe.
+  const cliEntry = join(repoRoot, "node_modules", "@insforge", "cli", "dist", "index.js");
+  const raw = execFileSync(process.execPath, [cliEntry, "db", "query", SQL, "--json"], {
     cwd: repoRoot,
     encoding: "utf8",
     maxBuffer: 32 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  rows = JSON.parse(raw.slice(raw.indexOf("{"))).rows;
-} catch (err) {
-  console.error("Could not read pg_policies. Is the InsForge CLI linked and authenticated?");
-  console.error(err.message);
+  rows = parseCliJson(raw).rows;
+} catch (error) {
+  const diagnostic = [error?.code, error?.status].filter((value) => value !== undefined).join("/");
+  console.error(
+    "Could not read pg_policies for public, storage and realtime. " +
+      `Is the InsForge CLI linked and authenticated? Raw CLI output was suppressed${diagnostic ? ` (${diagnostic})` : ""}.`,
+  );
   process.exit(2);
 }
 
@@ -56,24 +70,38 @@ const migrationText = readdirSync(migrationsDir)
 // `notifications` carried live RESTRICTIVE `tenant_isolation` and `tenant_active_restrictive` that are
 // defined for no table in any migration, and the guard reported OK — the exact drift it exists to catch.
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const isTracked = (p) =>
-  new RegExp(
-    `CREATE\\s+POLICY\\s+"?${escapeRe(p.policyname)}"?\\s+ON\\s+(?:public\\.)?"?${escapeRe(p.tablename)}"?\\b`,
+const sqlIdentifier = (value) =>
+  `(?:"${escapeRe(value).replaceAll('"', '""')}"|${escapeRe(value)})`;
+const isTracked = (p) => {
+  const schema = sqlIdentifier(p.schemaname);
+  const table = sqlIdentifier(p.tablename);
+  const policy = sqlIdentifier(p.policyname);
+  const qualifiedTable =
+    p.schemaname === "public" ? `(?:${schema}\\s*\\.\\s*)?${table}` : `${schema}\\s*\\.\\s*${table}`;
+  return new RegExp(
+    `CREATE\\s+POLICY\\s+${policy}\\s+ON\\s+${qualifiedTable}(?:\\s|$)`,
     "i",
   ).test(migrationText);
+};
 
 const untracked = rows.filter((p) => !isTracked(p));
 
 if (untracked.length === 0) {
-  console.log(`OK — all ${rows.length} live RLS policies are defined in migrations/.`);
+  const counts = Object.fromEntries(POLICY_SCHEMAS.map((schema) => [schema, 0]));
+  for (const row of rows) counts[row.schemaname] += 1;
+  console.log(
+    `OK — all ${rows.length} live RLS policies are defined in migrations/ ` +
+      `(public=${counts.public}, storage=${counts.storage}, realtime=${counts.realtime}).`,
+  );
   process.exit(0);
 }
 
 console.error(
-  `\nPOLICY DRIFT: ${untracked.length} of ${rows.length} live policies are in no migration.\n`,
+  `\nPOLICY DRIFT: ${untracked.length} of ${rows.length} live public/storage/realtime policies ` +
+    `are in no migration.\n`,
 );
 const byTable = {};
-for (const p of untracked) (byTable[p.tablename] ??= []).push(p.policyname);
+for (const p of untracked) (byTable[`${p.schemaname}.${p.tablename}`] ??= []).push(p.policyname);
 for (const t of Object.keys(byTable).sort()) {
   console.error(`  ${t}`);
   for (const n of byTable[t]) console.error(`      ${n}`);

@@ -9,7 +9,12 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:hrms-workflows": "node scratch/test-exceptions.js && node scratch/test-leave-approval.js",
-    "check:policy-drift": "node scripts/check-policy-drift.mjs"
+    "check:policy-drift": "node scripts/check-policy-drift.mjs",
+    "test:m1m2:harness": "node tests/m1m2/_harness.mjs --self-test",
+    "test:m1m2:target": "node tests/m1m2/_harness.mjs --check-target",
+    "test:m1m2:seed": "node tests/m1m2/fixtures/seed.mjs",
+    "test:m1m2:personas": "node tests/m1m2/fixtures/personas.mjs",
+    "test:m1m2:reset": "node tests/m1m2/fixtures/reset.mjs"
   },
   "dependencies": {
     "@insforge/sdk": "^1.2.5",
@@ -31,6 +36,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@insforge/cli": "0.2.8",
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
