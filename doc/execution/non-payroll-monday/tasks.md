@@ -1,7 +1,7 @@
 # TalentMesh non-payroll Monday execution tasks
 
 Plan version: **v0.5**  
-Status: **P1-00 CLOSED (reduced scope). P1-01 AUTHORIZED TO IMPLEMENT.**  
+Status: **P1-00 closed (reduced scope). P1-01 and P1-02 COMPLETE and accepted. Next: P2-01.**  
 Baseline revision: `7214f8e3abeaef797d45122c7bc1129f0663cc43`  
 Contract dependency: `contracts.md` v0.5
 
@@ -121,7 +121,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 
 - **Owner:** P1 Access/Organization lane; owner of shared contexts/guards.
 - **Model:** GPT-5.6 Sol high.
-- **Status:** **AUTHORIZED TO IMPLEMENT** once P1-00 criteria 2 and 7 close. No P6 pre-authorization remains outstanding.
+- **Status:** **COMPLETE — accepted 2026-09-13** at `bed95aa`. AC1, AC3, AC4, AC6, AC7, AC8 PASS (independently re-verified: grants match contract §4, no project/channel scopes emitted, self-approval and cross-tenant subject both fenced, RLS 1/2/0 unchanged). **AC2 and AC5 UNTESTED** — fail-closed is implemented and the code path was read, but no runtime network-failure injection or browser test was run; they stay UNTESTED rather than inferred.
 - **Exact allowed files:**
   - `src/types/access.ts` (new)
   - `src/contexts/AuthContext.tsx`
@@ -154,7 +154,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 
 - **Owner:** P1 Access/Organization lane; lead applies backend changes.
 - **Model:** GPT-5.6 Sol high.
-- **Status:** BLOCKED on P1-00, P1-01 shared seam, credential hygiene and `TB-M1M2`.
+- **Status:** **COMPLETE — accepted 2026-09-14** at `5f40414`. AC1–AC6, AC8–AC14 PASS; AC4 upgraded from the implementer's UNTESTED to PASS on a catalogue-exactness proof; **AC7 incomplete and labelled** (private storage and realtime revocation unproven, surfaced as `incomplete` by `list_tenant_access()` and in the UI — owned by P3-03). See `reviews/package-review-P1-02.md`.
 - **Exact allowed files:**
   - `migrations/20260912181000_m1m2-membership-grants-invites-ownership.sql` (new, lead-created)
   - `migrations/20260912181500_m1m2-fix-access-audit-writer.sql` (new, v0.5 — authorized 2026-09-13; forward fix, because `181000` is applied and therefore immutable)
