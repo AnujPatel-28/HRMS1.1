@@ -356,7 +356,7 @@ export default function EmployeeLayout() {
   const deptLabel = useDepartmentLabel();
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout, tenantId, user } = useAuth();
+  const { logout, tenantId, user, canAccessTeam, canAccessAdministration } = useAuth();
   const { employee } = useEmployee();
   const { hasModule } = useTenant();
   const { isManager, isManagerMode, toggleManagerMode, directReportIds } = useManagerView();
@@ -427,14 +427,25 @@ export default function EmployeeLayout() {
         });
       }
     }
-    if (isManager) {
+    if (canAccessTeam) {
       const profileSection = result.find((s) => s.title === "Profile");
       if (profileSection) {
-        profileSection.items.push({ label: "My Team", href: "/employee/my-team", icon: Users });
+        profileSection.items.push({
+          label: "Team",
+          href: canAccessAdministration ? "/hr/directory" : "/employee/my-team",
+          icon: Users,
+        });
       }
     }
+    if (canAccessAdministration) {
+      result.push({
+        title: "Administration",
+        icon: Shield,
+        items: [{ label: "Administration", href: "/hr/dashboard", icon: Shield }],
+      });
+    }
     return result;
-  }, [isManager, hasProjects, hasModule]);
+  }, [canAccessAdministration, canAccessTeam, hasProjects, hasModule]);
 
 
   const activeSection = sections.find((section) =>

@@ -25,6 +25,9 @@ type TenantContextValue = {
   tenantId: string;
   isLoading: boolean;
   refreshTenant: () => Promise<void>;
+  moduleStatus: "available" | "unavailable";
+  unavailableReason: string | null;
+  retryAccess: () => Promise<void>;
   /** True when the module is enabled for this tenant. Core modules are always true. */
   hasModule: (key: ModuleKey) => boolean;
 };
@@ -119,17 +122,27 @@ export const isTenantSubdomain = (hostname: string = window.location.hostname): 
 export function TenantProvider({ children }: { children: ReactNode }) {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [enabledModules, setEnabledModules] = useState<Set<ModuleKey> | null>(null);
+  const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [wrongTenant, setWrongTenant] = useState(false);
-  const { role, tenantId: authTenantId } = useAuth();
+  const {
+    role,
+    tenantId: authTenantId,
+    capability,
+    capabilityLoading,
+    capabilityUnavailableReason,
+    refreshCapabilities,
+  } = useAuth();
 
   const refreshTenant = useCallback(async () => {
     setIsLoading(true);
     setNotFound(false);
     setBlocked(false);
     setWrongTenant(false);
+    setUnavailableReason(null);
+    setEnabledModules(null);
 
     const hostname = window.location.hostname;
     const subdomain = getSubdomain(hostname);
@@ -176,24 +189,25 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     setTenant(nextTenant);
     setCurrentTenantId(nextTenant.id);
 
-    // Entitlements, fetched once per session alongside the tenant. RLS already scopes this to the
-    // caller's own tenant (tenant_modules_self_read), so no tenant filter is needed here.
-    const { data: moduleRows, error: moduleError } = await db
-      .from("tenant_modules")
-      .select("module_key")
-      .eq("enabled", true);
-
-    if (moduleError) {
-      // Fail OPEN, deliberately: the database is the real boundary, so a failed lookup must not
-      // black out the whole app. A disabled module's screens will simply come back empty.
-      console.warn("Could not load module entitlements; showing all modules.", moduleError);
-      setEnabledModules(null);
-    } else {
-      setEnabledModules(new Set((moduleRows ?? []).map((r) => (r as { module_key: ModuleKey }).module_key)));
+    // Module entitlements now come from the server-derived capability summary. The previous
+    // fail-open fallback showed every product when this lookup failed. That did not bypass RLS,
+    // but it did advertise unpurchased modules and route people into broken screens. Unknown is
+    // therefore an explicit unavailable/retry state; only a successfully loaded summary may allow.
+    if (capabilityLoading || !capability || capabilityUnavailableReason) {
+      setUnavailableReason(capabilityUnavailableReason ?? "capability_unavailable");
+      setIsLoading(false);
+      return;
+    }
+    if (capability.tenantId !== nextTenant.id) {
+      setUnavailableReason("capability_tenant_mismatch");
+      setIsLoading(false);
+      return;
     }
 
+    setEnabledModules(new Set(capability.enabledModules as ModuleKey[]));
+
     setIsLoading(false);
-  }, [authTenantId, role]);
+  }, [authTenantId, capability, capabilityLoading, capabilityUnavailableReason, role]);
 
   useEffect(() => {
     void refreshTenant();
@@ -201,13 +215,16 @@ export function TenantProvider({ children }: { children: ReactNode }) {
 
   const hasModule = useCallback(
     (key: ModuleKey) => {
+      if (unavailableReason || enabledModules === null) return false;
       if (CORE_MODULES.includes(key)) return true;
-      // null = entitlements unavailable; show everything rather than hiding the product.
-      if (enabledModules === null) return true;
       return enabledModules.has(key);
     },
-    [enabledModules],
+    [enabledModules, unavailableReason],
   );
+
+  const retryAccess = useCallback(async () => {
+    await refreshCapabilities();
+  }, [refreshCapabilities]);
 
   const value = useMemo(
     () => ({
@@ -215,9 +232,12 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       tenantId: tenant?.id ?? "",
       isLoading,
       refreshTenant,
+      moduleStatus: unavailableReason ? "unavailable" as const : "available" as const,
+      unavailableReason,
+      retryAccess,
       hasModule,
     }),
-    [tenant, isLoading, refreshTenant, hasModule],
+    [tenant, isLoading, refreshTenant, unavailableReason, retryAccess, hasModule],
   );
 
   if (isLoading) {
@@ -252,6 +272,24 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Wrong company portal.</h1>
           <p className="mt-2 text-slate-600">Please open the login URL for your company.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (unavailableReason) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-slate-50 px-4 text-center">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Access temporarily unavailable.</h1>
+          <p className="mt-2 text-slate-600">We could not verify this company&apos;s access. Please retry.</p>
+          <button
+            type="button"
+            onClick={() => void retryAccess()}
+            className="mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );

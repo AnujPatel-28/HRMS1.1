@@ -15,7 +15,7 @@ import { useDepartmentLabel, useJobTitleLabel } from "../contexts/OrgUnitsContex
 export default function Directory() {
   const navigate = useNavigate();
   const { tenantId } = useTenant();
-  const { role, user } = useAuth();
+  const { capability, hasGrant, user } = useAuth();
   const { error: toastError } = useToast();
   const { orgUnits, locations, employmentTypes } = useOrgStructure();
   const deptLabel = useDepartmentLabel();
@@ -29,7 +29,10 @@ export default function Directory() {
     return emp.work_location || "—";
   };
 
-  const isHr = role === "hr";
+  const isHr = hasGrant("employee.sensitive.read", "company");
+  const canReadCompany = hasGrant("employee.basic.read", "company");
+  const canReadDirectReports = hasGrant("employee.basic.read", "direct_reports");
+  const canReadSelf = hasGrant("employee.basic.read", "self");
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,9 +71,20 @@ export default function Directory() {
         // REPORTS, not their manager. `.full_name` on an array is undefined, so `|| null` fired for
         // every row and the manager rendered as "—" everywhere. The `!employees_manager_id_fkey`
         // constraint hint does NOT work here ("Could not find a relationship"). Resolve explicitly.
-        const query = isHr
+        if (!canReadCompany && !canReadDirectReports && !canReadSelf) {
+          setEmployees([]);
+          return;
+        }
+
+        let query = canReadCompany
           ? db.from("employees").select("*")
           : db.from("employee_directory_public").select("*");
+
+        if (!canReadCompany && canReadDirectReports && capability?.employeeId) {
+          query = query.eq("manager_id", capability.employeeId);
+        } else if (!canReadCompany && capability?.employeeId) {
+          query = query.eq("id", capability.employeeId);
+        }
 
         const { data, error } = await query
           .eq("tenant_id", tenantId)
@@ -100,7 +114,7 @@ export default function Directory() {
     return () => {
       active = false;
     };
-  }, [isHr, tenantId, toastError]);
+  }, [canReadCompany, canReadDirectReports, canReadSelf, capability?.employeeId, tenantId, toastError]);
 
   const departmentOptions = useMemo(() => {
     // Every active unit, at any depth — 06 §0 allows assignment to a Division or Team, so

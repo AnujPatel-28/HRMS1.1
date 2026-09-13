@@ -461,21 +461,33 @@ export default function HRLayout() {
   const deptLabel = useDepartmentLabel();
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout, tenantId, user } = useAuth();
+  const { logout, tenantId, user, canAccessMyWork, canAccessTeam } = useAuth();
   const { employee } = useEmployee();
   const { hasModule } = useTenant();
 
   // Hide nav entries whose module this tenant does not have. Sections that end up empty are
   // dropped entirely, so a disabled module leaves no empty heading behind.
   const sections = useMemo(
-    () =>
-      allSections
+    () => {
+      const visibleSections = allSections
         .map((section) => ({
           ...section,
           items: section.items.filter((item) => !item.module || hasModule(item.module)),
         }))
-        .filter((section) => section.items.length > 0),
-    [hasModule],
+        .filter((section) => section.items.length > 0);
+
+      const composedItems: NavLinkItem[] = [];
+      if (canAccessMyWork) {
+        composedItems.push({ label: "My Work", href: "/employee/dashboard", icon: Home });
+      }
+      if (canAccessTeam) {
+        composedItems.push({ label: "Team", href: "/hr/directory", icon: Users });
+      }
+      return composedItems.length > 0
+        ? [{ title: "Surfaces", icon: Home, items: composedItems }, ...visibleSections]
+        : visibleSections;
+    },
+    [canAccessMyWork, canAccessTeam, hasModule],
   );
 
   const [mobileOpen, setMobileOpen] = useState(false);

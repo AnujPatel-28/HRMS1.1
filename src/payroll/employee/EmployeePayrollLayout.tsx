@@ -4,6 +4,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { useEmployee } from "../../hooks/useEmployee";
 import { useTenant } from "../../contexts/TenantContext";
 import { useJobTitleLabel } from "../../contexts/OrgUnitsContext";
+import { RequireModule } from "../../shared/RequireModule";
 
 export default function EmployeePayrollLayout() {
   const navigate = useNavigate();
@@ -89,7 +90,9 @@ export default function EmployeePayrollLayout() {
 
       {/* Page content */}
       <main className="mx-auto max-w-6xl px-4 py-8">
-        <Outlet />
+        <RequireModule to="/employee/dashboard">
+          <Outlet />
+        </RequireModule>
       </main>
     </div>
   );

@@ -3,6 +3,7 @@
 import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { auth, db } from "../insforge/client";
 import type { EmployeeRole, Employee } from "../types";
+import type { CapabilitySummary, ScopeType } from "../types/access";
 
 type AuthUser = {
   id: string;
@@ -26,12 +27,20 @@ type AuthContextValue = {
   role: EmployeeRole | null;
   tenantId: string | null;
   loading: boolean;
+  capability: CapabilitySummary | null;
+  capabilityLoading: boolean;
+  capabilityUnavailableReason: string | null;
+  hasGrant: (action: string, scopeType?: ScopeType | ScopeType[]) => boolean;
+  canAccessMyWork: boolean;
+  canAccessTeam: boolean;
+  canAccessAdministration: boolean;
   isManager: boolean;
   currentEmployee: Employee | null;
   login: (email: string, password: string) => Promise<LoginResult>;
   verifyEmail: (email: string, otp: string) => Promise<{ error: string | null }>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  refreshCapabilities: () => Promise<void>;
 };
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -61,6 +70,56 @@ const resolvePlatformRole = async (): Promise<EmployeeRole | null> => {
   return data ? "superadmin" : null;
 };
 
+const scopeTypes = new Set<ScopeType>(["self", "direct_reports", "company", "project", "channel"]);
+
+const isCapabilitySummary = (value: unknown): value is CapabilitySummary => {
+  if (!value || typeof value !== "object") return false;
+  const summary = value as Record<string, unknown>;
+  if (
+    typeof summary.tenantId !== "string" ||
+    typeof summary.membershipId !== "string" ||
+    !["active", "suspended", "revoked"].includes(String(summary.membershipStatus)) ||
+    !(summary.employeeId === null || typeof summary.employeeId === "string") ||
+    !Number.isInteger(summary.accessVersion) ||
+    !Array.isArray(summary.responsibilities) ||
+    !summary.responsibilities.every((item) => typeof item === "string") ||
+    !Array.isArray(summary.grants) ||
+    !Array.isArray(summary.enabledModules) ||
+    !summary.enabledModules.every((item) => typeof item === "string") ||
+    !(summary.unavailableReason === null || typeof summary.unavailableReason === "string") ||
+    typeof summary.issuedAt !== "string" ||
+    summary.contractVersion !== "v0.5"
+  ) {
+    return false;
+  }
+
+  return summary.grants.every((grant) => {
+    if (!grant || typeof grant !== "object") return false;
+    const candidate = grant as Record<string, unknown>;
+    const isScopedResource = candidate.scopeType === "project" || candidate.scopeType === "channel";
+    return (
+      typeof candidate.action === "string" &&
+      typeof candidate.scopeType === "string" &&
+      scopeTypes.has(candidate.scopeType as ScopeType) &&
+      (isScopedResource ? typeof candidate.scopeId === "string" : candidate.scopeId === undefined)
+    );
+  });
+};
+
+const resolveCapabilitySummary = async (expectedTenantId: string | null) => {
+  const { data, error } = await db.rpc("get_my_capability_summary");
+  if (error || !isCapabilitySummary(data)) {
+    return { summary: null, reason: "capability_unavailable" } as const;
+  }
+  if (expectedTenantId && data.tenantId !== expectedTenantId) {
+    return { summary: null, reason: "capability_tenant_mismatch" } as const;
+  }
+  if (data.grants.some((grant) => grant.scopeType === "project" || grant.scopeType === "channel")) {
+    return { summary: null, reason: "unsupported_capability_scope" } as const;
+  }
+  return { summary: data, reason: data.unavailableReason } as const;
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [role, setRole] = useState<EmployeeRole | null>(null);
@@ -68,6 +127,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isManager, setIsManager] = useState(false);
   const [currentEmployee, setCurrentEmployee] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(true);
+  const [capability, setCapability] = useState<CapabilitySummary | null>(null);
+  const [capabilityLoading, setCapabilityLoading] = useState(true);
+  const [capabilityUnavailableReason, setCapabilityUnavailableReason] = useState<string | null>(null);
+
+  const clearCapability = useCallback(() => {
+    setCapability(null);
+    setCapabilityUnavailableReason(null);
+    setCapabilityLoading(false);
+  }, []);
+
+  const refreshCapabilities = useCallback(async () => {
+    if (!user || role === "superadmin") {
+      clearCapability();
+      return;
+    }
+    setCapabilityLoading(true);
+    const resolved = await resolveCapabilitySummary(tenantId);
+    setCapability(resolved.summary);
+    setCapabilityUnavailableReason(resolved.reason);
+    setCapabilityLoading(false);
+  }, [clearCapability, role, tenantId, user]);
 
   const refreshUser = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -78,6 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setTenantId(null);
       setIsManager(false);
       setCurrentEmployee(null);
+      clearCapability();
       if (showLoading) setLoading(false);
       return;
     }
@@ -106,6 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setTenantId(null);
       setIsManager(false);
       setCurrentEmployee(null);
+      clearCapability();
       if (showLoading) setLoading(false);
       return;
     }
@@ -113,6 +195,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(nextUser);
     setRole(resolvedRole);
     setTenantId(resolvedRole === "superadmin" ? null : resolvedTenantId);
+
+    if (resolvedRole === "superadmin") {
+      clearCapability();
+    } else {
+      setCapabilityLoading(true);
+      const resolvedCapability = await resolveCapabilitySummary(resolvedTenantId);
+      setCapability(resolvedCapability.summary);
+      setCapabilityUnavailableReason(resolvedCapability.reason);
+      setCapabilityLoading(false);
+    }
 
     // Dynamic Manager check
     let emp: Employee | null = null;
@@ -157,7 +249,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsManager(managerCheck);
 
     if (showLoading) setLoading(false);
-  }, []);
+  }, [clearCapability]);
 
   const login = useCallback(async (email: string, password: string): Promise<LoginResult> => {
     const { data, error } = await auth.signInWithPassword({ email, password });
@@ -204,6 +296,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setTenantId(null);
       setIsManager(false);
       setCurrentEmployee(null);
+      clearCapability();
       return { error: "This company account is suspended. Please contact TalentMesh support." };
     }
 
@@ -227,6 +320,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setTenantId(null);
         setIsManager(false);
         setCurrentEmployee(null);
+        clearCapability();
         return {
           error:
             "Your account is pending HR activation. Please contact your HR team.",
@@ -240,6 +334,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setTenantId(null);
         setIsManager(false);
         setCurrentEmployee(null);
+        clearCapability();
         return {
           error:
             "Your account setup is incomplete. Please check your email for an onboarding link, or contact your HR team.",
@@ -248,7 +343,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     return { error: null };
-  }, [refreshUser]);
+  }, [clearCapability, refreshUser]);
 
   const verifyEmail = useCallback(async (email: string, otp: string) => {
     const { data, error } = await auth.verifyEmail({ email, otp });
@@ -267,15 +362,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setTenantId(null);
     setIsManager(false);
     setCurrentEmployee(null);
-  }, []);
+    clearCapability();
+  }, [clearCapability]);
 
   useEffect(() => {
     void refreshUser();
   }, [refreshUser]);
 
+  const hasGrant = useCallback(
+    (action: string, scopeType?: ScopeType | ScopeType[]) => {
+      if (!capability || capability.membershipStatus !== "active" || capabilityUnavailableReason) return false;
+      const acceptedScopes = scopeType === undefined
+        ? null
+        : new Set(Array.isArray(scopeType) ? scopeType : [scopeType]);
+      return capability.grants.some(
+        (grant) => grant.action === action && (!acceptedScopes || acceptedScopes.has(grant.scopeType)),
+      );
+    },
+    [capability, capabilityUnavailableReason],
+  );
+
+  const canAccessMyWork = Boolean(capability?.employeeId) && hasGrant("employee.basic.read", "self");
+  const canAccessTeam = hasGrant("employee.basic.read", ["direct_reports", "company"]);
+  const canAccessAdministration =
+    hasGrant("employee.write", "company") ||
+    hasGrant("org.manage", "company") ||
+    hasGrant("access.manage", "company");
+
   const value = useMemo(
-    () => ({ user, role, tenantId, loading, isManager, currentEmployee, login, verifyEmail, logout, refreshUser }),
-    [user, role, tenantId, loading, isManager, currentEmployee, login, verifyEmail, logout, refreshUser],
+    () => ({
+      user,
+      role,
+      tenantId,
+      loading,
+      capability,
+      capabilityLoading,
+      capabilityUnavailableReason,
+      hasGrant,
+      canAccessMyWork,
+      canAccessTeam,
+      canAccessAdministration,
+      isManager,
+      currentEmployee,
+      login,
+      verifyEmail,
+      logout,
+      refreshUser,
+      refreshCapabilities,
+    }),
+    [
+      user, role, tenantId, loading, capability, capabilityLoading, capabilityUnavailableReason,
+      hasGrant, canAccessMyWork, canAccessTeam, canAccessAdministration, isManager, currentEmployee,
+      login, verifyEmail, logout, refreshUser, refreshCapabilities,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

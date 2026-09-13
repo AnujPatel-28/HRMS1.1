@@ -62,19 +62,35 @@ import AdminDashboard from "./admin/AdminDashboard";
 import AllCompanies from "./admin/AllCompanies";
 import AddCompany from "./admin/AddCompany";
 import Kiosk from "./kiosk/Kiosk";
-import type { EmployeeRole } from "./types";
 
 function LoadingScreen() {
   return <div className="grid min-h-screen place-items-center text-slate-500">Loading...</div>;
 }
 
-function RequireRole({ role, children }: { role: EmployeeRole; children: ReactElement }) {
-  const { user, loading, role: currentRole } = useAuth();
+type TenantSurface = "my_work" | "team" | "administration";
 
-  if (loading) return <LoadingScreen />;
+function RequireTenantSurface({ surface, children }: { surface: TenantSurface; children: ReactElement }) {
+  const {
+    user,
+    loading,
+    capability,
+    capabilityLoading,
+    canAccessMyWork,
+    canAccessTeam,
+    canAccessAdministration,
+  } = useAuth();
 
-  if (!user || currentRole !== role) {
-    return <Navigate to="/" replace />;
+  if (loading || capabilityLoading) return <LoadingScreen />;
+  if (!user || !capability) return <Navigate to="/" replace />;
+
+  const allowed = surface === "my_work"
+    ? canAccessMyWork
+    : surface === "team"
+      ? canAccessTeam
+      : canAccessAdministration;
+
+  if (!allowed) {
+    return <Navigate to={canAccessMyWork ? "/employee/dashboard" : "/"} replace />;
   }
 
   return children;
@@ -151,9 +167,9 @@ function TenantRoutes() {
         <Route
           path="/hr"
           element={
-            <RequireRole role="hr">
+            <RequireTenantSurface surface="administration">
               <HRLayout />
-            </RequireRole>
+            </RequireTenantSurface>
           }
         >
           <Route index element={<Navigate to="dashboard" replace />} />
@@ -190,9 +206,9 @@ function TenantRoutes() {
         <Route
           path="/payroll"
           element={
-            <RequireRole role="hr">
+            <RequireTenantSurface surface="administration">
               <PayrollLayout />
-            </RequireRole>
+            </RequireTenantSurface>
           }
         >
           <Route index element={<Navigate to="hr/salaries" replace />} />
@@ -204,9 +220,9 @@ function TenantRoutes() {
         <Route
           path="/payroll/employee"
           element={
-            <RequireRole role="employee">
+            <RequireTenantSurface surface="my_work">
               <EmployeePayrollLayout />
-            </RequireRole>
+            </RequireTenantSurface>
           }
         >
           <Route index element={<Navigate to="payslips" replace />} />
@@ -216,11 +232,11 @@ function TenantRoutes() {
         <Route
           path="/employee"
           element={
-            <RequireRole role="employee">
+            <RequireTenantSurface surface="my_work">
               <ManagerViewProvider>
                 <EmployeeLayout />
               </ManagerViewProvider>
-            </RequireRole>
+            </RequireTenantSurface>
           }
         >
           <Route index element={<Navigate to="dashboard" replace />} />
@@ -235,7 +251,14 @@ function TenantRoutes() {
           <Route path="directory" element={<Directory />} />
           <Route path="org-chart" element={<OrgChart />} />
           <Route path="id-card" element={<IDCardPage />} />
-          <Route path="my-team" element={<MyTeam />} />
+          <Route
+            path="my-team"
+            element={
+              <RequireTenantSurface surface="team">
+                <MyTeam />
+              </RequireTenantSurface>
+            }
+          />
           <Route path="onboarding" element={<OnboardingWizard />} />
           <Route path="exit" element={<MyExit />} />
           <Route path="pms/:projectId" element={<EmployeeProjectView />} />

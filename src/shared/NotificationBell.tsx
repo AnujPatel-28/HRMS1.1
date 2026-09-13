@@ -3,7 +3,6 @@ import { Bell, ClipboardList, CalendarCheck, FileText, CheckCircle, XCircle, Inf
 import { useNavigate } from "react-router-dom";
 import type { Notification } from "../types";
 import { db, realtime } from "../insforge/client";
-import { useAuth } from "../hooks/useAuth";
 import { useEmployee } from "../hooks/useEmployee";
 import { useTenant } from "../contexts/TenantContext";
 
@@ -55,7 +54,6 @@ function normalizeNotificationPayload(payload: unknown): Notification | null {
 }
 
 export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: NotificationBellProps) {
-  const { role } = useAuth();
   const { employee } = useEmployee();
   const { tenantId } = useTenant();
   const navigate = useNavigate();
@@ -147,12 +145,13 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
       setUnreadCount(prev => Math.max(0, prev - 1));
     }
 
-    const prefix = role === "hr" ? "/hr" : "/employee";
-
-    if (notif.type?.includes("task")) navigate(`${prefix}/tasks`);
-    else if (notif.type?.includes("leave")) navigate(`${prefix}/leaves`);
-    else if (notif.type === "new_policy") navigate(`${prefix}/policies`);
-    else if (notif.type === "punch_unlock") navigate(`${prefix}/dashboard`);
+    // These notifications belong to the recipient's personal work, even when the same human also
+    // holds HR grants. A single role string sent composed users to the administration copy of the
+    // task/leave screen and lost the personal record the notification referred to.
+    if (notif.type?.includes("task")) navigate("/employee/tasks");
+    else if (notif.type?.includes("leave")) navigate("/employee/leaves");
+    else if (notif.type === "new_policy") navigate("/employee/policies");
+    else if (notif.type === "punch_unlock") navigate("/employee/dashboard");
   }
 
   async function markAllRead() {
