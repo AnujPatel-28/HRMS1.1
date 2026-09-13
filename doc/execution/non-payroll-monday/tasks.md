@@ -55,6 +55,7 @@ v0.4 said and is deliberately not rewritten. **The names in this table are autho
 | `migrations/20260912179500_m1m2-reproducibility-baseline.sql` | P1-00 | Reviewed public/storage/realtime policy and database-function baseline |
 | `migrations/20260912180000_m1m2-access-capability-contract.sql` | P1-01 | Frozen capability seam and shared no-self guard |
 | `migrations/20260912181000_m1m2-membership-grants-invites-ownership.sql` | P1-02 | Membership, grants, invite, audit and owner lifecycle |
+| `migrations/20260912181500_m1m2-fix-access-audit-writer.sql` | P1-02 | **v0.5, added 2026-09-13.** Forward fix for two defects in the applied `181000` `write_access_audit`. Numbered in the P1-02 band, not `20260913…`, so ascending version order stays a valid topological order of the dependency graph |
 | `migrations/20260912182000_m1m2-shared-work-calendar-resolver.sql` | P2-01 | Shared dated calendar/schedule resolution |
 | `migrations/20260912183000_m1m2-dated-organization-transfer.sql` | P1-03 | Relationship scope, overlap and dated transfer |
 | `migrations/20260912184000_m1m2-attendance-correction-consistency.sql` | P2-02 | Attendance/correction and exclusive punch-out gate ownership |
@@ -156,6 +157,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 - **Status:** BLOCKED on P1-00, P1-01 shared seam, credential hygiene and `TB-M1M2`.
 - **Exact allowed files:**
   - `migrations/20260912181000_m1m2-membership-grants-invites-ownership.sql` (new, lead-created)
+  - `migrations/20260912181500_m1m2-fix-access-audit-writer.sql` (new, v0.5 — authorized 2026-09-13; forward fix, because `181000` is applied and therefore immutable)
   - `functions/create-hr-admin-user/index.js`
   - `functions/create-employee-user.ts`
   - `functions/finalize-onboarding.ts`
