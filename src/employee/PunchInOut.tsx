@@ -902,38 +902,16 @@ export default function PunchInOut() {
 
     setCorrectionSubmitting(true);
     try {
-      const { data: existingRequests, error: existingError } = await db
-        .from("attendance_corrections")
-        .select("id,status")
-        .eq("tenant_id", tenantId)
-        .eq("employee_id", employee.id)
-        .eq("attendance_date", selectedCorrectionDate);
-      if (existingError) throw existingError;
-
-      const hasPending = ((existingRequests ?? []) as { id: string; status: AttendanceCorrection["status"] }[])
-        .some((request) => request.status === "pending");
-      if (hasPending) {
-        error("You already have a pending correction request for this date.");
-        return;
-      }
-
-      const payload = {
-        tenant_id: tenantId,
-        employee_id: employee.id,
-        attendance_date: selectedCorrectionDate,
-        requested_punch_in: correctionPunchIn || null,
-        requested_punch_out: correctionPunchOut || null,
-        reason: correctionReason.trim(),
-        status: "pending" as const,
-        reviewed_by: null,
-        reviewed_at: null,
-        rejection_reason: null,
-      };
-
-      const { error: upsertError } = await db
-        .from("attendance_corrections")
-        .upsert([payload], { onConflict: "tenant_id,employee_id,attendance_date" });
-      if (upsertError) throw upsertError;
+      // The employee-facing table is intentionally read-only. The RPC re-derives the employee
+      // and attendance.correction.request:self grant, and only accepts the request fields below.
+      const { error: requestError } = await db.rpc("request_attendance_correction", {
+        p_tenant_id: tenantId,
+        p_attendance_date: selectedCorrectionDate,
+        p_requested_punch_in: correctionPunchIn || null,
+        p_requested_punch_out: correctionPunchOut || null,
+        p_reason: correctionReason.trim(),
+      });
+      if (requestError) throw requestError;
 
       success("Correction request submitted. HR will review it shortly.");
       setSelectedCorrectionDate(null);
