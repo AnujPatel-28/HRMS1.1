@@ -107,7 +107,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
   4. `check-policy-drift` covers `public`, `storage` and `realtime`. **MET.** It is *not* required to pass: the 50 untracked policies are pre-existing drift, recorded and owned by AC5 below, and blocking on them would stall every lane for a condition none of them created.
   6. The remote-only `20260812140000`, both `migrations-pending-deploy/` files and the untracked-applied `20260904120000` receive apply/defer/supersede/immutable decisions. **MET** — `reconciliation.md` §5.
   7. Deployed-only function bodies are captured locally **and dispositioned**: for each, does it enforce tenant scope, does it authenticate its caller, does it derive authority from anything but verified server state, and is it `keep` / `harden` / `delete`. A `delete` disposition removes that file from P1-02's list.
-  8. `check-punch-out-gate` and `on-leave-reviewed` local/deployed diffs name an authoritative side. Required before **P2** edits either file — **not** a P1-01 gate.
+  8. `check-punch-out-gate` and `on-leave-reviewed` local/deployed diffs name an authoritative side. **MET 2026-09-14** — `check-punch-out-gate` has zero drift (byte-identical); `on-leave-reviewed` drifts and the local 410 stub is authoritative, deployed copy dispositioned DELETE, owner P2-04. See `reconciliation.md` §13.
   10. Reconciliation records the P6 C8 baseline erratum: committed history permits six relationship types. **MET** — verified against `migrations/20260813080000:106-113`.
 
   **Deferred — real work, tracked, not gating P1-01.** These were written as blockers under a production-risk framing that does not apply to a pre-launch backend of dummy data.

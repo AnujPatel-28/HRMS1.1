@@ -317,3 +317,55 @@ shell, has no `VAR=value cmd` prefix syntax.
 `_harness.mjs`. **Importing anything from it re-executes the seed as a side effect.** It is harmless
 today only because the seed is idempotent. `personas.mjs` therefore duplicates the two tenant UUIDs
 rather than importing them. Add the guard before any lane imports from a fixture.
+
+---
+
+## 13. AC8 — function drift, authoritative sides named (CLOSED 2026-09-14)
+
+P1-00 criterion 8 required naming an authoritative side for `check-punch-out-gate` and
+`on-leave-reviewed` before P2 edits either. It was deferred as FAIL by the package review. Settled
+here by fetching each deployed body with `functions code` and diffing against the repo.
+
+### `check-punch-out-gate` — NO DRIFT
+
+```
+local body 71 lines | deployed body 71 lines | IDENTICAL
+```
+
+The repo file is a faithful recovered copy (its header says so, and the diff confirms it). Both sides
+agree; there is nothing to choose. **P2-02 may edit it normally** — redeploying cannot clobber unseen
+behaviour.
+
+Worth preserving from that header, because it is the design rule for the whole gate: the edge
+function is a **read-only UX pre-check, not the security boundary**. Enforcement lives in
+`punch_out_attendance()` (317 lines), which I verified checks both the tasks module gate and
+`punch_out_gate_enabled`. If the edge function vanished, punch-out would still be gated correctly.
+No decision may migrate from the database into it.
+
+### `on-leave-reviewed` — REAL DRIFT; the local stub is authoritative
+
+```
+local     28 lines — returns 410 "Deprecated. Leave approval is handled by the
+                     approve_leave_request SQL RPC."
+deployed 124 lines — full live implementation
+```
+
+**The local stub wins**, on two pieces of evidence:
+
+- `approve_leave_request` (136 lines) **writes notifications itself** — the job the edge function
+  existed to do has moved into the RPC.
+- **No caller.** `grep` across `src/` finds no reference to `on-leave-reviewed` anywhere.
+
+So the deployed function is orphaned: nothing invokes it, and its responsibility has been absorbed.
+
+**Disposition: DELETE on the branch** rather than deploying the stub over it — a 410 endpoint left
+standing is just a slower orphan. Deletion on `BASELINE-RO` is a separate deliberate step; confirm
+nothing outside this repository calls it first, exactly as with the five ATS functions in §11.
+
+**Owner: P2-04**, which is the package that touches leave approval. P2-02 must not touch it.
+
+### Consequence
+
+P1-00 criterion 8 is now **MET**. Every closing criterion for P1-00 is satisfied; only the three
+explicitly deferred items (5 policy classification, 9 credential rotation, 11 function
+classification) remain, each with a named owner.
