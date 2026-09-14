@@ -1,7 +1,7 @@
 # TalentMesh non-payroll Monday execution tasks
 
 Plan version: **v0.5**  
-Status: **P1-00 closed. P1-01, P1-02, P2-01 COMPLETE and accepted. Next: P1-03.**  
+Status: **P1 COMPLETE (P1-00 closed; P1-01, P1-02, P1-03 accepted). P2-01 accepted. Next: P2-02.**  
 Baseline revision: `7214f8e3abeaef797d45122c7bc1129f0663cc43`  
 Contract dependency: `contracts.md` v0.5
 
@@ -196,7 +196,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 
 - **Owner:** P1 Access/Organization lane.
 - **Model:** GPT-5.6 Sol high.
-- **Status:** BLOCKED on P1-00/P1-01/P1-02, P2-01 tenant-date primitive and dated-context review.
+- **Status:** **COMPLETE — accepted 2026-09-14** at `93b4e03`. AC1–AC6 PASS; AC7 PARTIAL (cross-tenant enforced; org-unit-overlap structurally untestable — no dated unit-assignment table exists, and building one is new product surface, not this package). See `reviews/package-review-P1-03.md`.
 - **Exact allowed files:**
   - `migrations/20260912183000_m1m2-dated-organization-transfer.sql` (new, lead-created)
   - `src/contexts/AuthContext.tsx` (sequential handoff from P1-01)
