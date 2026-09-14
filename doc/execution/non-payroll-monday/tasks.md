@@ -1,7 +1,7 @@
 # TalentMesh non-payroll Monday execution tasks
 
 Plan version: **v0.5**  
-Status: **P1-00 closed (reduced scope). P1-01 and P1-02 COMPLETE and accepted. Next: P2-01.**  
+Status: **P1-00 closed. P1-01, P1-02, P2-01 COMPLETE and accepted. Next: P1-03.**  
 Baseline revision: `7214f8e3abeaef797d45122c7bc1129f0663cc43`  
 Contract dependency: `contracts.md` v0.5
 
@@ -226,7 +226,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 
 - **Owner:** P2 Time lane.
 - **Model:** Sonnet 5 medium/high; fallback GPT-5.6 Sol high.
-- **Status:** BLOCKED on P1-00, P1-01 access contract and `TB-M1M2`.
+- **Status:** **COMPLETE — accepted 2026-09-14** at `caf9ec6`. All 8 criteria PASS under independent re-verification. The primitive was **consolidated, not created** — it already existed; the package removed an `attendance`-module gate that made `tenant_business_date` return NULL for any Leave-only tenant, violating §12.7. Decision recorded in-database via `COMMENT ON FUNCTION`: date/calendar primitives are infrastructure, gated on tenant access only, never on module entitlement. See `reviews/package-review-P2-01.md`.
 - **Exact allowed files:**
   - `migrations/20260912182000_m1m2-shared-work-calendar-resolver.sql` (new, lead-created)
   - `src/hr/ShiftManagement.tsx`
