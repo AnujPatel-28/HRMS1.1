@@ -309,6 +309,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
   - `src/hooks/useLeaves.ts`
   - `src/utils/leave.ts`
   - `tests/m1m2/p2_leave_workflow.mjs` (new)
+  - `tests/m1m2/fixtures/personas.mjs` (v0.5 — added 2026-09-15; both fixture tenants have ZERO `leave_types` and ZERO `leave_balances`, so AC1/AC3/AC4/AC5/AC7 are untestable without it. Seed minimal deterministic types and opening balances only — no invented accrual history)
 - **Dependencies:** P1-00 authoritative function side and verification whether `attendance_events` retains punches; P1 shared no-self/action scope; P1-03 dynamic eligibility; P2-01 calendar; known synthetic balances.
 - **Acceptance tests:**
   1. Apply/approve/reject/cancel-pending/cancel-approved use server APIs and correct states.
