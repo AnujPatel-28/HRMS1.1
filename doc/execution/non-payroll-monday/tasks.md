@@ -1,7 +1,7 @@
 # TalentMesh non-payroll Monday execution tasks
 
 Plan version: **v0.5**  
-Status: **P1 COMPLETE. P2-01, P2-02, P2-04 accepted. P2-03 blocked on hardware. Next: P3-01.**  
+Status: **P1 COMPLETE. P2-01, P2-02, P2-04, P3-01 accepted. P2-03 blocked on hardware. Next: P3-02.**  
 Baseline revision: `7214f8e3abeaef797d45122c7bc1129f0663cc43`  
 Contract dependency: `contracts.md` v0.5
 
@@ -328,7 +328,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 
 - **Owner:** P3 Policy/Work/Communication lane.
 - **Model:** Sonnet 5 medium; fallback GPT-5.6 Sol high.
-- **Status:** BLOCKED on P1-00 reproducible private storage and P1 access contract.
+- **Status:** **COMPLETE — accepted 2026-09-15** at `e34baab`. AC3 closed and verified with the identical anonymous request that proved it broken (200 → 401). AC1/AC2/AC4 PASS; AC5 untested by design; AC6 by code inspection only; signed-URL revoke-replay measured but not executed. Bucket privacy is set via the storage management API, not SQL — a recorded reproducibility gap. See `reviews/package-review-P3-01.md`.
 - **Exact allowed files:**
   - `migrations/20260912187000_m1m2-policy-privacy-versioning.sql` (new, lead-created)
   - `src/hr/PolicyCenter.tsx`
