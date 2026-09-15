@@ -1,7 +1,7 @@
 # TalentMesh non-payroll Monday execution tasks
 
 Plan version: **v0.5**  
-Status: **P1 COMPLETE (P1-00 closed; P1-01, P1-02, P1-03 accepted). P2-01 accepted. Next: P2-02.**  
+Status: **P1 COMPLETE. P2-01 and P2-02 accepted. P2-03 blocked on hardware. Next: P2-04.**  
 Baseline revision: `7214f8e3abeaef797d45122c7bc1129f0663cc43`  
 Contract dependency: `contracts.md` v0.5
 
@@ -249,7 +249,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 
 - **Owner:** P2 Time lane; sole owner of task-to-punch-out gate behavior.
 - **Model:** Sonnet 5 high; fallback GPT-5.6 Sol high.
-- **Status:** BLOCKED on P1-00 drift decision, P1-01 guard, P1-03 and P2-01.
+- **Status:** **COMPLETE — accepted 2026-09-15** at `98aff7a`. AC1–AC6 PASS under independent re-verification. Table writes on `attendance_corrections` are now denied at both policy and GRANT level; reads are policy-scoped; the edge pre-check was untouched and `punch_out_attendance()` remains the enforcement boundary. See `reviews/package-review-P2-02.md`.
 - **Exact allowed files:**
   - `migrations/20260912184000_m1m2-attendance-correction-consistency.sql` (new, lead-created)
   - `functions/run-attendance-derivation/index.ts`
