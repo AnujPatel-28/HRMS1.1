@@ -369,3 +369,52 @@ nothing outside this repository calls it first, exactly as with the five ATS fun
 P1-00 criterion 8 is now **MET**. Every closing criterion for P1-00 is satisfied; only the three
 explicitly deferred items (5 policy classification, 9 credential rotation, 11 function
 classification) remain, each with a named owner.
+
+---
+
+## 14. Open findings carried out of P2 (recorded 2026-09-15)
+
+Three real gaps surfaced by P2-04 and its review. None is fixed, each is owned.
+
+### 14.1 `employee_apply_leave_request` still uses server UTC `CURRENT_DATE`
+
+Two boundary checks were not converged onto `tenant_business_date`:
+
+```sql
+v_notice_given       := p_start_date - CURRENT_DATE;      -- minimum-notice policy
+v_days_since_joining := CURRENT_DATE - v_employee.date_of_joining;  -- applicable_from_day
+```
+
+`CURRENT_DATE` is the database server's UTC date. This product's primary market is IST (UTC+5:30),
+so **between 00:00 and 05:30 local the UTC date is still yesterday** — minimum notice computes one
+day more than reality, letting an application through with less notice than policy requires, and
+eligibility flips a day early or late.
+
+Small, live-relevant, and pre-existing — not introduced by P2-04, which is why it did not block
+acceptance. But the P2-04 brief did ask for every date boundary to use the primitive, and these two
+were missed rather than reported. **Owner: whichever package next touches leave application.**
+
+### 14.2 No re-derivation entrypoint for an already-derived attendance day
+
+`attendance_derive_pass1` only processes events with `attendance_id IS NULL`, so it never revisits a
+day it has already stamped. Consequence: cancelling approved leave restores the underlying data
+correctly — punches and raw events survive byte-identically, proved by un-stamping the events and
+re-running pass1 — but the **displayed status does not snap back on its own**.
+
+P2-04 correctly refused to patch this from leave code, which would reintroduce exactly the day-status
+duplication this milestone removes. The right fix is a product-side re-derivation entrypoint.
+**Unowned — needs a package.**
+
+### 14.3 `day_fraction` has a read path and no write path
+
+`attendance_derive_pass2` honours `day_fraction = 0.5 → half_day`, but neither
+`employee_apply_leave_request` nor `approve_leave_request` ever writes it. Half-day leave is
+therefore unreachable through the product. Reported as a feature gap rather than a vacuous AC6 pass.
+**Unowned — product decision.**
+
+### Note on a number in the P2-04 report
+
+That report gave drift as "24 untracked/modified paths in the working tree." That is `git status`
+output, not policy drift. Measured policy drift at the same moment was **50 untracked of 308** — the
+deferred baseline, unchanged. The two are unrelated metrics and should not be conflated in future
+reports.

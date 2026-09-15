@@ -1,7 +1,7 @@
 # TalentMesh non-payroll Monday execution tasks
 
 Plan version: **v0.5**  
-Status: **P1 COMPLETE. P2-01 and P2-02 accepted. P2-03 blocked on hardware. Next: P2-04.**  
+Status: **P1 COMPLETE. P2-01, P2-02, P2-04 accepted. P2-03 blocked on hardware. Next: P3-01.**  
 Baseline revision: `7214f8e3abeaef797d45122c7bc1129f0663cc43`  
 Contract dependency: `contracts.md` v0.5
 
@@ -300,7 +300,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 
 - **Owner:** P2 Time lane.
 - **Model:** Sonnet 5 high; fallback GPT-5.6 Sol high.
-- **Status:** BLOCKED on P1-00 drift/evidence decision, P1-01 guard, P1-03 and P2-01.
+- **Status:** **COMPLETE — accepted 2026-09-15** at `562a7d4`. AC1–AC4, AC7 PASS; AC5 split (evidence preservation PASS, automatic status restoration UNSUPPORTED — no re-derivation entrypoint exists); AC6 reported as a feature gap (`day_fraction` read path only). Two pre-existing bugs fixed: `leaves_status_check` never allowed `cancelled`, and `approve_leave_request` inferred a dropped ON CONFLICT index and inserted phantom attendance rows. Open findings in `reconciliation.md` §14.
 - **Exact allowed files:**
   - `migrations/20260912186000_m1m2-leave-approval-absence-coverage.sql` (new, lead-created)
   - `functions/on-leave-reviewed.ts`
