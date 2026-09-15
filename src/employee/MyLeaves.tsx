@@ -13,6 +13,7 @@ import { formatLocalDate } from "../utils/date";
 import { calculateBusinessDays } from "../utils/leave";
 import { useManagerView } from "../hooks/useManagerView";
 import { useDepartmentLabel, useJobTitleLabel } from "../contexts/OrgUnitsContext";
+import { useAuth } from "../hooks/useAuth";
 
 type Tab = "apply" | "history" | "team_requests";
 
@@ -49,6 +50,11 @@ export default function MyLeaves() {
   const { tenantId } = useTenant();
   const { shift } = useEmployeeShift();
   const { isManagerMode, directReportIds } = useManagerView();
+  const { hasGrant } = useAuth();
+  // P2-04 / contracts.md #9: leave approval is HR-only in M1 -- team visibility (isManagerMode)
+  // does not by itself grant review authority. The server (assert_leave_reviewer) already
+  // enforces this; gate the UI to match instead of offering an action that always fails.
+  const canReviewLeave = hasGrant("leave.approve", "company");
   
   const [tab, setTab] = useState<Tab>("history");
   const [leaves, setLeaves] = useState<Leave[]>([]);
@@ -427,8 +433,10 @@ export default function MyLeaves() {
                     </div>
                   </div>
                   <p className="mt-3 text-sm text-slate-700"><span className="font-medium">Reason:</span> {leave.reason}</p>
-                  
-                  {rejectId === leave.id ? (
+
+                  {!canReviewLeave ? (
+                    <p className="mt-3 text-xs text-slate-400">View only — leave review requires HR Admin authority.</p>
+                  ) : rejectId === leave.id ? (
                     <div className="mt-3 flex flex-col gap-2">
                       <textarea
                         value={rejectReason}
@@ -589,7 +597,7 @@ export default function MyLeaves() {
                     </td>
                     <td className="px-4 py-3">
                       {isManagerMode ? (
-                        l.status === "pending" && (
+                        canReviewLeave && l.status === "pending" && (
                           <div className="flex gap-1">
                             <button onClick={() => handleApprove(l)} disabled={actionLoading}
                               className="rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">

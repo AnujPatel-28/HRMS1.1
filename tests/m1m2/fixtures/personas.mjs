@@ -415,3 +415,96 @@ try {
   console.error(`${code}: ${error.message}`);
   process.exit(1);
 }
+
+/**
+ * P2-04 addition (2026-09-15): both fixture tenants are born with ZERO `leave_types` and ZERO
+ * `leave_balances` (measured live), so AC1/AC3/AC4/AC5/AC7 are untestable without opening data.
+ * This is fixture setup, not accrual history: one leave type, opening balances only, no invented
+ * usage. `total_allocated`/`balance` are seeded consistently with `used_days = 0` so a
+ * no-double-debit retry test has a clean baseline. Idempotent via each table's real unique key
+ * (leave_types: tenant_id+code; leave_balances: tenant_id+employee_id+leave_type_id+year).
+ */
+export const COMPANY_A_LEAVE_TYPE_CL = Object.freeze({
+  id: "a0000000-0000-4000-8006-000000000001",
+  tenantId: COMPANY_A_TENANT_ID,
+  code: "CL",
+  name: "P2-04 Casual Leave",
+});
+export const LEAVE_FIXTURE_YEAR = 2026;
+export const LEAVE_OPENING_BALANCE = 12;
+
+const LEAVE_SEED_SQL = `
+WITH ins_type AS (
+  INSERT INTO public.leave_types (
+    id, tenant_id, name, code, days_per_year, accrual_type, min_notice_days, is_active
+  )
+  VALUES (
+    '${COMPANY_A_LEAVE_TYPE_CL.id}'::uuid, '${COMPANY_A_TENANT_ID}'::uuid,
+    ${sqlStr(COMPANY_A_LEAVE_TYPE_CL.name)}, ${sqlStr(COMPANY_A_LEAVE_TYPE_CL.code)},
+    ${LEAVE_OPENING_BALANCE}, 'lump_sum', 0, true
+  )
+  ON CONFLICT (tenant_id, code) DO UPDATE
+    SET name = EXCLUDED.name,
+        days_per_year = EXCLUDED.days_per_year,
+        min_notice_days = EXCLUDED.min_notice_days,
+        is_active = true
+  RETURNING id
+),
+ins_balances AS (
+  INSERT INTO public.leave_balances (
+    tenant_id, employee_id, leave_type_id, year, total_allocated, carried_forward, used_days, pending_days, balance
+  )
+  SELECT
+    '${COMPANY_A_TENANT_ID}'::uuid, p.employee_id, '${COMPANY_A_LEAVE_TYPE_CL.id}'::uuid,
+    ${LEAVE_FIXTURE_YEAR}, ${LEAVE_OPENING_BALANCE}, 0, 0, 0, ${LEAVE_OPENING_BALANCE}
+  FROM (VALUES
+    ('${COMPANY_A_EMPLOYEE.employeeId}'::uuid),
+    ('${COMPANY_A_HR_EMPLOYEE.employeeId}'::uuid)
+  ) p(employee_id)
+  ON CONFLICT (tenant_id, employee_id, leave_type_id, year) DO UPDATE
+    SET total_allocated = EXCLUDED.total_allocated,
+        carried_forward = EXCLUDED.carried_forward,
+        used_days = 0,
+        pending_days = 0,
+        balance = EXCLUDED.balance,
+        updated_at = now()
+  RETURNING id
+)
+SELECT (SELECT count(*) FROM ins_type) AS types_written,
+       (SELECT count(*) FROM ins_balances) AS balances_written;
+`;
+
+const LEAVE_VERIFY_SQL = `
+SELECT
+  (SELECT count(*) FROM public.leave_types WHERE id = '${COMPANY_A_LEAVE_TYPE_CL.id}'::uuid AND is_active) AS type_active,
+  (SELECT count(*) FROM public.leave_balances
+     WHERE tenant_id = '${COMPANY_A_TENANT_ID}'::uuid AND leave_type_id = '${COMPANY_A_LEAVE_TYPE_CL.id}'::uuid
+       AND year = ${LEAVE_FIXTURE_YEAR} AND balance = ${LEAVE_OPENING_BALANCE} AND used_days = 0) AS balances_clean;
+`;
+
+try {
+  await guardedMutation("P2-04 leave fixtures (opening balances only)", async (verified) => {
+    runSql(LEAVE_SEED_SQL.trim());
+    const [check] = rowsOf(runSql(LEAVE_VERIFY_SQL.trim()));
+    if (Number(check.type_active) !== 1) {
+      throw new HarnessBlockedError(
+        "LEAVE_TYPE_SEED_MISMATCH",
+        `Expected 1 active leave type ${COMPANY_A_LEAVE_TYPE_CL.code}; found ${check.type_active}.`,
+      );
+    }
+    if (Number(check.balances_clean) !== 2) {
+      throw new HarnessBlockedError(
+        "LEAVE_BALANCE_SEED_MISMATCH",
+        `Expected 2 clean opening balances (employee A, HR+employee A) at ${LEAVE_OPENING_BALANCE}/0 used; found ${check.balances_clean}.`,
+      );
+    }
+    console.log(
+      `M1M2 leave fixtures: leave type ${COMPANY_A_LEAVE_TYPE_CL.code} active on ${verified.projectName}; ` +
+        `2 opening balances at ${LEAVE_OPENING_BALANCE} days for year ${LEAVE_FIXTURE_YEAR}, used_days=0.`,
+    );
+  });
+} catch (error) {
+  const code = error instanceof HarnessBlockedError ? error.code : "PERSONAS_ERROR";
+  console.error(`${code}: ${error.message}`);
+  process.exit(1);
+}
