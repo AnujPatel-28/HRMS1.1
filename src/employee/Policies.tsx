@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { FileText, Eye, X, Search, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle } from "lucide-react";
 import type { EmployeeVisibleHRPolicy } from "../types";
-import { db } from "../insforge/client";
+import { db, storage } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
 import { useTenant } from "../contexts/TenantContext";
 import { useToast } from "../shared/ToastContext";
@@ -14,6 +14,7 @@ export default function Policies() {
   const [policies, setPolicies] = useState<EmployeeVisibleHRPolicy[]>([]);
   const [loading, setLoading] = useState(true);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<string | null>(null);
   const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
 
   // Search & Pagination states
@@ -57,6 +58,54 @@ export default function Policies() {
   useEffect(() => {
     void fetchPolicies();
   }, [fetchPolicies]);
+
+  // `hr-policies` is a private bucket (P3-01): file_url is no longer fetchable directly, and the
+  // previous docs.google.com/viewer embed would otherwise be handed a live bearer-token URL.
+  // Preview and download both go through authenticated storage.download() into a same-origin blob.
+  async function loadPolicyBlob(policy: EmployeeVisibleHRPolicy): Promise<Blob | null> {
+    const path = policy.storage_path;
+    if (!path) {
+      error("This document has no storage path on record.");
+      return null;
+    }
+    const { data, error: dlError } = await storage.from("hr-policies").download(path);
+    if (dlError || !data) {
+      error("Failed to load document.");
+      return null;
+    }
+    return data;
+  }
+
+  async function handlePreview(policy: EmployeeVisibleHRPolicy) {
+    setPreviewLoading(policy.id);
+    try {
+      const blob = await loadPolicyBlob(policy);
+      if (blob) setPreviewUrl(URL.createObjectURL(blob));
+    } finally {
+      setPreviewLoading(null);
+    }
+  }
+
+  function closePreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+  }
+
+  async function handleDownload(policy: EmployeeVisibleHRPolicy) {
+    setPreviewLoading(policy.id);
+    try {
+      const blob = await loadPolicyBlob(policy);
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = policy.file_name || "policy";
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setPreviewLoading(null);
+    }
+  }
 
   async function handleAcknowledge(policyId: string) {
     setAcknowledgingId(policyId);
@@ -179,21 +228,20 @@ export default function Policies() {
                 )}
 
                 <div className="flex gap-2 pt-2 border-t border-slate-100">
-                  <button 
-                    onClick={() => setPreviewUrl(policy.file_url)}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 border border-brand-200 px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 transition"
+                  <button
+                    onClick={() => void handlePreview(policy)}
+                    disabled={previewLoading === policy.id}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 border border-brand-200 px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 transition disabled:opacity-50"
                   >
                     <Eye className="h-3.5 w-3.5" /> View
                   </button>
-                  <a 
-                    href={policy.file_url} 
-                    download={policy.file_name || "policy"} 
-                    target="_blank" 
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
+                  <button
+                    onClick={() => void handleDownload(policy)}
+                    disabled={previewLoading === policy.id}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition disabled:opacity-50"
                   >
                     Download
-                  </a>
+                  </button>
                 </div>
               </div>
             );
@@ -227,22 +275,24 @@ export default function Policies() {
         </div>
       )}
 
-      {/* PDF Preview Modal */}
+      {/* Document Preview Modal. `previewUrl` is a same-origin blob: URL from an authenticated
+          download() -- never a bucket URL, so nothing is sent to a third party such as the
+          previous docs.google.com/viewer embed. */}
       {previewUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setPreviewUrl(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closePreview}>
           <div className="flex h-full max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
             onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
               <h3 className="font-semibold text-slate-800 flex items-center gap-2">
                 <FileText className="h-4 w-4 text-brand-600" /> Document Preview
               </h3>
-              <button onClick={() => setPreviewUrl(null)} className="rounded-lg p-1.5 hover:bg-slate-200 transition"><X className="h-5 w-5 text-slate-500" /></button>
+              <button onClick={closePreview} className="rounded-lg p-1.5 hover:bg-slate-200 transition"><X className="h-5 w-5 text-slate-500" /></button>
             </div>
             <div className="flex-1 bg-slate-100 relative">
-              <iframe 
-                src={`https://docs.google.com/viewer?url=${encodeURIComponent(previewUrl)}&embedded=true`} 
-                className="h-full w-full border-none" 
-                title="Policy Preview" 
+              <iframe
+                src={previewUrl}
+                className="h-full w-full border-none"
+                title="Policy Preview"
               />
             </div>
           </div>
