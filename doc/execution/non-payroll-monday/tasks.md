@@ -386,7 +386,8 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 
 - **Owner:** P3 Policy/Work/Communication lane.
 - **Model:** Sonnet 5 high; fallback GPT-5.6 Sol high.
-- **Status:** BLOCKED on P1-00 policy baseline, P1 revocation and private storage/realtime access.
+- **Status:** **BRIEFED 2026-09-21** — `prompts/p3-03_realtime_chat_isolation_2026-09-21.md`. Lead measured with live sockets: anonymous and cross-tenant clients subscribe to and receive every chat/notification topic, and can publish into any. Two tiers with a hold point after Tier 1 (cross-tenant/anon isolation). `employee-documents`/`expense-receipts`/`task-attachments` split out to P3-04.
+  - `migrations/20260912189100_...` pre-authorized for one Tier 1 forward fix.
 - **Exact allowed files:**
   - `migrations/20260912189000_m1m2-communication-realtime-storage.sql` (new, lead-created)
   - `src/shared/Chat.tsx`
@@ -410,6 +411,13 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
   8. Birthday automation passes removed-role, eligibility/privacy and duplicate-run tests or remains disabled/partial.
 - **Review requirements:** P6 PACKAGE high-risk review with raw packet evidence, storage HTTP evidence and notification trigger/policy review. Client filtering is not evidence.
 - **Backend target:** `TB-M1M2` only; no realtime/bucket/function change on `BASELINE-RO`.
+
+### P3-04 — Private personal-data buckets (added 2026-09-21)
+
+- **Owner:** lead brief; implementer Sonnet 5.
+- **Status:** NOT BRIEFED. Follows P3-03 Tier 1.
+- **Why:** `employee-documents` (payslips, IDs), `expense-receipts`, `task-attachments` are public buckets. Lead proved it: an anonymous `curl` with no auth header downloaded a payslip PDF from `employee-documents` on TB-M1M2 (HTTP 200, 231 KB). Split from P3-03 because their screens are outside P3-03's file list.
+- **Shape:** buckets private; tenant/owner/HR-scoped `storage.objects` policies; UI moves to signed URLs; record previously-issued URL behavior; record how privacy is set (not reconstructible from SQL — P3-01 finding).
 
 ## Integrated ordering and hold points
 

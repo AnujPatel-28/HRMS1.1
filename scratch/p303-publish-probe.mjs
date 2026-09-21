@@ -1,0 +1,14 @@
+import { createClient } from "@insforge/sdk";
+import { spawnSync } from "node:child_process";
+import { TB_M1M2 } from "../tests/m1m2/_target.mjs";
+const r = spawnSync(process.execPath, ["node_modules/@insforge/cli/dist/index.js", "secrets", "get", "ANON_KEY", "--json"], { encoding: "utf8" });
+const key = JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))).value;
+const mk = () => createClient({ baseUrl: TB_M1M2.baseUrl, functionsUrl: TB_M1M2.functionsUrl, anonKey: key });
+const victim = mk(), anon = mk(); const got = [];
+await victim.realtime.connect(); await victim.realtime.subscribe("notifications:a0000000-0000-4000-8001-000000000002");
+victim.realtime.on("INSERT_notification", (p) => got.push(p));
+await anon.realtime.connect(); await anon.realtime.subscribe("notifications:a0000000-0000-4000-8001-000000000002");
+const res = await anon.realtime.publish("notifications:a0000000-0000-4000-8001-000000000002", "INSERT_notification", { title: "p303 spoof probe" }).catch(e => ({ error: e.message }));
+await new Promise(r => setTimeout(r, 3000));
+console.log("anon publish result:", JSON.stringify(res ?? null), "| delivered to topic subscriber:", JSON.stringify(got).slice(0, 200));
+victim.realtime.disconnect(); anon.realtime.disconnect(); process.exit(0);
