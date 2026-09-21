@@ -205,6 +205,11 @@ await guardedMutation("P3-03 Tier 2 disposable fixture", async () => {
     assert.ok(createdId, "channel.manage create returned no id");
     const memberCount = allowed(await clients.hr.client.database.rpc("p3_set_channel_members", { p_channel_id: createdId, p_employee_ids: [employeeA.employeeId] }), "T2-3 HR adds members");
     assert.equal(memberCount, 1);
+    denied(await clients.employee.client.database.rpc("p3_update_chat_channel", { p_channel_id: createdId, p_name: "p3c-hr-created", p_description: "employee tries to rename", p_type: "global", p_target_org_unit_ids: null, p_is_announcement: false }), "T2-3 employee.a update channel denied");
+    const updateOk = allowed(await clients.hr.client.database.rpc("p3_update_chat_channel", { p_channel_id: createdId, p_name: "p3c-hr-created", p_description: "p3c updated by HR", p_type: "global", p_target_org_unit_ids: null, p_is_announcement: false }), "T2-3 HR updates the channel it created");
+    assert.equal(updateOk, true);
+    const updatedRow = rows(runSql(`SELECT description FROM public.chat_channels WHERE id = '${createdId}'`));
+    assert.equal(updatedRow[0]?.description, "p3c updated by HR");
     allowed(await clients.hr.client.database.rpc("delete_chat_channel", { channel_id: createdId }), "T2-3 HR archives (deletes) the channel it created");
 
     // Send-retry idempotency on (channel_id, client_message_id).
@@ -229,6 +234,33 @@ await guardedMutation("P3-03 Tier 2 disposable fixture", async () => {
     assert.equal(moderateOk, true);
     const afterDelete = rows(runSql(`SELECT is_deleted FROM public.chat_messages WHERE id = '${MSG_1}'`));
     assert.equal(afterDelete[0]?.is_deleted, true);
+
+    // Attachment path through p3_send_chat_message (previously UNTESTED): upload, send with
+    // p_attachment_url, verify the row and that a member/non-member get the p3_chat_object_readable
+    // (189000/189100) outcome regardless of how the message row was created.
+    let attachmentKey;
+    try {
+      const attachmentPath = `${companyA}/${CHAN_PRIV}/p3c-tier2-attachment.txt`;
+      const upload = await clients.employee.client.storage.from("chat-attachments").upload(attachmentPath, new Blob(["p3c tier2 attachment fixture"], { type: "text/plain" }));
+      assert.equal(upload.error, null, fingerprint(upload.error));
+      attachmentKey = upload.data.key ?? attachmentPath;
+      const attachmentMsgId = allowed(await clients.employee.client.database.rpc("p3_send_chat_message", {
+        p_channel_id: CHAN_PRIV, p_content: "p3c attachment message", p_client_message_id: randomUUID(),
+        p_attachment_url: `chat-attachments:${attachmentKey}`, p_attachment_name: "p3c-tier2-attachment.txt",
+      }), "T2-3 send with attachment_url via RPC");
+      const attachmentRow = rows(runSql(`SELECT attachment_url, attachment_name FROM public.chat_messages WHERE id = '${attachmentMsgId}'`));
+      assert.equal(attachmentRow[0]?.attachment_url, `chat-attachments:${attachmentKey}`);
+      assert.equal(attachmentRow[0]?.attachment_name, "p3c-tier2-attachment.txt");
+      console.log(`PASS T2-3 attachment message row: ${JSON.stringify(attachmentRow[0])}`);
+      const ownDownload = await clients.employee.client.storage.from("chat-attachments").download(attachmentKey);
+      assert.equal(ownDownload.error, null, fingerprint(ownDownload.error));
+      console.log(`PASS T2-3 sender downloads own attachment: ${ownDownload.data?.size} bytes`);
+      const crossTenantDownload = await clients.crossTenant.client.storage.from("chat-attachments").download(attachmentKey);
+      assert.ok(crossTenantDownload.error, "cross-tenant download of the attachment was not denied");
+      console.log(`PASS T2-3 cross-tenant attachment download denied: ${crossTenantDownload.error.message}`);
+    } finally {
+      if (attachmentKey) await clients.employee.client.storage.from("chat-attachments").remove(attachmentKey);
+    }
 
     // --- T2-4: Connect ---
     emptyRead(await clients.employee.client.database.from("posts").update({ content: "hack" }).eq("id", POST_HR).select("id"), "T2-4 employee.a updates another author's post (denied)");
