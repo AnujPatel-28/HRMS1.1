@@ -416,7 +416,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 ### P3-04 — Private personal-data buckets (added 2026-09-21)
 
 - **Owner:** lead brief; implementer Sonnet 5.
-- **Status:** NOT BRIEFED. Follows P3-03 Tier 1.
+- **Status:** **BRIEFED 2026-09-21** — `prompts/p3-04_private_personal_data_buckets_2026-09-21.md`. Survey added two within-company leaks: any employee reads every colleague's employee-documents (storage policy checks tenant only), and `employee_documents` table is fenced by a PERMISSIVE tenant policy. Migration `20260912190000`, one forward fix `190100` pre-authorized.
 - **Why:** `employee-documents` (payslips, IDs), `expense-receipts`, `task-attachments` are public buckets. Lead proved it: an anonymous `curl` with no auth header downloaded a payslip PDF from `employee-documents` on TB-M1M2 (HTTP 200, 231 KB). Split from P3-03 because their screens are outside P3-03's file list.
 - **Shape:** buckets private; tenant/owner/HR-scoped `storage.objects` policies; UI moves to signed URLs; record previously-issued URL behavior; record how privacy is set (not reconstructible from SQL — P3-01 finding).
 
