@@ -1,7 +1,7 @@
 # TalentMesh non-payroll Monday execution tasks
 
 Plan version: **v0.5**  
-Status: **P1 COMPLETE. P2-01, P2-02, P2-04, P3-01 accepted. P2-03 blocked on hardware. Next: P3-02.**  
+Status: **P1 COMPLETE. P2-01, P2-02, P2-04, P3-01, P3-02 accepted. P2-03 blocked on hardware. Next: P3-03, then P3-02b.**  
 Baseline revision: `7214f8e3abeaef797d45122c7bc1129f0663cc43`  
 Contract dependency: `contracts.md` v0.5
 
@@ -351,11 +351,12 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 
 - **Owner:** P3 Policy/Work/Communication lane.
 - **Model:** Sonnet 5 medium; fallback GPT-5.6 Sol high.
-- **Status:** BLOCKED on P1-00/P1 capabilities, P1-03 and P2 availability.
+- **Status:** **ACCEPTED 2026-09-21** at `2a5870c` — AC1–AC6 PASS, AC7 retry PASS / availability N/A. See `reviews/package-review-P3-02.md`. P3-02b (advertise project scope) follows P3-03.
 - **Exact allowed files:**
   - `migrations/20260912188000_m1m2-project-members-task-lifecycle.sql` (new, lead-created) — APPLIED 2026-09-21, immutable
   - `migrations/20260912188100_m1m2-task-notification-recipient.sql` (v0.5 — 2026-09-21: forward fix, 188000 wrote `notifications.user_id`, an FK to legacy `profiles` that 10/17 employees lack. Brief §8 D3)
-  - `migrations/20260912188200_m1m2-task-lifecycle-followup.sql` (v0.5 — pre-authorized for further DB defects found on rerun; each named with evidence)
+  - `migrations/20260912188200_m1m2-task-lifecycle-followup.sql` (v0.5 — pre-authorized for further DB defects found on rerun; each named with evidence) — APPLIED, calendar mark on approval
+  - `migrations/20260912188300_m1m2-project-lifecycle-closure.sql` (v0.5 — 2026-09-21 lead review: membership backfill, open-task deactivation guard, dates, department assignment. Brief §9 D5)
   - `src/hr/TaskWorkspace.tsx`
   - `src/hr/TaskManagement.tsx`
   - `src/hr/pms/ProjectList.tsx`
