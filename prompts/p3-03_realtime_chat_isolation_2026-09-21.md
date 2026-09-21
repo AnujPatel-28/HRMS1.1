@@ -169,3 +169,70 @@ schedule; record AC8 as **PARTIAL — automation disabled**. Do not enable it.
 Commit hash, files, per item above PASS / FAIL / UNTESTED / N/A with the raw log line. Something you
 reasoned about but did not execute is UNTESTED. State plainly anything the platform would not let you
 enforce. Stop at the Tier 1 hold point.
+
+---
+
+## 7. Tier 1 accepted (`34581df`). Tier 2 brief — within-tenant authorization
+
+Read `reviews/package-review-P3-03-tier1.md` and **contracts.md §16 (A1, A2)** first. A1 is a user
+decision: HR Admin manages channels and reads all projects, but does not read private channels.
+
+Migration **`20260912189200_m1m2-communication-tier2.sql`**; **`20260912189300_…`** pre-authorized
+for one forward fix, named with evidence. Tests in **`tests/m1m2/p3_chat_connect.mjs`** (disposable
+fixtures, `finally` teardown, 1/2/0). Allowed files: the tasks.md P3-03 list. Same rules as §4.
+
+### T2-1 Catalogue grants (A1)
+Insert `access_template_grants`: `hr_admin` → `channel.manage@company`, `project.read@company`;
+`communication_moderator` → `channel.manage@company`. Idempotent. Confirm with
+`get_my_capability_summary` as `hr-employee.a` that both appear (company scope is not filtered).
+
+### T2-2 Channel access
+- Channel **metadata** (`chat_channels`, `chat_channel_members` rows) readable by: members; everyone
+  in the tenant for `global`; org-unit match for `department` (keep the existing rule); and holders of
+  `has_access_action('channel.manage','company')`.
+- **Message** read (`chat_messages`): `global`/`department` per the same audience rule; `custom`
+  (private) channels **members only**. No HR, `jwt_role_is_hr()`, `is_hr()` or Company-Admin
+  bypass on messages. Drop the blanket `*_hr_all` policies on the three chat tables.
+- **Realtime:** change `p3_realtime_topic_readable` so a `chat:` topic follows the **message-read**
+  rule, not channel-row visibility — otherwise a channel manager could subscribe to a private
+  channel. SECURITY INVOKER stays. Exact signature, derive from `pg_get_functiondef()`.
+- Company Admin alone (`company-admin.a` / `owner.a`, no employee row) reads no private channel.
+
+### T2-3 Writes through RPCs (P2-02/P3-02 pattern)
+- Revoke INSERT/UPDATE/DELETE from `authenticated` on `chat_channels`, `chat_channel_members`,
+  `chat_messages`. Definer RPCs with column allowlists, each with tenant fence, pinned `search_path`,
+  no `anon` EXECUTE:
+  - create/update/archive channel, set members → `channel.manage@company`.
+  - send message → by **`channel_id`** (never name), sender derived server-side, caller must pass the
+    message-read rule, announcement channels require `channel.manage@company`. **Idempotent on
+    `(tenant_id, sender_id, client_message_id)`** — a retry returns the existing message, no second row,
+    no second realtime event. Add the unique index if missing (check nothing's `ON CONFLICT` relies
+    on a different one).
+  - edit/soft-delete own message; soft-delete any message → `message.moderate` (not HR).
+- Move `shared/Chat.tsx` / `useChat.ts` callers (channel create at ~528, member insert at ~559,
+  message send) onto the RPCs; send a `client_message_id` (uuid per attempt).
+
+### T2-4 Connect
+- RESTRICTIVE tenant fence on `posts` and `post_reactions` (today `post_reactions` has only a
+  PERMISSIVE one).
+- `posts` update/delete: author, or `feed.moderate@company`. Insert: author = self, `feed.post`.
+- `post_reactions`: insert/delete own only; retry idempotent (unique `(post_id, employee_id,
+  reaction)` or equivalent — check the existing constraint first).
+- `posts`/`post_reactions` realtime: **no trigger publishes them and no channel pattern exists** —
+  Connect realtime never worked. Do not build it. Remove the dead subscribes in `Connect.tsx`; report
+  the ones in `EmployeeLayout.tsx` / `HRLayout.tsx` (outside your files) rather than editing them.
+
+### T2-5 Projects read for HR (A1)
+`projects_p302_read` / `project_memberships_read`: add `OR has_access_action('project.read','company')`.
+Read only — every P3-02 RPC must still deny HR `project.manage`/`project.members.manage`. Re-run
+`node tests/m1m2/p3_projects_tasks.mjs` — it must still exit 0.
+
+### Evidence (PASS/FAIL/UNTESTED per item, raw lines)
+HR creates a channel and adds members (allowed); HR reads messages of a private channel it is not a
+member of (**denied**) and cannot subscribe to its topic (**denied**); member of a private channel reads
+and receives; non-member employee denied; Company Admin alone denied; send-retry with the same
+`client_message_id` → one row, one event; employee edits another's message/post (denied), author
+allowed, moderator soft-delete allowed; reaction on behalf of another employee denied; HR sees all
+projects but `p3_update_project` denied; existing custom channels (`vishal`, `test`, `test2`) still
+readable by their members (use existing rows — see §1 of package-review-P3-02 for why). Tier 1 suite
+still passes except known item 6. Hygiene as §5 item 9.

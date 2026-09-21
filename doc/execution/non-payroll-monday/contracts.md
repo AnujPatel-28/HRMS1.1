@@ -259,3 +259,22 @@ One M1 invitation flow is named, expiring, single-use and tenant/template/scope-
 | S1–S5 | Unavailable-state consumer test, scope activation, contract version and manager-UI coordination added; external IP lookup documented as deferred privacy decision |
 
 This v0.4 remains **unaccepted** until another P6 CONTRACT review records an acceptance verdict.
+
+## 16. v0.5 amendments — 2026-09-21
+
+**A1 — HR Admin defaults (user decision, 2026-09-21).** The HR Admin template gains two
+catalogue grants, overriding §4's "does not grant … project management or communication
+moderation" for these two actions only:
+- `channel.manage` at `company` — create/manage company chat channels and their membership.
+  **Not** `channel.read` of private channels and **not** `message.moderate`: HR manages channels
+  but cannot read a private channel's messages unless a member.
+- `project.read` at `company` — read-only visibility of all projects. **Not** `project.manage`,
+  `project.members.manage` or `task.review` at project scope.
+Both are ordinary `access_template_grants` rows, so a tenant can remove them. The Communication
+Moderator template also gains `channel.manage` at `company` (channel creation needs a company-scope
+action; §4 listed it only at `channel:<id>`).
+
+**A2 — Realtime freshness (P3-03 Tier 1).** The InsForge realtime server does not revoke an
+already-joined socket when policy changes; reconnect is refused. §164 is satisfied for realtime by
+**identifier-only payloads plus fresh RLS refetch**, not by socket termination. A realtime payload
+must never carry content.
