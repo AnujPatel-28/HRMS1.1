@@ -3,7 +3,6 @@ import { Link, useNavigate } from "react-router-dom";
 import { Plus, Search, Calendar, Users, FolderKanban, CheckCircle2, ChevronRight, X, Shield, Building } from "lucide-react";
 import { db } from "../../insforge/client";
 import { useTenant } from "../../contexts/TenantContext";
-import { useEmployee } from "../../hooks/useEmployee";
 import { useToast } from "../../shared/ToastContext";
 import { Skeleton } from "../../shared/Skeleton";
 import { EmptyState } from "../../shared/EmptyState";
@@ -70,7 +69,6 @@ export default function ProjectList() {
   const titleLabel = useJobTitleLabel();
   const hrIds = useTenantHrIds();
   const { tenantId } = useTenant();
-  const { employee: currentHr } = useEmployee();
   const navigate = useNavigate();
   const { success, error: toastError } = useToast();
 
@@ -243,40 +241,20 @@ export default function ProjectList() {
     }
 
     try {
-      const visibility_config = {
-        type: formVisibilityType,
-        departments: formVisibilityType === "departments" ? formSelectedDepts : undefined,
-        // Slice B target-side key, written alongside `departments` — RLS still reads `departments`
-        // Slice B is APPLIED (20260820110000): projects_employee_read gates the departments branch
-        // on org_unit_ids ONLY. `departments` is kept for display and is no longer an RLS input.
-        org_unit_ids: formVisibilityType === "departments" ? formSelectedOrgUnitIds : undefined,
-        employee_ids: formVisibilityType === "people" ? formSelectedPeople : undefined,
-      };
-
-      const { data, error } = await db
-        .from("projects")
-        .insert([
-          {
-            tenant_id: tenantId,
-            name: formName.trim(),
-            description: formDesc.trim() || null,
-            status: formStatus,
-            manager_id: formManagerId || null,
-            start_date: formStartDate || null,
-            end_date: formEndDate || null,
-            visibility_config,
-            created_by: currentHr?.id || null,
-          },
-        ])
-        .select();
+      if (formStatus !== "planning" || formManagerId || formStartDate || formEndDate || formVisibilityType !== "all") {
+        throw new Error("The project API currently creates a planning project with you as manager and default visibility. Change the form options to match.");
+      }
+      const { data, error } = await db.rpc("p3_create_project", {
+        p_name: formName.trim(), p_description: formDesc.trim() || null,
+      });
 
       if (error) throw error;
 
       success("Project created. Now add tasks to it.");
       setIsModalOpen(false);
       resetForm();
-      if (data && data[0]) {
-        navigate(`/hr/pms/${data[0].id}`);
+      if (data) {
+        navigate(`/hr/pms/${data}`);
       } else {
         void fetchProjectsAndEmployees();
       }

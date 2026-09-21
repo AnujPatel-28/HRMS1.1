@@ -236,10 +236,10 @@ export default function ProjectDetail() {
   const handleSaveTitle = async () => {
     if (!titleInput.trim() || !project) return;
     try {
-      const { error } = await db
-        .from("projects")
-        .update({ name: titleInput.trim() })
-        .eq("id", project.id);
+      const { error } = await db.rpc("p3_update_project", {
+        p_project_id: project.id, p_name: titleInput.trim(),
+        p_description: project.description, p_status: project.status,
+      });
       if (error) throw error;
       setProject({ ...project, name: titleInput.trim() });
       success("Project title updated.");
@@ -253,10 +253,10 @@ export default function ProjectDetail() {
   const handleUpdateStatus = async (status: Project["status"]) => {
     if (!project) return;
     try {
-      const { error } = await db
-        .from("projects")
-        .update({ status })
-        .eq("id", project.id);
+      const { error } = await db.rpc("p3_update_project", {
+        p_project_id: project.id, p_name: project.name,
+        p_description: project.description, p_status: status,
+      });
       if (error) throw error;
       setProject({ ...project, status });
       success(`Status updated to ${status.replace("_", " ")}`);
@@ -310,26 +310,16 @@ export default function ProjectDetail() {
         employee_ids: editVisibilityType === "people" ? editSelectedPeople : undefined,
       };
 
-      const { data, error } = await db
-        .from("projects")
-        .update({
-          name: editName.trim(),
-          description: editDesc.trim() || null,
-          status: editStatus,
-          manager_id: editManagerId || null,
-          start_date: editStartDate || null,
-          end_date: editEndDate || null,
-          visibility_config,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", project.id)
-        .select();
-
-      // RLS refuses a write by matching zero rows, which comes back as a SUCCESSFUL empty response
-      // rather than an error (src/admin/TenantModulesPanel.tsx:77-79). An empty array is truthy in
-      // JS, so this update must check length, not just presence.
+      if (editManagerId !== (project.manager_id || "") || editStartDate !== (project.start_date || "") ||
+          editEndDate !== (project.end_date || "") || JSON.stringify(visibility_config) !== JSON.stringify(project.visibility_config || { type: "all" })) {
+        throw new Error("Manager, dates, and visibility cannot be changed through the current project API.");
+      }
+      const { data, error } = await db.rpc("p3_update_project", {
+        p_project_id: project.id, p_name: editName.trim(),
+        p_description: editDesc.trim() || null, p_status: editStatus,
+      });
       if (error) throw error;
-      if (!data || data.length === 0) {
+      if (!data) {
         throw new Error("Project was not updated — the write was rejected.");
       }
       success("Project details updated.");
@@ -358,10 +348,10 @@ export default function ProjectDetail() {
     if (!task || task.status === targetStatus) return;
 
     try {
-      const { error } = await db
-        .from("tasks")
-        .update({ status: targetStatus, updated_at: new Date().toISOString() })
-        .eq("id", taskId);
+      if (targetStatus !== "in_progress") {
+        throw new Error("Use the submission and review actions to change this task status.");
+      }
+      const { error } = await db.rpc("p3_set_task_state", { p_task_id: taskId, p_status: targetStatus });
 
       if (error) throw error;
       success(`Task status updated to ${targetStatus.replace("_", " ")}.`);
@@ -385,33 +375,12 @@ export default function ProjectDetail() {
     }
 
     try {
-      const { error } = await db.from("tasks").insert([
-        {
-          tenant_id: tenantId,
-          title: taskTitle.trim(),
-          description: taskDesc.trim() || null,
-          assigned_to: taskAssigneeId,
-          assigned_by: currentHr.id,
-          priority: taskPriority,
-          due_date: taskDueDate || null,
-          due_time: taskDueTime || null,
-          status: "assigned",
-          project_id: project.id,
-          attendance_lock_date: taskDueDate || null,
-        },
-      ]);
+      const { error } = await db.rpc("p3_assign_task", {
+        p_assigned_to: taskAssigneeId, p_title: taskTitle.trim(), p_project_id: project.id,
+        p_description: taskDesc.trim() || null, p_priority: taskPriority,
+        p_due_date: taskDueDate || null, p_due_time: taskDueTime || null,
+      });
       if (error) throw error;
-
-      // Add Notification
-      await db.from("notifications").insert([
-        {
-          tenant_id: tenantId,
-          employee_id: taskAssigneeId,
-          title: "New Project Task Assigned",
-          body: `You have been assigned: "${taskTitle.trim()}" in project "${project.name}"`,
-          type: "task_assigned",
-        },
-      ]);
 
       success("Task added to project.");
       setIsAddTaskModalOpen(false);
@@ -438,29 +407,6 @@ export default function ProjectDetail() {
       });
       if (rpcErr) throw rpcErr;
 
-      const targetDate = task.attendance_lock_date || task.due_date || new Date().toISOString().slice(0, 10);
-
-      await db.from("calendar_events").insert([
-        {
-          tenant_id: tenantId,
-          employee_id: task.assigned_to,
-          date: targetDate,
-          type: "green",
-          task_id: task.id,
-          notes: `Task approved: ${task.title}`,
-        },
-      ]);
-
-      await db.from("notifications").insert([
-        {
-          tenant_id: tenantId,
-          employee_id: task.assigned_to,
-          title: "Task Approved ✅",
-          body: `Your task "${task.title}" in project "${project?.name}" was approved.`,
-          type: "task_approved",
-          reference_id: task.id,
-        },
-      ]);
 
       void logAction("task.approved", "task", task.id);
       success("Task approved.");
@@ -488,16 +434,6 @@ export default function ProjectDetail() {
       });
       if (rpcErr) throw rpcErr;
 
-      await db.from("notifications").insert([
-        {
-          tenant_id: tenantId,
-          employee_id: task.assigned_to,
-          title: "Task Rejected",
-          body: `Your task "${task.title}" in project "${project?.name}" was rejected. Reason: ${rejectNotes.trim()}`,
-          type: "task_rejected",
-          reference_id: task.id,
-        },
-      ]);
 
       void logAction("task.rejected", "task", task.id, { reason: rejectNotes.trim() });
       success("Task rejected.");
@@ -513,19 +449,15 @@ export default function ProjectDetail() {
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    if (!confirm("Are you sure you want to delete this task?")) return;
+    if (!confirm("Are you sure you want to archive this task?")) return;
     try {
-      const { error } = await db
-        .from("tasks")
-        .delete()
-        .eq("tenant_id", tenantId)
-        .eq("id", taskId);
+      const { error } = await db.rpc("p3_archive_task", { p_task_id: taskId });
       if (error) throw error;
-      success("Task deleted.");
+      success("Task archived.");
       setIsTaskDrawerOpen(false);
       void fetchProjectData();
     } catch (err) {
-      toastError("Failed to delete task.");
+      toastError("Failed to archive task.");
     }
   };
 
@@ -810,7 +742,7 @@ export default function ProjectDetail() {
                       return (
                         <div
                           key={t.id}
-                          draggable
+                          draggable={t.status === "assigned" || t.status === "rejected"}
                           onDragStart={(e) => handleDragStart(e, t.id)}
                           onClick={() => {
                             setSelectedTask(t);
@@ -1260,7 +1192,7 @@ export default function ProjectDetail() {
                 onClick={() => void handleDeleteTask(selectedTask.id)}
                 className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 px-4 py-2 text-xs font-semibold transition active:scale-[0.98]"
               >
-                <Trash2 className="h-3.5 w-3.5" /> Delete Task
+                <Trash2 className="h-3.5 w-3.5" /> Archive Task
               </button>
             </div>
           </div>

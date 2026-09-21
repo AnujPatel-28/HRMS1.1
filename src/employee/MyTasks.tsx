@@ -201,27 +201,12 @@ export default function MyTasks() {
     }
     setAssignSubmitting(true);
     try {
-      const { error: taskErr } = await db.from("tasks").insert([{
-        title: assignForm.title,
-        description: assignForm.description || null,
-        tenant_id: tenantId,
-        assigned_to: assignForm.assigned_to,
-        assigned_by: employee.id,
-        priority: assignForm.priority,
-        due_date: assignForm.due_date || null,
-        due_time: assignForm.due_time || null,
-        status: "assigned",
-        attendance_lock_date: assignForm.due_date || null
-      }]);
+      const { error: taskErr } = await db.rpc("p3_assign_task", {
+        p_assigned_to: assignForm.assigned_to, p_title: assignForm.title,
+        p_description: assignForm.description || null, p_priority: assignForm.priority,
+        p_due_date: assignForm.due_date || null, p_due_time: assignForm.due_time || null,
+      });
       if (taskErr) throw taskErr;
-
-      await db.from("notifications").insert([{
-        tenant_id: tenantId,
-        employee_id: assignForm.assigned_to,
-        title: "New Task Assigned",
-        body: `You have been assigned task: "${assignForm.title}"${assignForm.due_date ? ` — due ${assignForm.due_date}` : ""}`,
-        type: "task_assigned",
-      }]);
 
       success("Task assigned successfully!");
       setAssignForm({ title: "", description: "", assigned_to: "", priority: "medium", due_date: "", due_time: "" });
@@ -243,20 +228,6 @@ export default function MyTasks() {
       });
       if (rpcErr) throw rpcErr;
       
-      const targetDate = task.attendance_lock_date || task.due_date || new Date().toISOString().slice(0, 10);
-      
-      await db.from("calendar_events").insert([{
-        tenant_id: tenantId,
-        employee_id: task.assigned_to, date: targetDate, type: "green", task_id: task.id,
-        notes: `Task approved: ${task.title}`,
-      }]);
-
-      await db.from("notifications").insert([{
-        tenant_id: tenantId,
-        employee_id: task.assigned_to, title: "Task Approved ✅",
-        body: `Your task "${task.title}" was approved — you can now punch out.`,
-        type: "task_approved", reference_id: task.id,
-      }]);
 
       success("Task approved.");
       void fetchTeamTasks();
@@ -280,12 +251,6 @@ export default function MyTasks() {
       });
       if (rpcErr) throw rpcErr;
       
-      await db.from("notifications").insert([{
-        tenant_id: tenantId,
-        employee_id: task.assigned_to, title: "Task Rejected",
-        body: `Your task "${task.title}" was rejected. Reason: ${rejectNotes}. Please resubmit.`,
-        type: "task_rejected", reference_id: task.id,
-      }]);
 
       success("Task rejected.");
       setRejectId(null); setRejectNotes("");
@@ -298,14 +263,14 @@ export default function MyTasks() {
   }
 
   async function handleDeleteTask(taskId: string) {
-    if (!confirm("Are you sure you want to delete this task?")) return;
+    if (!confirm("Are you sure you want to archive this task?")) return;
     try {
-      const { error: delErr } = await db.from("tasks").delete().eq("tenant_id", tenantId).eq("id", taskId);
+      const { error: delErr } = await db.rpc("p3_archive_task", { p_task_id: taskId });
       if (delErr) throw delErr;
-      success("Task deleted.");
+      success("Task archived.");
       void fetchTeamTasks();
     } catch (err) {
-      error("Failed to delete task.");
+      error("Failed to archive task.");
     }
   }
 
@@ -545,6 +510,7 @@ export default function MyTasks() {
                       <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${PRIORITY_BADGE[task.priority]}`}>{task.priority}</span>
                       <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${cfg.color}`}>{cfg.icon} {cfg.label}</span>
                       <button onClick={e => { e.stopPropagation(); handleDeleteTask(task.id); }}
+                        title="Archive task"
                         className="rounded-lg border border-rose-200 p-1 text-rose-500 hover:bg-rose-50 transition">
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -751,4 +717,3 @@ function EmployeeProjectsTab({ employeeId, tenantId }: { employeeId?: string; te
     </div>
   );
 }
-

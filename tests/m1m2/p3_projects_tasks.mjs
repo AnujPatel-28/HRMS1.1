@@ -38,6 +38,7 @@ const taskA2 = "a3020000-0000-4000-8000-000000004002";
 const taskNull = "a3020000-0000-4000-8000-000000004003";
 const taskB = "a3020000-0000-4000-8000-000000004004";
 const taskHr = "a3020000-0000-4000-8000-000000004005";
+const taskGate = "a3020000-0000-4000-8000-000000004006";
 const allTaskIds = [taskA1, taskA2, taskNull, taskB, taskHr];
 
 function anonKey() {
@@ -123,12 +124,12 @@ function setupFullFixture() {
       ('${companyA}'::uuid,'${projectA1}'::uuid,'${projectManager.employeeId}'::uuid,'manager'),
       ('${companyA}'::uuid,'${projectA1}'::uuid,'${employeeA.employeeId}'::uuid,'member'),
       ('${companyA}'::uuid,'${projectA2}'::uuid,'${employeeA.employeeId}'::uuid,'member');
-    INSERT INTO public.tasks(id,tenant_id,title,assigned_to,assigned_by,project_id,status) VALUES
-      ('${taskA1}'::uuid,'${companyA}'::uuid,'P3-02 A1 review','${employeeA.employeeId}'::uuid,'${projectManager.employeeId}'::uuid,'${projectA1}'::uuid,'submitted'),
-      ('${taskA2}'::uuid,'${companyA}'::uuid,'P3-02 A2 review','${employeeA.employeeId}'::uuid,'${hrA.employeeId}'::uuid,'${projectA2}'::uuid,'submitted'),
-      ('${taskNull}'::uuid,'${companyA}'::uuid,'P3-02 null project','${employeeA.employeeId}'::uuid,'${manager.employeeId}'::uuid,NULL,'submitted'),
-      ('${taskB}'::uuid,'${companyB}'::uuid,'P3-02 Company B','b0000000-0000-4000-8001-000000000002'::uuid,'b0000000-0000-4000-8001-000000000002'::uuid,NULL,'submitted'),
-      ('${taskHr}'::uuid,'${companyA}'::uuid,'P3-02 HR self','${hrA.employeeId}'::uuid,'${manager.employeeId}'::uuid,NULL,'submitted');
+    INSERT INTO public.tasks(id,tenant_id,title,assigned_to,assigned_by,project_id,status,due_date) VALUES
+      ('${taskA1}'::uuid,'${companyA}'::uuid,'P3-02 A1 review','${employeeA.employeeId}'::uuid,'${projectManager.employeeId}'::uuid,'${projectA1}'::uuid,'submitted','2099-01-01'),
+      ('${taskA2}'::uuid,'${companyA}'::uuid,'P3-02 A2 review','${employeeA.employeeId}'::uuid,'${hrA.employeeId}'::uuid,'${projectA2}'::uuid,'submitted','2099-01-01'),
+      ('${taskNull}'::uuid,'${companyA}'::uuid,'P3-02 null project','${employeeA.employeeId}'::uuid,'${manager.employeeId}'::uuid,NULL,'submitted','2099-01-03'),
+      ('${taskB}'::uuid,'${companyB}'::uuid,'P3-02 Company B','b0000000-0000-4000-8001-000000000002'::uuid,'b0000000-0000-4000-8001-000000000002'::uuid,NULL,'submitted',NULL),
+      ('${taskHr}'::uuid,'${companyA}'::uuid,'P3-02 HR self','${hrA.employeeId}'::uuid,'${manager.employeeId}'::uuid,NULL,'submitted',NULL);
     INSERT INTO public.task_submissions(id,tenant_id,task_id,employee_id,notes,status) VALUES
       ('a3020000-0000-4000-8000-000000005001'::uuid,'${companyA}'::uuid,'${taskA1}'::uuid,'${employeeA.employeeId}'::uuid,'A1','pending'),
       ('a3020000-0000-4000-8000-000000005002'::uuid,'${companyA}'::uuid,'${taskA2}'::uuid,'${employeeA.employeeId}'::uuid,'A2','pending'),
@@ -154,6 +155,8 @@ function teardownFullFixture() {
   // Only P3-02-owned rows are removed. Dynamic RPC-created projects/tasks carry the P3-02
   // title prefix, so failures before a returned id cannot strand them.
   runSql(`
+    DELETE FROM public.calendar_events WHERE task_id IN
+      (SELECT id FROM public.tasks WHERE title LIKE 'P3-02%');
     DELETE FROM public.notifications WHERE reference_id IN
       (SELECT id FROM public.tasks WHERE title LIKE 'P3-02%');
     DELETE FROM public.task_submissions WHERE task_id IN
@@ -230,21 +233,41 @@ async function fullSuite(clients,key) {
     denied(await clients.manager.database.rpc("approve_task_request",{p_task_id:taskHr}),"Manager non-direct report");
     denied(await clients.projectManager.database.rpc("approve_task_request",{p_task_id:taskA2}),"Project Manager other project");
     denied(await clients.projectManager.database.rpc("approve_task_request",{p_task_id:taskNull}),"Project Manager null project");
+    const calendarBefore=rows(runSql(`SELECT date,type,task_id FROM public.calendar_events WHERE tenant_id='${companyA}'::uuid AND employee_id='${employeeA.employeeId}'::uuid AND date='2099-01-01'`));
+    assert.equal(calendarBefore.length,0,"test calendar date already occupied");
+    console.log(`Calendar before approval: ${JSON.stringify(calendarBefore)}`);
     allowed(await clients.projectManager.database.rpc("p3_review_task",{p_task_id:taskA1,p_approved:true,p_reason:"A1 complete"}),"Project Manager A1 review");
+    const calendarFirst=rows(runSql(`SELECT date,type,task_id FROM public.calendar_events WHERE tenant_id='${companyA}'::uuid AND employee_id='${employeeA.employeeId}'::uuid AND date='2099-01-01'`));
+    assert.deepEqual(calendarFirst.map(r=>[r.type,r.task_id]),[["green",taskA1]]);
+    console.log(`Calendar after first approval: ${JSON.stringify(calendarFirst)}`);
     allowed(await clients.manager.database.rpc("p3_review_task",{p_task_id:taskNull,p_approved:true,p_reason:"Direct report complete"}),"Manager null-project review");
     allowed(await clients.hr.database.rpc("p3_review_task",{p_task_id:taskA2,p_approved:true,p_reason:"HR company review"}),"HR company review");
+    const calendarConflict=rows(runSql(`SELECT date,type,task_id FROM public.calendar_events WHERE tenant_id='${companyA}'::uuid AND employee_id='${employeeA.employeeId}'::uuid AND date='2099-01-01'`));
+    assert.deepEqual(calendarConflict.map(r=>[r.type,r.task_id]),[["green",taskA2]]);
+    console.log(`Calendar same-day conflict: ${JSON.stringify(calendarConflict)}`);
 
-    const hrAssigned=allowed(await clients.hr.database.rpc("p3_assign_task",{p_assigned_to:employeeA.employeeId,p_title:"P3-02 HR null assignment"}),"HR null assignment");
+    const hrAssigned=allowed(await clients.hr.database.rpc("p3_assign_task",{p_assigned_to:employeeA.employeeId,p_title:"P3-02 HR null assignment",p_due_date:"2099-01-04"}),"HR null assignment");
     allowed(await clients.manager.database.rpc("p3_assign_task",{p_assigned_to:employeeA.employeeId,p_title:"P3-02 manager assignment"}),"Manager direct assignment");
-    allowed(await clients.projectManager.database.rpc("p3_assign_task",{p_assigned_to:employeeA.employeeId,p_title:"P3-02 PM A1 assignment",p_project_id:projectA1}),"Project Manager A1 assignment");
+    const pmAssigned=allowed(await clients.projectManager.database.rpc("p3_assign_task",{p_assigned_to:employeeA.employeeId,p_title:"P3-02 PM A1 assignment",p_project_id:projectA1}),"Project Manager A1 assignment");
     denied(await clients.manager.database.rpc("p3_assign_task",{p_assigned_to:hrA.employeeId,p_title:"P3-02 denied manager"}),"Manager non-direct assignment");
     denied(await clients.projectManager.database.rpc("p3_assign_task",{p_assigned_to:employeeA.employeeId,p_title:"P3-02 denied PM",p_project_id:projectA2}),"Project Manager A2 assignment");
 
+    const projectSubmit=allowed(await clients.employee.database.rpc("submit_task_request",{p_task_id:pmAssigned,p_notes:"project done",p_attachment_url:null,p_attachment_name:null}),"Employee project task submit");
+    const projectRecipients=rows(runSql(`SELECT employee_id FROM public.notifications WHERE tenant_id='${companyA}'::uuid AND reference_id='${pmAssigned}'::uuid AND type='general' ORDER BY employee_id`)).map(r=>r.employee_id);
+    assert.deepEqual(projectRecipients,[hrA.employeeId,manager.employeeId,projectManager.employeeId].sort());
+    assert.equal(projectSubmit.notified,3);
+    console.log(`Project submit reviewers notified: ${projectRecipients.join(",")}`);
+
     const submitted=allowed(await clients.employee.database.rpc("submit_task_request",{p_task_id:hrAssigned,p_notes:"done",p_attachment_url:null,p_attachment_name:null}),"Employee null-project submit");
     assert.equal(submitted.duplicate,false);
+    const noticesBefore=rows(runSql(`SELECT count(*)::integer AS count FROM public.notifications WHERE tenant_id='${companyA}'::uuid AND reference_id='${hrAssigned}'::uuid AND type='general'`))[0].count;
+    assert.equal(noticesBefore,submitted.notified);
     const retry=allowed(await clients.employee.database.rpc("submit_task_request",{p_task_id:hrAssigned,p_notes:"done",p_attachment_url:null,p_attachment_name:null}),"Employee submit retry");
     assert.equal(retry.submission_id,submitted.submission_id);
     assert.equal(retry.notified,0);
+    const noticesAfter=rows(runSql(`SELECT count(*)::integer AS count FROM public.notifications WHERE tenant_id='${companyA}'::uuid AND reference_id='${hrAssigned}'::uuid AND type='general'`))[0].count;
+    assert.equal(noticesAfter,noticesBefore);
+    console.log(`Submit retry: submission ${submitted.submission_id}, notifications ${noticesBefore} -> ${noticesAfter}`);
     allowed(await clients.hr.database.rpc("p3_review_task",{p_task_id:hrAssigned,p_approved:false,p_reason:"Please revise"}),"HR reject with reason");
     allowed(await clients.employee.database.rpc("submit_task_request",{p_task_id:hrAssigned,p_notes:"revised",p_attachment_url:null,p_attachment_name:null}),"Employee resubmit");
     allowed(await clients.hr.database.rpc("p3_review_task",{p_task_id:hrAssigned,p_approved:true,p_reason:"Accepted revision"}),"HR approve resubmission");
@@ -259,6 +282,48 @@ async function fullSuite(clients,key) {
     assert.equal(projectRead.error,null);
     assert.equal(projectRead.data.length,1,"explicit member cannot read project");
     console.log("Employee explicit project membership: ALLOWED");
+
+    // Projects remain available with Tasks disabled; the P2-owned punch-out gate
+    // must let an employee leave even when an unapproved task is due today.
+    const settings=rows(runSql(`SELECT tm.enabled AS tasks_enabled,t.punch_out_gate_enabled AS gate_enabled
+      FROM public.tenant_modules tm JOIN public.tenants t ON t.id=tm.tenant_id
+      WHERE tm.tenant_id='${companyA}'::uuid AND tm.module_key='tasks'`))[0];
+    assert.equal(settings.tasks_enabled,true);
+    const today=rows(runSql(`SELECT public.tenant_business_date('${companyA}'::uuid,now()) AS today`))[0].today.slice(0,10);
+    const attendanceIds=[];
+    try {
+      runSql(`INSERT INTO public.tasks(id,tenant_id,title,assigned_to,assigned_by,due_date,status)
+        VALUES('${taskGate}'::uuid,'${companyA}'::uuid,'P3-02 punch-out gate','${employeeA.employeeId}'::uuid,'${hrA.employeeId}'::uuid,'${today}'::date,'assigned');
+        UPDATE public.tenant_modules SET enabled=false WHERE tenant_id='${companyA}'::uuid AND module_key='tasks';
+        UPDATE public.tenants SET punch_out_gate_enabled=true WHERE id='${companyA}'::uuid`);
+      const projectsOnly=await clients.projectManager.database.from("projects").select("id").eq("id",projectA1);
+      assert.equal(projectsOnly.error,null);
+      assert.equal(projectsOnly.data.length,1,"Projects-only lost project access");
+      assert.equal((await taskIds(clients.employee,[taskGate])).length,0,"Tasks disabled still exposed task");
+      console.log("Projects-only: project visible; Tasks disabled: task hidden");
+      const punchedIn=allowed(await clients.employee.database.rpc("punch_in_attendance",{
+        p_tenant_id:companyA,p_employee_id:employeeA.employeeId,p_lat:null,p_lng:null,p_acc:null,
+        p_loc_status:"gps_unavailable",p_confidence:null,p_ip:null,p_remote_exception_id:null,
+        p_verification_snapshot:{test:"P3-02"},
+      }),"P3-02 punch in with Tasks disabled");
+      const attendanceId=punchedIn.attendance_id??punchedIn.id;
+      assert.ok(attendanceId);
+      attendanceIds.push(attendanceId);
+      const punchedOut=allowed(await clients.employee.database.rpc("punch_out_attendance",{
+        p_attendance_id:attendanceId,p_tenant_id:companyA,p_lat:null,p_lng:null,p_acc:null,
+        p_loc_status:"gps_unavailable",p_confidence:null,p_remote_exception_id:null,
+        p_verification_snapshot:{test:"P3-02"},
+      }),"P3-02 punch out with Tasks disabled");
+      assert.equal(punchedOut.success,true,"Tasks-disabled punch-out blocked");
+      console.log("AC6 punch-out with Tasks disabled and due unapproved task: success=true");
+    } finally {
+      if (attendanceIds.length) runSql(`DELETE FROM public.overtime_records WHERE attendance_id IN (${attendanceIds.map(id=>q(id)+"::uuid").join(",")});
+        DELETE FROM public.attendance_events WHERE attendance_id IN (${attendanceIds.map(id=>q(id)+"::uuid").join(",")});
+        DELETE FROM public.attendance WHERE id IN (${attendanceIds.map(id=>q(id)+"::uuid").join(",")})`);
+      runSql(`UPDATE public.tenant_modules SET enabled=${settings.tasks_enabled} WHERE tenant_id='${companyA}'::uuid AND module_key='tasks';
+        UPDATE public.tenants SET punch_out_gate_enabled=${settings.gate_enabled} WHERE id='${companyA}'::uuid;
+        DELETE FROM public.tasks WHERE id='${taskGate}'::uuid`);
+    }
 
     // Deep links must recheck membership on each request, without relying on the summary.
     denied(await clients.projectManager.database.rpc("p3_set_project_member",{p_project_id:projectA1,p_employee_id:projectManager.employeeId,p_role:"manager",p_active:false}),"Project Manager self removal");

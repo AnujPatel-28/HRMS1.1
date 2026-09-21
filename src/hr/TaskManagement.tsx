@@ -157,27 +157,13 @@ export default function TaskManagement() {
       return;
     }
     try {
-      const deptName = form.assign_mode === "department" ? deptOptions.find(d => d.value === form.department)?.label ?? null : null;
       for (const emp of targets) {
-        const { error: taskErr } = await db.from("tasks").insert([{
-          title: form.title, description: form.description || null,
-          tenant_id: tenantId,
-          assigned_to: emp.id, assigned_by: hrEmployee.id,
-          // department_filter keeps the unit's name for legacy display; org_unit_id is the real join key.
-          department_filter: deptName,
-          org_unit_id: form.assign_mode === "department" ? form.department : null,
-          priority: form.priority, due_date: form.due_date || null, due_time: form.due_time || null,
-          status: "assigned",
-          attendance_lock_date: form.due_date || null
-        }]);
+        const { error: taskErr } = await db.rpc("p3_assign_task", {
+          p_assigned_to: emp.id, p_title: form.title,
+          p_description: form.description || null, p_priority: form.priority,
+          p_due_date: form.due_date || null, p_due_time: form.due_time || null,
+        });
         if (taskErr) throw taskErr;
-        const { error: notifErr } = await db.from("notifications").insert([{
-          tenant_id: tenantId,
-          employee_id: emp.id, title: "New Task Assigned",
-          body: `You have been assigned: "${form.title}"${form.due_date ? ` — due ${form.due_date}` : ""}`,
-          type: "task_assigned",
-        }]);
-        if (notifErr) throw notifErr;
       }
       success(`Task assigned to ${targets.length} employee${targets.length !== 1 ? 's' : ''}`);
       setForm(EMPTY_FORM);
@@ -200,20 +186,6 @@ export default function TaskManagement() {
         p_task_id: task.id
       });
       if (rpcErr) throw rpcErr;
-      
-      const targetDate = task.attendance_lock_date || task.due_date || new Date().toISOString().slice(0,10);
-      
-      await db.from("calendar_events").insert([{
-        tenant_id: tenantId,
-        employee_id: task.assigned_to, date: targetDate, type: "green", task_id: task.id,
-        notes: `Task approved: ${task.title}`,
-      }]);
-      await db.from("notifications").insert([{
-        tenant_id: tenantId,
-        employee_id: task.assigned_to, title: "Task Approved ✅",
-        body: `Your task "${task.title}" was approved — you can now punch out.`,
-        type: "task_approved", reference_id: task.id,
-      }]);
       void logAction("task.approved", "task", task.id);
       success("Task approved.");
     } catch (err) {
@@ -235,12 +207,6 @@ export default function TaskManagement() {
       });
       if (rpcErr) throw rpcErr;
       
-      await db.from("notifications").insert([{
-        tenant_id: tenantId,
-        employee_id: task.assigned_to, title: "Task Rejected",
-        body: `Your task "${task.title}" was rejected.${rejectNotes ? ` Reason: ${rejectNotes}` : ""} Please resubmit.`,
-        type: "task_rejected", reference_id: task.id,
-      }]);
       void logAction("task.rejected", "task", task.id, { reason: rejectNotes });
       success("Task rejected.");
       setRejectId(null); setRejectNotes("");
@@ -255,12 +221,13 @@ export default function TaskManagement() {
   async function handleDeleteTask() {
     if (!deleteModal.taskId) return;
     try {
-      await db.from("tasks").delete().eq("tenant_id", tenantId).eq("id", deleteModal.taskId);
-      success("Task deleted.");
+      const { error: archiveErr } = await db.rpc("p3_archive_task", { p_task_id: deleteModal.taskId });
+      if (archiveErr) throw archiveErr;
+      success("Task archived.");
       setDeleteModal({ isOpen: false, taskId: null });
       void fetchTasks();
     } catch (err) {
-      toastError("Failed to delete task.");
+      toastError("Failed to archive task.");
     }
   }
 
@@ -601,9 +568,9 @@ export default function TaskManagement() {
         isOpen={deleteModal.isOpen}
         onClose={() => setDeleteModal({ isOpen: false, taskId: null })}
         onConfirm={handleDeleteTask}
-        title="Delete Task"
-        message="Are you sure you want to delete this task? This action cannot be undone."
-        confirmText="Delete Task"
+        title="Archive Task"
+        message="Archive this task? It will leave the active task lists."
+        confirmText="Archive Task"
         confirmColor="red"
       />
     </section>

@@ -23,7 +23,9 @@ export function useTasks(employeeId?: string) {
 
   const updateTaskStatus = useCallback(
     async (taskId: string, status: Task["status"]) => {
-      await db.from("tasks").update({ status }).eq("tenant_id", tenantId).eq("id", taskId);
+      if (status !== "in_progress") throw new Error("Use the submission and review actions to change task status.");
+      const { error } = await db.rpc("p3_set_task_state", { p_task_id: taskId, p_status: status });
+      if (error) throw error;
       await fetchTasks();
     },
     [fetchTasks, tenantId],
