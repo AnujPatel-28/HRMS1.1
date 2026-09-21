@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, X, Eye, Paperclip, ChevronDown, ChevronUp, Trash2, ClipboardList } from "lucide-react";
 import type { Employee, Task, TaskSubmission } from "../types";
 import { useTenant } from "../contexts/TenantContext";
-import { db } from "../insforge/client";
+import { db, storage } from "../insforge/client";
 import { useAuditLog } from "../hooks/useAuditLog";
 import { useEmployee } from "../hooks/useEmployee";
 import { useOrgStructure } from "../hooks/useOrgStructure";
@@ -12,6 +12,16 @@ import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { SelectDropdown } from "../shared/components/SelectDropdown";
 import { ALL_TASK_STATUSES, BLOCKING_TASK_STATUSES, SUBMITTED_TASK_STATUSES } from "../utils/taskConstants";
+
+// Attachments are stored under a "task-attachments:<key>" reference (P3-04 D1); download goes
+// through the authenticated SDK instead of a stored public URL (D6).
+function extractTaskAttachmentKey(value: string): string | null {
+  const prefix = "task-attachments:";
+  if (value.startsWith(prefix)) return value.slice(prefix.length);
+  const marker = "/api/storage/buckets/task-attachments/objects/";
+  const idx = value.indexOf(marker);
+  return idx !== -1 ? decodeURIComponent(value.slice(idx + marker.length)) : null;
+}
 
 type Tab = "active" | "inbox" | "all" | "assign";
 type StatusFilter = "all" | Task["status"];
@@ -232,6 +242,25 @@ export default function TaskManagement() {
     }
   }
 
+  async function downloadTaskAttachment(sub: TaskSubmission) {
+    if (!sub.attachment_url) return;
+    try {
+      const key = extractTaskAttachmentKey(sub.attachment_url);
+      if (!key) throw new Error("Attachment reference unavailable.");
+      const { data, error: dlErr } = await storage.from("task-attachments").download(key);
+      if (dlErr || !data) throw dlErr ?? new Error("Attachment unavailable.");
+      const url = URL.createObjectURL(data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = sub.attachment_name || "attachment";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      toastError("Failed to download attachment.");
+    }
+  }
+
   const filteredEmp = employees.filter(e =>
     e.full_name.toLowerCase().includes(empSearch.toLowerCase()) || e.email.toLowerCase().includes(empSearch.toLowerCase())
   );
@@ -404,11 +433,11 @@ export default function TaskManagement() {
                     <p className="text-xs font-semibold text-purple-700 mb-1">Submission Notes</p>
                     <p className="text-sm text-slate-700">{task.submission.notes ?? "No notes provided."}</p>
                     {task.submission.attachment_url && (
-                      <a href={task.submission.attachment_url} target="_blank" rel="noreferrer"
+                      <button type="button" onClick={() => void downloadTaskAttachment(task.submission)}
                         className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-white border border-purple-200 px-3 py-1.5 text-xs font-medium text-purple-700 hover:bg-purple-50">
                         <Paperclip className="h-3.5 w-3.5" />
                         {task.submission.attachment_name ?? "View Attachment"}
-                      </a>
+                      </button>
                     )}
                   </div>
 

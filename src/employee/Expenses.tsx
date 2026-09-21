@@ -38,6 +38,16 @@ const CATEGORIES = [
   { value: "other", label: "Other", icon: Receipt }
 ] as const;
 
+// Receipts are stored under a "expense-receipts:<key>" reference (P3-04 D1); download goes
+// through the authenticated SDK instead of a stored public URL (D6).
+function extractReceiptKey(value: string): string | null {
+  const prefix = "expense-receipts:";
+  if (value.startsWith(prefix)) return value.slice(prefix.length);
+  const marker = "/api/storage/buckets/expense-receipts/objects/";
+  const idx = value.indexOf(marker);
+  return idx !== -1 ? decodeURIComponent(value.slice(idx + marker.length)) : null;
+}
+
 export default function Expenses() {
   const { employee, loading: empLoading } = useEmployee();
   const { tenantId } = useTenant();
@@ -139,12 +149,14 @@ export default function Expenses() {
 
     try {
       if (receiptFile) {
+        const fileExt = receiptFile.name.includes(".") ? receiptFile.name.split(".").pop() : "bin";
+        const key = `${tenantId}/${employee.id}/${crypto.randomUUID()}.${fileExt}`;
         const { data: uploadData, error: uploadErr } = await storage
           .from("expense-receipts")
-          .uploadAuto(receiptFile);
+          .upload(key, receiptFile);
 
         if (uploadErr || !uploadData) throw uploadErr || new Error("Upload failed");
-        receiptUrl = uploadData.url;
+        receiptUrl = `expense-receipts:${uploadData.key}`;
         receiptName = receiptFile.name;
       }
 
@@ -222,13 +234,8 @@ export default function Expenses() {
 
       // Delete receipt from storage if exists
       if (cancelExpense.receipt_url) {
-        // extract storage path / key from url
-        const marker = "/objects/";
-        const idx = cancelExpense.receipt_url.indexOf(marker);
-        if (idx !== -1) {
-          const key = decodeURIComponent(cancelExpense.receipt_url.slice(idx + marker.length));
-          await storage.from("expense-receipts").remove?.(key);
-        }
+        const key = extractReceiptKey(cancelExpense.receipt_url);
+        if (key) await storage.from("expense-receipts").remove?.(key);
       }
 
       success("Expense claim cancelled.");
@@ -239,6 +246,26 @@ export default function Expenses() {
       error("Failed to cancel expense claim.");
     } finally {
       setCancelling(false);
+    }
+  };
+
+  // Download a receipt through the authenticated SDK rather than a stored URL (D6).
+  const handleDownloadReceipt = async (exp: Expense) => {
+    if (!exp.receipt_url) return;
+    try {
+      const key = extractReceiptKey(exp.receipt_url);
+      if (!key) throw new Error("Receipt reference unavailable.");
+      const { data, error: dlErr } = await storage.from("expense-receipts").download(key);
+      if (dlErr || !data) throw dlErr ?? new Error("Receipt unavailable.");
+      const url = URL.createObjectURL(data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = exp.receipt_name || "receipt";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      error("Failed to download receipt.");
     }
   };
 
@@ -438,15 +465,14 @@ export default function Expenses() {
                             </td>
                             <td className="px-5 py-4 whitespace-nowrap">
                               {exp.receipt_url ? (
-                                <a
-                                  href={exp.receipt_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDownloadReceipt(exp)}
                                   className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
                                 >
                                   <Eye className="h-3.5 w-3.5" />
                                   View
-                                </a>
+                                </button>
                               ) : (
                                 <span className="text-xs text-slate-400">-</span>
                               )}

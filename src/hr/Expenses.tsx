@@ -17,7 +17,7 @@ import {
   Square,
   DollarSign
 } from "lucide-react";
-import { db } from "../insforge/client";
+import { db, storage } from "../insforge/client";
 import { useEmployee } from "../hooks/useEmployee";
 import { useTenant } from "../contexts/TenantContext";
 import { useToast } from "../shared/ToastContext";
@@ -36,11 +36,40 @@ const CATEGORIES = [
   { value: "other", label: "Other", icon: Receipt }
 ] as const;
 
+// Receipts are stored under a "expense-receipts:<key>" reference (P3-04 D1); download goes
+// through the authenticated SDK instead of a stored public URL (D6).
+function extractReceiptKey(value: string): string | null {
+  const prefix = "expense-receipts:";
+  if (value.startsWith(prefix)) return value.slice(prefix.length);
+  const marker = "/api/storage/buckets/expense-receipts/objects/";
+  const idx = value.indexOf(marker);
+  return idx !== -1 ? decodeURIComponent(value.slice(idx + marker.length)) : null;
+}
+
 export default function HRExpenses() {
   const deptLabel = useDepartmentLabel();
   const { employee: currentHR } = useEmployee();
   const { tenantId } = useTenant();
   const { success, error } = useToast();
+
+  const handleDownloadReceipt = async (exp: Expense) => {
+    if (!exp.receipt_url) return;
+    try {
+      const key = extractReceiptKey(exp.receipt_url);
+      if (!key) throw new Error("Receipt reference unavailable.");
+      const { data, error: dlErr } = await storage.from("expense-receipts").download(key);
+      if (dlErr || !data) throw dlErr ?? new Error("Receipt unavailable.");
+      const url = URL.createObjectURL(data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = exp.receipt_name || "receipt";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      error("Failed to download receipt.");
+    }
+  };
 
   const [activeTab, setActiveTab] = useState<"pending" | "all" | "history">("pending");
   const [expenses, setExpenses] = useState<(Expense & { payroll_runs?: { month: number; year: number } | null })[]>([]);
@@ -514,15 +543,14 @@ export default function HRExpenses() {
                             {exp.expense_date}
                           </span>
                           {exp.receipt_url && (
-                            <a
-                              href={exp.receipt_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              type="button"
+                              onClick={() => void handleDownloadReceipt(exp)}
                               className="inline-flex items-center gap-1 rounded-full bg-brand-50 border border-brand-100 px-2 py-0.5 text-xs font-semibold text-brand-700"
                             >
                               <Eye className="h-3 w-3" />
                               View Receipt
-                            </a>
+                            </button>
                           )}
                         </div>
                       </div>
@@ -751,15 +779,14 @@ export default function HRExpenses() {
                         </td>
                         <td className="px-5 py-4 whitespace-nowrap">
                           {exp.receipt_url ? (
-                            <a
-                              href={exp.receipt_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              type="button"
+                              onClick={() => void handleDownloadReceipt(exp)}
                               className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
                             >
                               <Eye className="h-3.5 w-3.5" />
                               View
-                            </a>
+                            </button>
                           ) : (
                             <span className="text-xs text-slate-400">-</span>
                           )}
@@ -893,15 +920,14 @@ export default function HRExpenses() {
                             </td>
                             <td className="px-5 py-4 whitespace-nowrap">
                               {exp.receipt_url ? (
-                                <a
-                                  href={exp.receipt_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDownloadReceipt(exp)}
                                   className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
                                 >
                                   <Eye className="h-3.5 w-3.5" />
                                   View
-                                </a>
+                                </button>
                               ) : (
                                 <span className="text-xs text-slate-400">-</span>
                               )}

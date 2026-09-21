@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ChevronRight, Calendar, Users, FolderKanban, CheckCircle2, AlertCircle, Edit, Trash2, Plus, X, Paperclip, Check, Search } from "lucide-react";
-import { db } from "../../insforge/client";
+import { db, storage } from "../../insforge/client";
 import { useTenant } from "../../contexts/TenantContext";
 import { useEmployee } from "../../hooks/useEmployee";
 import { useToast } from "../../shared/ToastContext";
@@ -10,6 +10,16 @@ import { EmptyState } from "../../shared/EmptyState";
 import { useAuditLog } from "../../hooks/useAuditLog";
 import type { Project, Employee, Task, TaskSubmission } from "../../types";
 import { useDepartmentLabel } from "../../contexts/OrgUnitsContext";
+
+// Attachments are stored under a "task-attachments:<key>" reference (P3-04 D1); download goes
+// through the authenticated SDK instead of a stored public URL (D6).
+function extractTaskAttachmentKey(value: string): string | null {
+  const prefix = "task-attachments:";
+  if (value.startsWith(prefix)) return value.slice(prefix.length);
+  const marker = "/api/storage/buckets/task-attachments/objects/";
+  const idx = value.indexOf(marker);
+  return idx !== -1 ? decodeURIComponent(value.slice(idx + marker.length)) : null;
+}
 
 const PRIORITY_DOT: Record<Task["priority"], string> = {
   low: "bg-slate-400",
@@ -381,6 +391,25 @@ export default function ProjectDetail() {
       void fetchProjectData();
     } catch (err) {
       toastError("Failed to archive task.");
+    }
+  };
+
+  const downloadTaskAttachment = async (sub: TaskSubmission) => {
+    if (!sub.attachment_url) return;
+    try {
+      const key = extractTaskAttachmentKey(sub.attachment_url);
+      if (!key) throw new Error("Attachment reference unavailable.");
+      const { data, error: dlErr } = await storage.from("task-attachments").download(key);
+      if (dlErr || !data) throw dlErr ?? new Error("Attachment unavailable.");
+      const url = URL.createObjectURL(data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = sub.attachment_name || "attachment";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      toastError("Failed to download attachment.");
     }
   };
 
@@ -1009,15 +1038,14 @@ export default function ProjectDetail() {
                       {submissions[selectedTask.id].notes || "No submission notes."}
                     </p>
                     {submissions[selectedTask.id].attachment_url && (
-                      <a
-                        href={submissions[selectedTask.id].attachment_url!}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={() => void downloadTaskAttachment(submissions[selectedTask.id])}
                         className="inline-flex items-center gap-1.5 rounded-lg bg-white border border-purple-200 px-3 py-1.5 text-xs font-medium text-purple-700 hover:bg-purple-50 shadow-sm transition"
                       >
                         <Paperclip className="h-3.5 w-3.5" />
                         {submissions[selectedTask.id].attachment_name || "View Attachment"}
-                      </a>
+                      </button>
                     )}
                   </div>
 

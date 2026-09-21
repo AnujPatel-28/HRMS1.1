@@ -10,6 +10,18 @@ import { Skeleton } from "../shared/Skeleton";
 import { EmptyState } from "../shared/EmptyState";
 import { useManagerView } from "../hooks/useManagerView";
 
+// Attachments are stored under a "task-attachments:<key>" reference (P3-04 D1); download goes
+// through the authenticated SDK instead of a stored public URL (D6). Legacy pre-migration rows
+// held a full storage URL — parsed here for display only, though those specific objects now
+// fail closed (unprefixed keys, D3) and cannot be retrieved.
+function extractTaskAttachmentKey(value: string): string | null {
+  const prefix = "task-attachments:";
+  if (value.startsWith(prefix)) return value.slice(prefix.length);
+  const marker = "/api/storage/buckets/task-attachments/objects/";
+  const idx = value.indexOf(marker);
+  return idx !== -1 ? decodeURIComponent(value.slice(idx + marker.length)) : null;
+}
+
 const PRIORITY_BADGE: Record<Task["priority"], string> = {
   low: "bg-slate-100 text-slate-600",
   medium: "bg-blue-100 text-blue-700",
@@ -161,9 +173,11 @@ export default function MyTasks() {
 
     try {
       if (file) {
-        const { data: uploadData, error: uploadErr } = await storage.from("task-attachments").uploadAuto(file);
+        const fileExt = file.name.includes(".") ? file.name.split(".").pop() : "bin";
+        const key = `${tenantId}/${employee.id}/${crypto.randomUUID()}.${fileExt}`;
+        const { data: uploadData, error: uploadErr } = await storage.from("task-attachments").upload(key, file);
         if (uploadErr || !uploadData) throw new Error(`Failed to upload file: ${uploadErr?.message}`);
-        attachment_url = uploadData.url;
+        attachment_url = `task-attachments:${uploadData.key}`;
         attachment_name = file.name;
       }
 
@@ -190,6 +204,25 @@ export default function MyTasks() {
       error("Submission failed. Please try again.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function downloadTaskAttachment(sub: TaskSubmission) {
+    if (!sub.attachment_url) return;
+    try {
+      const key = extractTaskAttachmentKey(sub.attachment_url);
+      if (!key) throw new Error("Attachment reference unavailable.");
+      const { data, error: dlErr } = await storage.from("task-attachments").download(key);
+      if (dlErr || !data) throw dlErr ?? new Error("Attachment unavailable.");
+      const url = URL.createObjectURL(data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = sub.attachment_name || "attachment";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      error("Failed to download attachment.");
     }
   }
 
@@ -428,10 +461,10 @@ export default function MyTasks() {
                           <p className="font-semibold text-purple-700 mb-1">Awaiting Manager Review</p>
                           {sub.notes && <p className="text-slate-600 text-xs">Your notes: {sub.notes}</p>}
                           {sub.attachment_url && (
-                            <a href={sub.attachment_url} target="_blank" rel="noreferrer"
+                            <button type="button" onClick={() => void downloadTaskAttachment(sub)}
                               className="mt-1 inline-flex items-center gap-1 text-xs text-brand-600 hover:underline">
                               <Paperclip className="h-3.5 w-3.5" /> {sub.attachment_name ?? "Attachment"}
-                            </a>
+                            </button>
                           )}
                         </div>
                       )}
@@ -529,11 +562,11 @@ export default function MyTasks() {
                           <p className="text-xs font-semibold text-purple-700">Submission Details</p>
                           <p className="text-sm text-slate-700">{sub.notes ?? "No submission notes."}</p>
                           {sub.attachment_url && (
-                            <a href={sub.attachment_url} target="_blank" rel="noreferrer"
+                            <button type="button" onClick={() => void downloadTaskAttachment(sub)}
                               className="inline-flex items-center gap-1.5 rounded-lg bg-white border border-purple-200 px-3 py-1.5 text-xs font-medium text-purple-700 hover:bg-purple-50">
                               <Paperclip className="h-3.5 w-3.5" />
                               {sub.attachment_name ?? "View Attachment"}
-                            </a>
+                            </button>
                           )}
 
                           {rejectId === task.id ? (
@@ -570,10 +603,10 @@ export default function MyTasks() {
                           <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1"><CheckCircle className="h-4 w-4" /> Task Approved</p>
                           <p className="text-xs text-slate-500 mt-1">Submitted notes: {sub.notes}</p>
                           {sub.attachment_url && (
-                            <a href={sub.attachment_url} target="_blank" rel="noreferrer"
+                            <button type="button" onClick={() => void downloadTaskAttachment(sub)}
                               className="mt-2 inline-flex items-center gap-1 text-xs text-brand-600 hover:underline">
                               <Paperclip className="h-3.5 w-3.5" /> {sub.attachment_name ?? "Attachment"}
-                            </a>
+                            </button>
                           )}
                         </div>
                       )}

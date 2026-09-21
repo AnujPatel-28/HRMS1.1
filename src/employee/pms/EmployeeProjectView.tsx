@@ -9,6 +9,16 @@ import { Skeleton } from "../../shared/Skeleton";
 import { EmptyState } from "../../shared/EmptyState";
 import type { Project, Employee, Task, TaskSubmission } from "../../types";
 
+// Attachments are stored under a "task-attachments:<key>" reference (P3-04 D1); download goes
+// through the authenticated SDK instead of a stored public URL (D6).
+function extractTaskAttachmentKey(value: string): string | null {
+  const prefix = "task-attachments:";
+  if (value.startsWith(prefix)) return value.slice(prefix.length);
+  const marker = "/api/storage/buckets/task-attachments/objects/";
+  const idx = value.indexOf(marker);
+  return idx !== -1 ? decodeURIComponent(value.slice(idx + marker.length)) : null;
+}
+
 const PRIORITY_BADGE: Record<Task["priority"], string> = {
   low: "bg-slate-100 text-slate-600",
   medium: "bg-blue-100 text-blue-700",
@@ -154,9 +164,11 @@ export default function EmployeeProjectView() {
 
     try {
       if (file) {
-        const { data: uploadData, error: uploadErr } = await storage.from("task-attachments").uploadAuto(file);
+        const fileExt = file.name.includes(".") ? file.name.split(".").pop() : "bin";
+        const key = `${tenantId}/${employee.id}/${crypto.randomUUID()}.${fileExt}`;
+        const { data: uploadData, error: uploadErr } = await storage.from("task-attachments").upload(key, file);
         if (uploadErr || !uploadData) throw new Error(`Failed to upload file: ${uploadErr?.message}`);
-        attachment_url = uploadData.url;
+        attachment_url = `task-attachments:${uploadData.key}`;
         attachment_name = file.name;
       }
 
@@ -185,6 +197,25 @@ export default function EmployeeProjectView() {
       error(err.message || "Submission failed. Please try again.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const downloadTaskAttachment = async (sub: TaskSubmission) => {
+    if (!sub.attachment_url) return;
+    try {
+      const key = extractTaskAttachmentKey(sub.attachment_url);
+      if (!key) throw new Error("Attachment reference unavailable.");
+      const { data, error: dlErr } = await storage.from("task-attachments").download(key);
+      if (dlErr || !data) throw dlErr ?? new Error("Attachment unavailable.");
+      const url = URL.createObjectURL(data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = sub.attachment_name || "attachment";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      error("Failed to download attachment.");
     }
   };
 
@@ -314,14 +345,13 @@ export default function EmployeeProjectView() {
                           <p className="font-bold text-purple-700 mb-1">Awaiting Review</p>
                           {sub.notes && <p className="text-slate-600 font-medium">Your notes: {sub.notes}</p>}
                           {sub.attachment_url && (
-                            <a
-                              href={sub.attachment_url}
-                              target="_blank"
-                              rel="noreferrer"
+                            <button
+                              type="button"
+                              onClick={() => void downloadTaskAttachment(sub)}
                               className="mt-2 inline-flex items-center gap-1 text-brand-600 hover:underline font-semibold"
                             >
                               <Paperclip className="h-3.5 w-3.5" /> {sub.attachment_name || "Attachment"}
-                            </a>
+                            </button>
                           )}
                         </div>
                       )}
