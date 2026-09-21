@@ -413,6 +413,12 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 - **Review requirements:** P6 PACKAGE high-risk review with raw packet evidence, storage HTTP evidence and notification trigger/policy review. Client filtering is not evidence.
 - **Backend target:** `TB-M1M2` only; no realtime/bucket/function change on `BASELINE-RO`.
 
+### P3-02b — Advertise project and channel scopes (added 2026-09-21)
+
+- **Owner:** lead brief; implementer Sonnet 5.
+- **Status:** **BRIEFED 2026-09-21** — `prompts/p3-02b_advertise_project_channel_scope_2026-09-21.md`. One predicate drives both the capability summary and `has_access_action`; AuthContext stops rejecting scoped grants; Chat management keys on `channel.manage` not `role===hr`. **Production deploy order: frontend first, then migration** — new summary + old AuthContext drops every user's capabilities.
+- **Migration:** `20260912191000_m1m2-advertise-project-channel-scope.sql`; one forward fix `191100` pre-authorized.
+
 ### P3-04 — Private personal-data buckets (added 2026-09-21)
 
 - **Owner:** lead brief; implementer Sonnet 5.
