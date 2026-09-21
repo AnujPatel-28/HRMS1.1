@@ -1,7 +1,7 @@
 # TalentMesh non-payroll Monday execution tasks
 
 Plan version: **v0.5**  
-Status: **P1 COMPLETE. P2-01, P2-02, P2-04, P3-01, P3-02, P3-03 accepted. P2-03 blocked on hardware. Next: P3-04 (buckets), then P3-02b (advertise project + channel scope).**  
+Status: **P1 COMPLETE. P2-01, P2-02, P2-04, P3-01, P3-02, P3-03, P3-04 accepted. P2-03 blocked on hardware. Next: P3-02b (advertise project + channel scope), then deferred cleanup.**  
 Baseline revision: `7214f8e3abeaef797d45122c7bc1129f0663cc43`  
 Contract dependency: `contracts.md` v0.5
 
@@ -416,7 +416,8 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 ### P3-04 — Private personal-data buckets (added 2026-09-21)
 
 - **Owner:** lead brief; implementer Sonnet 5.
-- **Status:** **BRIEFED 2026-09-21** — `prompts/p3-04_private_personal_data_buckets_2026-09-21.md`. Survey added two within-company leaks: any employee reads every colleague's employee-documents (storage policy checks tenant only), and `employee_documents` table is fenced by a PERMISSIVE tenant policy. Migration `20260912190000`, one forward fix `190100` pre-authorized.
+- **Status:** **ACCEPTED 2026-09-21** at `1a10646` — anonymous payslip download 200 → 401; colleague and cross-tenant reads denied; real legacy owner read verified. See `reviews/package-review-P3-04.md`.
+  - Briefed as `prompts/p3-04_private_personal_data_buckets_2026-09-21.md`. Survey added two within-company leaks: any employee reads every colleague's employee-documents (storage policy checks tenant only), and `employee_documents` table is fenced by a PERMISSIVE tenant policy. Migration `20260912190000`, one forward fix `190100` pre-authorized.
 - **Why:** `employee-documents` (payslips, IDs), `expense-receipts`, `task-attachments` are public buckets. Lead proved it: an anonymous `curl` with no auth header downloaded a payslip PDF from `employee-documents` on TB-M1M2 (HTTP 200, 231 KB). Split from P3-03 because their screens are outside P3-03's file list.
 - **Shape:** buckets private; tenant/owner/HR-scoped `storage.objects` policies; UI moves to signed URLs; record previously-issued URL behavior; record how privacy is set (not reconstructible from SQL — P3-01 finding).
 
