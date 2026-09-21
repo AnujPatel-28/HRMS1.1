@@ -365,7 +365,8 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
   - `functions/on-task-assigned.ts`
   - `functions/on-task-approved.ts`
   - `functions/on-task-rejected.ts`
-  - `tests/m1m2/p3_projects_tasks.mjs` (new)
+  - `tests/m1m2/p3_projects_tasks.mjs` (new) (v0.5 — 2026-09-21: owns ALL P3-02 fixtures, disposable, incl. two temporary Company A personas; shared fixture files stay untouched so 1/2/0 holds. See brief §7 D1)
+  - **Not in scope (decision 2026-09-21):** the capability resolver and `src/contexts/AuthContext.tsx`. P3-02 enforces `project:<id>` via its own server membership check; advertising it is **P3-02b**, one resolver-replacement migration + the AuthContext guard, shipped together after P3-02 is accepted. See brief §7 D2
 - **Dependencies:** P1-00 harness; P1-01 shared no-self predicate; P1-02 capability check; P1-03 reporting separation; P2-01/P2-04 availability; decision on direct-table substitutes.
 - **Acceptance tests:**
   1. Explicit project membership, assignment, submit, review with reason, resubmit and archive use server APIs; HR Admin assigns/reviews at `company`, Manager assigns/reviews only at `direct_reports`, and Employee submits a non-project task at `self` as well as a project task at `project:<id>`.

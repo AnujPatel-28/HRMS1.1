@@ -149,3 +149,53 @@ Evidence, not assertion, for:
 If advertising `project:<id>` requires changing P1-01's resolver, or any fix needs a file outside
 your list, **stop and report**. That is a scoping decision, not something to solve by widening your
 own file list.
+
+---
+
+## 7. Lead decisions, 2026-09-21 (answers to the first stop-and-report)
+
+The first attempt stopped correctly at HEAD `8fb7f62`, with two blockers: Company A has zero tasks,
+and advertising `project:<id>` needs the resolver (`has_access_action`, `scope_type NOT IN
+('project','channel')`) **and** `AuthContext.tsx` (which rejects the whole summary if a project
+grant appears). Both decisions below are made. Resume.
+
+### D1 — Fixtures: authorized, disposable, owned by your test file
+
+- **All P3-02 fixtures live in `tests/m1m2/p3_projects_tasks.mjs`** (already on your list), created
+  at setup and removed in a `finally` teardown, the way `p2_leave_workflow.mjs` does it. Use
+  deterministic ids with a recognisable prefix so teardown is exact.
+- **Do not edit `personas.mjs`, `seed.mjs` or `reset.mjs`.** You may *import* their helpers.
+- You may create, for the duration of the run only: projects, project membership rows, tasks and
+  submissions in Company A and Company B, and **two temporary Company A personas** — a reporting
+  manager with an effective `primary` relationship over `employee.a`, and a project manager who is a
+  member of project A1 only. Give the project manager a **non-primary** relationship (e.g. `mentor`)
+  to `employee.a` so the P1-03 rule is tested: it must fail a manager-scope read.
+- Minimum task set: a project-A1 task assigned to `employee.a` in a submitted state; a project-A2
+  task (PM not a member); a `project_id IS NULL` task assigned to `employee.a`; a Company B task.
+- **Why disposable and not persistent:** persistent extra Company A employees would change the 1/2/0
+  invariant every other package reports. Report 1/2/0 before setup and after teardown; the mid-run
+  count will differ and that is expected.
+- **Order of operations for the before-evidence:** run setup → execute the self-approval PATCH as
+  `employee.a` against the unchanged schema → record the raw response and the row's status after →
+  teardown → only then apply migration `20260912188000`. Give the script a mode flag for this
+  (e.g. `--before-only`) so the "before" line is reproducible.
+
+### D2 — Project scope: enforce now, advertise later. The resolver and AuthContext stay untouched
+
+- P3-02 **enforces** project membership. It does **not** advertise `project:<id>`. Do not edit
+  `has_access_action`, `get_my_capability_summary`, migration `181000`, or `AuthContext.tsx`.
+- Consequence you must design for: `has_access_action(..., 'project', <id>)` returns **false by
+  design** today. Do **not** route project authority through it. Write your own definer helper (e.g.
+  `is_project_member(p_project_id uuid, p_role text)`) that is a **server membership check** against
+  your new membership table — current, same tenant, active employee — and use it in the RLS policies
+  and the review/assign RPCs. That matches §3 of `contracts.md`: "one explicit current project
+  membership and project role", never a caller-supplied array.
+- Company and direct-reports authority (HR Admin, Manager) keep going through the existing seams
+  (`has_access_action` at `company`, P1-03's primary-relationship rule at `direct_reports`).
+- **Advertising becomes P3-02b**, a small follow-up the lead dispatches after P3-02 is accepted: one
+  new migration replacing the resolver on its exact signature, plus the `AuthContext.tsx` guard,
+  shipped together — shipping either alone breaks every user's capability summary. It is ordered
+  after P3-02 on purpose: a scope must be enforced and verified before the UI is told it exists.
+- Report the frontend consequence honestly: until P3-02b, a Project Manager's UI will not *show*
+  project actions from the capability summary, even though the server allows them. Say which of
+  your listed screens that affects; do not work around it client-side.
