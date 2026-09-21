@@ -92,8 +92,19 @@ function assertFrozenWire(summary, persona) {
   assert.deepEqual(summary.responsibilities, persona.responsibilities);
   assert.equal(summary.unavailableReason, null);
   assert.equal(Number.isNaN(Date.parse(summary.issuedAt)), false);
-  assert.equal(summary.grants.some((grant) => ["project", "channel"].includes(grant.scopeType)), false);
-  assert.equal(summary.grants.some((grant) => Object.hasOwn(grant, "scopeId")), false);
+  // P3-02b: project/channel scopes are now advertised, but only for a current explicit
+  // membership (contracts.md v0.5 §16). None of these three fixed personas holds a project or
+  // channel membership, so the count stays zero here — that is still an empirical fact, just no
+  // longer a blanket architectural ban. What IS still a wire-shape invariant: scopeId is present
+  // if and only if the scope is project/channel (never `"scopeId": null` on a company/self/
+  // direct_reports grant — that would fail AuthContext's ~99-104 validation for every user).
+  const scopedGrants = summary.grants.filter((grant) => ["project", "channel"].includes(grant.scopeType));
+  assert.equal(scopedGrants.length, 0, `${persona.email}: unexpected project/channel grants for a persona with no project/channel membership`);
+  assert.equal(
+    summary.grants.every((grant) => ["project", "channel"].includes(grant.scopeType) === Object.hasOwn(grant, "scopeId")),
+    true,
+    `${persona.email}: scopeId must be present iff scopeType is project/channel`,
+  );
   assert.equal(summary.enabledModules.includes("payroll"), false);
   assert.equal(summary.enabledModules.includes("insurance"), false);
   assert.equal(summary.grants.some((grant) => grant.action.includes("payroll") || grant.action.includes("insurance")), false);

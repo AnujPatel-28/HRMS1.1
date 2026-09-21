@@ -8,6 +8,7 @@ import { useToast } from "../../shared/ToastContext";
 import { Skeleton } from "../../shared/Skeleton";
 import { EmptyState } from "../../shared/EmptyState";
 import { useAuditLog } from "../../hooks/useAuditLog";
+import { useAuth } from "../../hooks/useAuth";
 import type { Project, Employee, Task, TaskSubmission } from "../../types";
 import { useDepartmentLabel } from "../../contexts/OrgUnitsContext";
 
@@ -53,6 +54,13 @@ export default function ProjectDetail() {
   const navigate = useNavigate();
   const { success, error: toastError } = useToast();
   const { logAction } = useAuditLog();
+  const { hasGrant } = useAuth();
+  // D5: manage/assign/review controls are gated on an explicit project:<id> membership grant, not
+  // role. HR's A1 grant is project.read@company (read-only) and never satisfies these — a caller
+  // needs an actual project_manager membership in THIS project to see them.
+  const canManageProject = hasGrant("project.manage", "project", projectId);
+  const canAssignTasks = hasGrant("task.assign", "project", projectId);
+  const canReviewTasks = hasGrant("task.review", "project", projectId);
 
   const [project, setProject] = useState<Project | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -580,42 +588,55 @@ export default function ProjectDetail() {
           </div>
 
           <div className="flex items-center gap-2.5">
-            {/* Status Dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
-                className={`rounded-full border px-3.5 py-1.5 text-xs font-bold capitalize tracking-wide shadow-sm flex items-center gap-2 hover:bg-slate-50 transition active:scale-[0.98] ${
+            {/* Status: interactive for a project.manage holder, read-only badge otherwise (D5 —
+                HR's project.read@company must not see manage controls). */}
+            {canManageProject ? (
+              <div className="relative">
+                <button
+                  onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
+                  className={`rounded-full border px-3.5 py-1.5 text-xs font-bold capitalize tracking-wide shadow-sm flex items-center gap-2 hover:bg-slate-50 transition active:scale-[0.98] ${
+                    STATUS_COLOR[project.status]
+                  }`}
+                >
+                  <span>{project.status.replace("_", " ")}</span>
+                  <span className="text-[10px]">▼</span>
+                </button>
+
+                {isStatusDropdownOpen && (
+                  <div className="absolute right-0 z-50 mt-1.5 w-36 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-lg space-y-1">
+                    {(["planning", "active", "on_hold", "completed", "cancelled"] as const).map((st) => (
+                      <button
+                        key={st}
+                        onClick={() => void handleUpdateStatus(st)}
+                        className={`flex w-full items-center px-3 py-2 text-left text-xs font-semibold rounded-xl capitalize transition ${
+                          project.status === st ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        {st.replace("_", " ")}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span
+                className={`rounded-full border px-3.5 py-1.5 text-xs font-bold capitalize tracking-wide shadow-sm ${
                   STATUS_COLOR[project.status]
                 }`}
               >
-                <span>{project.status.replace("_", " ")}</span>
-                <span className="text-[10px]">▼</span>
-              </button>
-
-              {isStatusDropdownOpen && (
-                <div className="absolute right-0 z-50 mt-1.5 w-36 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-lg space-y-1">
-                  {(["planning", "active", "on_hold", "completed", "cancelled"] as const).map((st) => (
-                    <button
-                      key={st}
-                      onClick={() => void handleUpdateStatus(st)}
-                      className={`flex w-full items-center px-3 py-2 text-left text-xs font-semibold rounded-xl capitalize transition ${
-                        project.status === st ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      {st.replace("_", " ")}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+                {project.status.replace("_", " ")}
+              </span>
+            )}
 
             {/* Edit Button */}
-            <button
-              onClick={openEditModal}
-              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 shadow-sm transition active:scale-[0.98]"
-            >
-              <Edit className="h-3.5 w-3.5" /> Edit Project
-            </button>
+            {canManageProject && (
+              <button
+                onClick={openEditModal}
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 shadow-sm transition active:scale-[0.98]"
+              >
+                <Edit className="h-3.5 w-3.5" /> Edit Project
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -642,12 +663,14 @@ export default function ProjectDetail() {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <h3 className="text-lg font-bold text-slate-900">Project Tasks</h3>
-            <button
-              onClick={() => setIsAddTaskModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700 shadow transition active:scale-[0.98]"
-            >
-              <Plus className="h-4 w-4" /> Add Task
-            </button>
+            {canAssignTasks && (
+              <button
+                onClick={() => setIsAddTaskModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700 shadow transition active:scale-[0.98]"
+              >
+                <Plus className="h-4 w-4" /> Add Task
+              </button>
+            )}
           </div>
 
           {/* Kanban Board */}
@@ -771,16 +794,18 @@ export default function ProjectDetail() {
                     <p className="text-xs text-slate-400 font-medium">Completion Rate</p>
                     <p className="text-sm font-bold text-emerald-600">{member.completionRate}%</p>
                   </div>
-                  <button
-                    onClick={() => {
-                      setTaskAssigneeId(member.employee?.id || "");
-                      setTaskAssigneeSearch(member.employee?.full_name || "");
-                      setIsAddTaskModalOpen(true);
-                    }}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition active:scale-[0.98]"
-                  >
-                    Assign Task
-                  </button>
+                  {canAssignTasks && (
+                    <button
+                      onClick={() => {
+                        setTaskAssigneeId(member.employee?.id || "");
+                        setTaskAssigneeSearch(member.employee?.full_name || "");
+                        setIsAddTaskModalOpen(true);
+                      }}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition active:scale-[0.98]"
+                    >
+                      Assign Task
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -860,12 +885,14 @@ export default function ProjectDetail() {
               <Calendar className="mx-auto h-12 w-12 text-slate-300 mb-2" />
               <p className="text-sm font-semibold text-slate-700">Project dates are not configured</p>
               <p className="text-xs text-slate-400 mt-1">Please set project Start and End dates to generate the timeline.</p>
-              <button
-                onClick={openEditModal}
-                className="mt-4 rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
-              >
-                Set Dates
-              </button>
+              {canManageProject && (
+                <button
+                  onClick={openEditModal}
+                  className="mt-4 rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                >
+                  Set Dates
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1080,7 +1107,7 @@ export default function ProjectDetail() {
                       </div>
                     </div>
                   ) : (
-                    selectedTask.status === "submitted" && (
+                    selectedTask.status === "submitted" && canReviewTasks && (
                       <div className="flex gap-2.5 pt-2 border-t border-slate-100">
                         <button
                           onClick={() => void handleApproveTask(selectedTask)}
@@ -1120,15 +1147,17 @@ export default function ProjectDetail() {
               )}
             </div>
 
-            {/* Drawer Footer */}
-            <div className="border-t border-slate-100 bg-slate-50 px-6 py-4 flex items-center justify-end">
-              <button
-                onClick={() => void handleDeleteTask(selectedTask.id)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 px-4 py-2 text-xs font-semibold transition active:scale-[0.98]"
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Archive Task
-              </button>
-            </div>
+            {/* Drawer Footer: p3_archive_task requires the same task.assign scope as assigning it. */}
+            {canAssignTasks && (
+              <div className="border-t border-slate-100 bg-slate-50 px-6 py-4 flex items-center justify-end">
+                <button
+                  onClick={() => void handleDeleteTask(selectedTask.id)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 px-4 py-2 text-xs font-semibold transition active:scale-[0.98]"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Archive Task
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

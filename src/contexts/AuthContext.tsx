@@ -30,7 +30,7 @@ type AuthContextValue = {
   capability: CapabilitySummary | null;
   capabilityLoading: boolean;
   capabilityUnavailableReason: string | null;
-  hasGrant: (action: string, scopeType?: ScopeType | ScopeType[]) => boolean;
+  hasGrant: (action: string, scopeType?: ScopeType | ScopeType[], scopeId?: string) => boolean;
   canAccessMyWork: boolean;
   canAccessTeam: boolean;
   canAccessAdministration: boolean;
@@ -114,9 +114,9 @@ const resolveCapabilitySummary = async (expectedTenantId: string | null) => {
   if (expectedTenantId && data.tenantId !== expectedTenantId) {
     return { summary: null, reason: "capability_tenant_mismatch" } as const;
   }
-  if (data.grants.some((grant) => grant.scopeType === "project" || grant.scopeType === "channel")) {
-    return { summary: null, reason: "unsupported_capability_scope" } as const;
-  }
+  // P3-02b: project/channel scopes are now advertised (server-enforced, contracts.md v0.5 §16).
+  // isCapabilitySummary above already requires scopeId to be a string for those two scopes and
+  // absent otherwise, so a well-formed summary is accepted whether or not it carries any.
   return { summary: data, reason: data.unavailableReason } as const;
 };
 
@@ -370,13 +370,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshUser]);
 
   const hasGrant = useCallback(
-    (action: string, scopeType?: ScopeType | ScopeType[]) => {
+    (action: string, scopeType?: ScopeType | ScopeType[], scopeId?: string) => {
       if (!capability || capability.membershipStatus !== "active" || capabilityUnavailableReason) return false;
       const acceptedScopes = scopeType === undefined
         ? null
         : new Set(Array.isArray(scopeType) ? scopeType : [scopeType]);
       return capability.grants.some(
-        (grant) => grant.action === action && (!acceptedScopes || acceptedScopes.has(grant.scopeType)),
+        (grant) =>
+          grant.action === action &&
+          (!acceptedScopes || acceptedScopes.has(grant.scopeType)) &&
+          (scopeId === undefined || grant.scopeId === scopeId),
       );
     },
     [capability, capabilityUnavailableReason],

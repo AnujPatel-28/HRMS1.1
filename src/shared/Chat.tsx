@@ -131,9 +131,12 @@ function messageReducer(state: Record<string, ChatMessage[]>, action: MessageAct
 export default function Chat() {
   const deptLabel = useDepartmentLabel();
   const { employee } = useEmployee();
-  const { role } = useAuth();
+  const { hasGrant } = useAuth();
   const { tenantId } = useTenant();
-  const isHr = role === "hr";
+  // D5: channel management is the catalogue grant channel.manage@company (contracts.md v0.5 §16
+  // A1), not role === "hr" — a Communication Moderator without the HR role gets these controls,
+  // and a tenant that removed the grant from HR Admin no longer shows them.
+  const canManageChannels = hasGrant("channel.manage", "company");
 
   const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [selectedChannel, setSelectedChannel] = useState<ChatChannel | null>(null);
@@ -482,7 +485,7 @@ export default function Chat() {
 
   const fmt = (ts: string) => new Date(ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
   const isMine = (senderId: string) => senderId === employee?.id;
-  const canSend = isHr || (selectedChannel && !selectedChannel.is_announcement);
+  const canSend = canManageChannels || (selectedChannel && !selectedChannel.is_announcement);
 
   const DEPARTMENTS = ["sales", "dev", "marketing", "operations", "design", "other"] as const;
 
@@ -587,7 +590,7 @@ export default function Chat() {
   // target_org_unit_ids (20260820110000 / 20260820130000). The legacy target_departments branch that
   // used to sit beside this is gone — it compared capitalised unit names against the hardcoded
   // lowercase slug list, so it could never match, and employees.department no longer exists.
-  const visibleChannels = isHr
+  const visibleChannels = canManageChannels
     ? channels
     : channels.filter(c =>
         c.type === "global" ||
@@ -607,7 +610,7 @@ export default function Chat() {
       <aside className="w-full md:w-64 shrink-0 border-b md:border-b-0 md:border-r border-slate-200 bg-slate-50/50 p-2 md:p-4 flex flex-row overflow-x-auto md:overflow-x-hidden md:flex-col gap-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         <div className="flex items-center justify-between mb-1 md:mb-2 px-2">
           <p className="text-[10px] md:text-xs font-bold uppercase tracking-wider text-slate-500">Channels</p>
-          {isHr && (
+          {canManageChannels && (
             <button onClick={() => setShowCreateModal(true)} className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors">
               <Plus className="h-4 w-4" />
             </button>
@@ -625,7 +628,7 @@ export default function Chat() {
                 <Hash className={`h-4 w-4 shrink-0 ${selectedChannel?.id === ch.id ? "text-brand-500" : "opacity-60"}`} />
                 <span className="capitalize truncate">{ch.name}</span>
               </button>
-              {isHr && ch.name !== "general" && (
+              {canManageChannels && ch.name !== "general" && (
                 <button 
                   onClick={(e) => { e.stopPropagation(); setChannelToDelete(ch); }}
                   className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all text-slate-400 hover:bg-rose-50 hover:text-rose-600 shrink-0"
@@ -724,7 +727,7 @@ export default function Chat() {
                           </button>
                         )}
 
-                        {mine && !isSending && !isFailed && (
+                        {(mine || hasGrant("message.moderate", "channel", selectedChannel?.id)) && !isSending && !isFailed && (
                           <button onClick={() => deleteMessage(m.id)}
                             className="absolute -left-10 top-1/2 -translate-y-1/2 opacity-0 rounded-full p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100 transition-all shadow-sm bg-white border border-slate-100">
                             <Trash2 className="h-4 w-4" />
