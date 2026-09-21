@@ -353,7 +353,9 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 - **Model:** Sonnet 5 medium; fallback GPT-5.6 Sol high.
 - **Status:** BLOCKED on P1-00/P1 capabilities, P1-03 and P2 availability.
 - **Exact allowed files:**
-  - `migrations/20260912188000_m1m2-project-members-task-lifecycle.sql` (new, lead-created)
+  - `migrations/20260912188000_m1m2-project-members-task-lifecycle.sql` (new, lead-created) — APPLIED 2026-09-21, immutable
+  - `migrations/20260912188100_m1m2-task-notification-recipient.sql` (v0.5 — 2026-09-21: forward fix, 188000 wrote `notifications.user_id`, an FK to legacy `profiles` that 10/17 employees lack. Brief §8 D3)
+  - `migrations/20260912188200_m1m2-task-lifecycle-followup.sql` (v0.5 — pre-authorized for further DB defects found on rerun; each named with evidence)
   - `src/hr/TaskWorkspace.tsx`
   - `src/hr/TaskManagement.tsx`
   - `src/hr/pms/ProjectList.tsx`

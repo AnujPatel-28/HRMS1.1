@@ -199,3 +199,45 @@ grant appears). Both decisions below are made. Resume.
 - Report the frontend consequence honestly: until P3-02b, a Project Manager's UI will not *show*
   project actions from the capability summary, even though the server allows them. Say which of
   your listed screens that affects; do not work around it client-side.
+
+---
+
+## 8. Lead decisions, 2026-09-21 (second stop-and-report, at `851471d`)
+
+AC3 is accepted in principle (before: HTTP 200 → `approved`; after: 403 → `submitted`). I will
+re-verify it independently at acceptance. The AC5 failure was diagnosed by the lead before this
+decision, and **it is a migration defect, not a fixture gap. Do not "fix" it by seeding a
+`profiles` row.**
+
+Measured on TB-M1M2:
+- `notifications.user_id` → FK `profiles(id)`. `profiles` is a legacy table: **10 of the 17**
+  employees that have a `user_id` have no `profiles` row.
+- **Every existing notification writer omits `user_id`.** All 41 live notifications have
+  `user_id IS NULL`, keyed on `employee_id` (`functions/on-task-approved.ts`, `MyTasks.tsx`).
+- `20260912188000` introduced `user_id` into three `INSERT INTO public.notifications` statements
+  (lines ~239, ~312, ~376). That would break review for most real employees, not just the fixture.
+
+### D3 — Forward migration authorized
+
+- **`migrations/20260912188100_m1m2-task-notification-recipient.sql`** — fix: drop `user_id` from
+  the three inserts and key on `employee_id`, like every other writer. **Derive each function body
+  from `pg_get_functiondef()`**, change only that column list, replace on the exact signature,
+  assert one `pg_proc` row per name afterwards. Nothing else goes in this file.
+- If the rerun of AC1/AC2/AC5–AC7 exposes a further *database* defect,
+  **`20260912188200_m1m2-task-lifecycle-followup.sql`** is pre-authorized for it. Name each defect
+  in the report with the evidence that found it. Beyond 188200, stop and report.
+- `20260912188000` stays immutable.
+
+### D4 — Two things you will meet moving the frontend onto the RPCs
+
+1. **No duplicate notifications (AC7).** `MyTasks.tsx` (lines ~218/254/283) inserts notifications
+   from the client. Where your RPC now writes the same notification, remove the client insert —
+   otherwise every submit/review notifies twice. Do not touch client notification inserts in files
+   outside your list (e.g. `Expenses.tsx`, `AddTeamMemberModal.tsx`); those are P3-03 territory.
+2. **Preserve the `calendar_events` side effect.** On approval, `TaskManagement.tsx:206` and
+   `MyTasks.tsx:248` write a `calendar_events` row that `Calendar.tsx` displays. Your RPCs do not
+   write it. Moving callers must not silently drop it: keep it working (in the RPC, idempotent on
+   the existing `tenant_id,employee_id,date` conflict target, is preferred — the approval and its
+   calendar mark then commit together) and show a before/after `calendar_events` row as evidence.
+   The `on-task-*` edge functions have **no caller in `src/`**; say so in the report rather than
+   wiring them up.
