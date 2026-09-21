@@ -152,6 +152,7 @@ export default function Chat() {
   const [sending, setSending] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [realtimeError, setRealtimeError] = useState<string | null>(null);
   const [channelToDelete, setChannelToDelete] = useState<ChatChannel | null>(null);
   
   // Modal States
@@ -171,7 +172,13 @@ export default function Chat() {
   // 1. Fetch Channels
   const fetchChannels = useCallback(async () => {
     if (!tenantId) return;
-    const { data } = await db.from("chat_channels").select("*").eq("tenant_id", tenantId).order("name", { ascending: true });
+    const { data, error } = await db.from("chat_channels").select("*").eq("tenant_id", tenantId).order("name", { ascending: true });
+    if (error) {
+      setChannels([]);
+      setSelectedChannel(null);
+      setRealtimeError("Chat is unavailable. Please retry.");
+      return;
+    }
     if (data) {
       const allChannels = data as ChatChannel[];
       setChannels(allChannels);
@@ -242,7 +249,7 @@ export default function Chat() {
     fetchSequenceRef.current[channelId] = seq;
     
     setLoading(true);
-    const { data } = await db.from("chat_messages").select("*")
+    const { data, error } = await db.from("chat_messages").select("*")
       .eq("tenant_id", tenantId)
       .eq("channel_id", channelId)
       .eq("is_deleted", false)
@@ -250,8 +257,13 @@ export default function Chat() {
       .order("id", { ascending: false })
       .limit(50);
       
-    if (data && fetchSequenceRef.current[channelId] === seq) {
-      dispatchMessages({ type: "INIT_CHANNEL", channelId, messages: data as ChatMessage[] });
+    if (fetchSequenceRef.current[channelId] === seq) {
+      if (error || !data?.length) {
+        dispatchMessages({ type: "EVICT", channelIds: [channelId] });
+        if (error) setRealtimeError("Chat is unavailable. Please retry.");
+      } else {
+        dispatchMessages({ type: "INIT_CHANNEL", channelId, messages: data as ChatMessage[] });
+      }
     }
     setLoading(false);
   }, [tenantId]);
@@ -262,58 +274,63 @@ export default function Chat() {
     }
   }, [selectedChannel, employees, fetchMessages]);
 
-  // 3. Stable Realtime Subscription & Resync
+  // 3. Server-authorized topics; event bodies are invalidations, never messages.
   useEffect(() => {
-    if (employees.length === 0 || !tenantId) return;
-
+    if (!tenantId) return;
+    let active = true;
+    const channelId = selectedChannel?.id;
+    const listTopic = `chat-channels:${tenantId}`;
+    const messageTopic = channelId ? `chat:${tenantId}:${channelId}` : null;
+    const topics = messageTopic ? [listTopic, messageTopic] : [listTopic];
+    setRealtimeError(null);
     const setupRealtime = async () => {
       await realtime.connect();
-      await realtime.subscribe("chat_messages");
-      await realtime.subscribe("chat_channels");
-      await realtime.subscribe("chat_channel_members");
-    };
-
-    void setupRealtime();
-
-    const handleInsertOrUpdate = (payload: any) => {
-      if (payload.tenant_id !== tenantId) return;
-
-      if ("content" in payload && "channel_id" in payload) {
-        const msg = payload as ChatMessage;
-        if (msg.is_deleted) {
-          dispatchMessages({ type: "DELETE", channelId: msg.channel_id!, messageIds: [msg.id] });
-        } else {
-          dispatchMessages({ type: "UPSERT", channelId: msg.channel_id!, messages: [msg] });
-        }
-      } else {
-        // It's a channel or channel member update
-        void fetchChannels();
+      for (const topic of topics) {
+        if (!active) return;
+        const result = await realtime.subscribe(topic);
+        if (!active) { realtime.unsubscribe(topic); return; }
+        if (!result.ok) throw new Error("Chat subscription denied");
       }
     };
-
-    realtime.on("INSERT", handleInsertOrUpdate);
-    realtime.on("UPDATE", handleInsertOrUpdate);
-
-    // Resynchronization on reconnect
+    void setupRealtime().catch(() => {
+      if (active) setRealtimeError("Live chat is unavailable. Please retry.");
+    });
+    const handleMessage = async (payload: { id?: string; meta?: { channel?: string } }) => {
+      if (!active || !channelId || !payload.id) return;
+      if (![messageTopic, `realtime:${messageTopic}`].includes(payload.meta?.channel ?? "")) return;
+      const { data, error } = await db.from("chat_messages").select("*")
+        .eq("id", payload.id).eq("channel_id", channelId).eq("is_deleted", false).maybeSingle();
+      if (!active) return;
+      if (error) {
+        dispatchMessages({ type: "EVICT", channelIds: [channelId] });
+        setRealtimeError("Chat is unavailable. Please retry.");
+      } else if (data) {
+        dispatchMessages({ type: "UPSERT", channelId, messages: [data as ChatMessage] });
+      } else {
+        dispatchMessages({ type: "DELETE", channelId, messageIds: [payload.id] });
+      }
+    };
+    const handleChannel = (payload: { meta?: { channel?: string } }) => {
+      if (active && [listTopic, `realtime:${listTopic}`].includes(payload.meta?.channel ?? "")) void fetchChannels();
+    };
+    for (const event of ["INSERT_message", "UPDATE_message", "DELETE_message"]) realtime.on(event, handleMessage);
+    for (const event of ["INSERT_channel", "UPDATE_channel", "DELETE_channel"]) realtime.on(event, handleChannel);
     const handleOnline = () => {
-      // Refetch for active and top recently active cached channels
-      accessedChannels.slice(0, 3).forEach(id => {
-        void fetchMessages(id);
-      });
+      if (!active) return;
+      if (channelId) void fetchMessages(channelId);
       void fetchChannels();
     };
-
+    realtime.on("connect", handleOnline);
     window.addEventListener("online", handleOnline);
-
     return () => {
-      realtime.off("INSERT", handleInsertOrUpdate);
-      realtime.off("UPDATE", handleInsertOrUpdate);
-      realtime.unsubscribe("chat_messages");
-      realtime.unsubscribe("chat_channels");
-      realtime.unsubscribe("chat_channel_members");
+      active = false;
+      for (const event of ["INSERT_message", "UPDATE_message", "DELETE_message"]) realtime.off(event, handleMessage);
+      for (const event of ["INSERT_channel", "UPDATE_channel", "DELETE_channel"]) realtime.off(event, handleChannel);
+      topics.forEach(topic => realtime.unsubscribe(topic));
+      realtime.off("connect", handleOnline);
       window.removeEventListener("online", handleOnline);
     };
-  }, [employees, tenantId, accessedChannels, fetchMessages, fetchChannels]);
+  }, [tenantId, selectedChannel?.id, fetchMessages, fetchChannels]);
 
   // Load More (Composite Cursor Pagination)
   async function loadMore() {
@@ -382,13 +399,14 @@ export default function Chat() {
       if (f) {
         const fileExt = f.name.includes(".") ? f.name.split(".").pop() : "bin";
         const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
-        filePath = `chat/${fileName}`;
+        filePath = `${tenantId}/${selectedChannel.id}/${fileName}`;
         
         // InsForge upload() returns { data: { url, key, ... } } — URL is in data.url
         const { data: uploadData, error: uploadError } = await storage.from("chat-attachments").upload(filePath, f);
         if (uploadError) throw uploadError;
         
-        attachment_url = uploadData?.url ?? null;
+        // Keep the key, never a signed URL. Download authorization happens on click.
+        attachment_url = uploadData?.key ? `chat-attachments:${uploadData.key}` : null;
         attachment_name = f.name;
         
         dispatchMessages({ type: "UPSERT", channelId: selectedChannel.id, messages: [{
@@ -432,6 +450,27 @@ export default function Chat() {
   async function deleteMessage(id: string) {
     if (!tenantId) return;
     await db.from("chat_messages").update({ is_deleted: true }).eq("tenant_id", tenantId).eq("id", id);
+  }
+
+  async function downloadAttachment(message: ChatMessage) {
+    if (!message.attachment_url) return;
+    try {
+      const value = message.attachment_url;
+      const key = value.startsWith("chat-attachments:")
+        ? value.slice("chat-attachments:".length)
+        : decodeURIComponent(new URL(value).pathname.split("/api/storage/buckets/chat-attachments/objects/")[1] ?? "");
+      if (!key) throw new Error("Attachment key is unavailable");
+      const { data, error } = await storage.from("chat-attachments").download(key);
+      if (error || !data) throw error ?? new Error("Attachment unavailable");
+      const url = URL.createObjectURL(data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = message.attachment_name || "attachment";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      setRealtimeError("This attachment is unavailable or you no longer have access.");
+    }
   }
 
   function handleKey(e: React.KeyboardEvent) {
@@ -623,6 +662,7 @@ export default function Chat() {
         </div>
 
         {/* Messages */}
+        {realtimeError && <p role="status" className="px-4 py-2 text-sm text-amber-700">{realtimeError}</p>}
         <div className="flex-1 overflow-y-auto px-3 md:px-6 py-4 md:py-6 space-y-4 md:space-y-6">
           {!selectedChannel ? (
             <div className="flex h-full items-center justify-center text-slate-400">
@@ -683,13 +723,13 @@ export default function Chat() {
                         
                         {/* Attachment Rendering */}
                         {(m.attachment_url || m.upload_status === 'uploading') && (
-                          <a href={m.attachment_url || "#"} target={m.attachment_url ? "_blank" : "_self"} rel="noreferrer"
+                          <button type="button" disabled={!m.attachment_url} onClick={() => void downloadAttachment(m)}
                             className={`mt-3 flex items-center gap-3 rounded-xl p-2.5 text-sm transition-colors ${mine ? (isFailed ? "bg-rose-100/50" : "bg-brand-700/50 hover:bg-brand-700") : "bg-slate-50 border border-slate-100 hover:bg-slate-100"}`}>
                             <div className={`p-2 rounded-lg shadow-sm ${mine ? (isFailed ? "bg-rose-200" : "bg-white text-brand-600") : "bg-white border border-slate-200 text-slate-600"}`}>
                               {m.upload_status === 'uploading' ? <Clock className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
                             </div>
                             <span className="font-semibold truncate max-w-[200px]">{m.attachment_name || "Attachment"}</span>
-                          </a>
+                          </button>
                         )}
 
                         {mine && !isSending && !isFailed && (

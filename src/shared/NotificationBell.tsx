@@ -32,27 +32,6 @@ function timeAgo(dateStr: string) {
   return `${days}d ago`;
 }
 
-function normalizeNotificationPayload(payload: unknown): Notification | null {
-  if (!payload || typeof payload !== "object") return null;
-
-  const source = payload as Record<string, unknown>;
-  const candidate =
-    (source.record as Record<string, unknown> | undefined) ??
-    (source.new as Record<string, unknown> | undefined) ??
-    source;
-
-  if (
-    typeof candidate.id !== "string" ||
-    typeof candidate.tenant_id !== "string" ||
-    typeof candidate.employee_id !== "string" ||
-    typeof candidate.title !== "string"
-  ) {
-    return null;
-  }
-
-  return candidate as unknown as Notification;
-}
-
 export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: NotificationBellProps) {
   const { employee } = useEmployee();
   const { tenantId } = useTenant();
@@ -60,6 +39,7 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
+  const [realtimeError, setRealtimeError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialUnreadCount > 0) setUnreadCount(initialUnreadCount);
@@ -68,9 +48,13 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
   useEffect(() => {
     if (!employee?.id || !tenantId) return;
     let active = true;
+    const topic = `notifications:${tenantId}:${employee.id}`;
+    setNotifications([]);
+    setUnreadCount(0);
+    setRealtimeError(null);
 
     const fetchNotifs = async () => {
-      const { data } = await db.from("notifications")
+      const { data, error } = await db.from("notifications")
         .select("*")
         .eq("tenant_id", tenantId)
         .eq("employee_id", employee.id)
@@ -80,50 +64,42 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
         setNotifications(data as Notification[]);
         setUnreadCount(data.filter(n => !n.is_read).length);
       }
+      if (active && error) {
+        setNotifications([]);
+        setUnreadCount(0);
+        setRealtimeError("Notifications are unavailable. Please retry.");
+      }
     };
     void fetchNotifs();
 
     const setupRealtime = async () => {
       await realtime.connect();
-      await realtime.subscribe(`notifications:${employee.id}`);
+      if (!active) return;
+      const result = await realtime.subscribe(topic);
+      if (!active) { realtime.unsubscribe(topic); return; }
+      if (!result.ok) throw new Error("Notification subscription denied");
     };
     
-    void setupRealtime();
+    void setupRealtime().catch(() => {
+      if (active) setRealtimeError("Live notifications are unavailable. Please retry.");
+    });
 
     const handler = (payload: any) => {
       if (!active) return;
 
       const eventChannel = payload?.meta?.channel;
-      if (eventChannel && eventChannel !== `notifications:${employee.id}`) return;
-
-      const newNotif = normalizeNotificationPayload(payload);
-      if (!newNotif || newNotif.tenant_id !== tenantId || newNotif.employee_id !== employee.id) return;
-
-      let shouldIncreaseUnread = false;
-      setNotifications((prev) => {
-        const existingIndex = prev.findIndex((notif) => notif.id === newNotif.id);
-        if (existingIndex >= 0) {
-          const next = [...prev];
-          next[existingIndex] = newNotif;
-          return next;
-        }
-        shouldIncreaseUnread = !newNotif.is_read;
-        return [newNotif, ...prev].slice(0, 20);
-      });
-
-      if (shouldIncreaseUnread) {
-        setUnreadCount((prev) => prev + 1);
-      }
+      if (eventChannel !== topic && eventChannel !== `realtime:${topic}`) return;
+      // The event is an invalidation only. Content always comes from an RLS read.
+      void fetchNotifs();
     };
-
-    realtime.on("INSERT", handler);
     realtime.on("INSERT_notification", handler);
+    realtime.on("connect", fetchNotifs);
 
     return () => {
       active = false;
-      realtime.off("INSERT", handler);
       realtime.off("INSERT_notification", handler);
-      realtime.unsubscribe(`notifications:${employee.id}`);
+      realtime.off("connect", fetchNotifs);
+      realtime.unsubscribe(topic);
     };
   }, [employee?.id, tenantId]);
 
@@ -196,6 +172,7 @@ export function NotificationBell({ unreadCount: initialUnreadCount = 0 }: Notifi
             </div>
             
             <div className="flex-1 overflow-y-auto">
+              {realtimeError && <p role="status" className="p-3 text-sm text-amber-700">{realtimeError}</p>}
               {notifications.length === 0 ? (
                 <div className="p-8 text-center text-sm text-slate-500">
                   <Bell className="mx-auto mb-2 h-8 w-8 text-slate-300" />
