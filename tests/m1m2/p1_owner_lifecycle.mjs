@@ -261,7 +261,9 @@ await guardedMutation("P1-02 owner lifecycle", async (verified) => {
       p_working_dates: null,
       p_approved_business_days: null,
     }),
-    /HR|Forbidden|denied|P1001/i,
+    // P2-04 answers a leave outside the caller's tenant with P1003 APPROVAL_SUBJECT_UNAVAILABLE (it
+    // does not reveal the row exists). Still a denial; the older HR/P1001 wording is also accepted.
+    /HR|Forbidden|denied|P1001|APPROVAL_SUBJECT_UNAVAILABLE/i,
     "bootstrap Company Admin leave approval",
   );
   expectError(

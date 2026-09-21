@@ -68,6 +68,8 @@ const TEMPLATE_GRANTS = Object.freeze({
       "employee.basic.read", "employee.export", "employee.sensitive.read", "employee.write",
       "leave.approve", "leave.configure", "leave.read", "org.read", "policy.configure",
       "policy.publish", "policy.read", "shift.manage", "shift.read", "task.assign", "task.review",
+      // contracts.md §16 A1 (user decision 2026-09-21, migration 189200).
+      "channel.manage", "project.read",
     ],
   },
   manager: {
@@ -89,7 +91,8 @@ const TEMPLATE_GRANTS = Object.freeze({
   },
   communication_moderator: {
     channel: ["channel.manage", "channel.read", "message.moderate", "message.send"],
-    company: ["feed.moderate", "feed.post", "feed.read"],
+    // channel.manage@company: contracts.md §16 A1 (channel creation needs a company-scope action).
+    company: ["channel.manage", "feed.moderate", "feed.post", "feed.read"],
   },
 });
 
@@ -402,7 +405,9 @@ async function runMembershipInvitationRevocation() {
         p_working_dates: null,
         p_approved_business_days: null,
       }),
-      /Forbidden|HR|denied|P1001/i,
+      // PENDING_LEAVE_ID is in tenant da7a0000, not Company A: P2-04 answers a cross-tenant leave with
+      // P1003 APPROVAL_SUBJECT_UNAVAILABLE rather than revealing it. Still a denial.
+      /Forbidden|HR|denied|P1001|APPROVAL_SUBJECT_UNAVAILABLE/i,
       "Company Admin leave approval",
     );
 

@@ -1,7 +1,7 @@
 # TalentMesh non-payroll Monday execution tasks
 
 Plan version: **v0.5**  
-Status: **P1 COMPLETE. P2-01, P2-02, P2-04, P3-01, P3-02, P3-03, P3-04 accepted. P2-03 blocked on hardware. Next: P3-02b (advertise project + channel scope), then deferred cleanup.**  
+Status: **P1 COMPLETE. P2-01, P2-02, P2-04, P3-01, P3-02, P3-02b, P3-03, P3-04 accepted — M1/M2 non-payroll security scope COMPLETE except P2-03 (blocked on hardware). Next: deferred cleanup, then payroll. PRODUCTION PROMOTION: see reviews/package-review-P3-02b.md deploy order.**  
 Baseline revision: `7214f8e3abeaef797d45122c7bc1129f0663cc43`  
 Contract dependency: `contracts.md` v0.5
 
@@ -416,7 +416,7 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 ### P3-02b — Advertise project and channel scopes (added 2026-09-21)
 
 - **Owner:** lead brief; implementer Sonnet 5.
-- **Status:** **BRIEFED 2026-09-21** — `prompts/p3-02b_advertise_project_channel_scope_2026-09-21.md`. One predicate drives both the capability summary and `has_access_action`; AuthContext stops rejecting scoped grants; Chat management keys on `channel.manage` not `role===hr`. **Production deploy order: frontend first, then migration** — new summary + old AuthContext drops every user's capabilities.
+- **Status:** **ACCEPTED 2026-09-21** at `ee0cefc` — see `reviews/package-review-P3-02b.md`. Lead repaired three stale P1 suites (revocation coverage had been dark since P3-03). Originally briefed — `prompts/p3-02b_advertise_project_channel_scope_2026-09-21.md`. One predicate drives both the capability summary and `has_access_action`; AuthContext stops rejecting scoped grants; Chat management keys on `channel.manage` not `role===hr`. **Production deploy order: frontend first, then migration** — new summary + old AuthContext drops every user's capabilities.
 - **Migration:** `20260912191000_m1m2-advertise-project-channel-scope.sql`; one forward fix `191100` pre-authorized.
 
 ### P3-04 — Private personal-data buckets (added 2026-09-21)

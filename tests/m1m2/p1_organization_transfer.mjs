@@ -165,7 +165,10 @@ await guardedMutation("P1-03 dated organization placement and reporting", async 
     // RLS policies whose qual is can_view_employee(employee_id). This IS the full
     // "employee/attendance/leave manager-scope reads" surface AC3 requires -- not assumed.
     const consumers = rowsOf(runSql(`SELECT proname FROM pg_proc WHERE prosrc ILIKE '%is_manager_of%' AND proname <> 'is_manager_of'`));
-    assert.deepEqual(consumers.map((r) => r.proname).sort(), ["can_view_employee"], "is_manager_of consumer set changed");
+    // Later accepted packages added two direct_reports consumers, both gated on the same primary rule:
+    // P2-02 assert_attendance_correction_reviewer, P3-02 p3_task_scope. A new consumer still fails here.
+    assert.deepEqual(consumers.map((r) => r.proname).sort(),
+      ["assert_attendance_correction_reviewer", "can_view_employee", "p3_task_scope"], "is_manager_of consumer set changed");
     const policies = rowsOf(runSql(
       `SELECT tablename, policyname FROM pg_policies WHERE qual ILIKE '%can_view_employee%' ORDER BY tablename`,
     ));
