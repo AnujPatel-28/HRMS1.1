@@ -39,21 +39,17 @@ export function useChat(channel = "general") {
   }, [resolveChannel, tenantId]);
 
   const sendMessage = useCallback(
-    async (senderId: string, content: string) => {
+    async (_senderId: string, content: string) => {
       const channelId = await resolveChannel();
-      const { error } = await db.from("chat_messages").insert([
-        {
-          sender_id: senderId,
-          tenant_id: tenantId,
-          channel,
-          channel_id: channelId,
-          content,
-        },
-      ]);
+      const { error } = await db.rpc("p3_send_chat_message", {
+        p_channel_id: channelId,
+        p_content: content,
+        p_client_message_id: crypto.randomUUID(),
+      });
       if (error) throw error;
       await fetchMessages();
     },
-    [channel, fetchMessages, resolveChannel, tenantId],
+    [fetchMessages, resolveChannel],
   );
 
   const connectRealtime = useCallback(() => {

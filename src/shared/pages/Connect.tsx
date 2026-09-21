@@ -254,17 +254,11 @@ export default function Connect() {
     });
   }, [tenantId]);
 
-  // Set up realtime subscriptions
+  // No realtime here: no trigger publishes posts/post_reactions and no realtime.channels
+  // pattern exists for either topic (package-review-P3-03-tier1.md §3; brief §T2-4). Connect
+  // realtime never worked — the feed refreshes on mount/interaction only.
   useEffect(() => {
     if (!tenantId) return;
-
-    const setupRealtime = async () => {
-      await realtime.connect();
-      await realtime.subscribe("posts");
-      await realtime.subscribe("post_reactions");
-    };
-
-    void setupRealtime();
 
     const handleInsert = (payload: any) => {
       if (payload.content !== undefined) {
@@ -305,8 +299,6 @@ export default function Connect() {
       realtime.off("INSERT", handleInsert);
       realtime.off("UPDATE", handleUpdate);
       realtime.off("DELETE", handleDelete);
-      realtime.unsubscribe("posts");
-      realtime.unsubscribe("post_reactions");
     };
   }, [tenantId, fetchPosts, fetchBirthdays, handleRealtimePost, handleRealtimeReaction]);
 

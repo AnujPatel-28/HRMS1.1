@@ -414,22 +414,22 @@ export default function Chat() {
         }] });
       }
 
-      const { data, error } = await db.from("chat_messages").insert([{
-        client_message_id: clientId,
-        sender_id: employee.id,
-        tenant_id: tenantId,
-        channel: selectedChannel.name,
-        channel_id: selectedChannel.id,
-        content: optimisticMsg.content,
-        attachment_url,
-        attachment_name,
-      }]).select();
+      const { data: messageId, error } = await db.rpc("p3_send_chat_message", {
+        p_channel_id: selectedChannel.id,
+        p_content: optimisticMsg.content,
+        p_client_message_id: clientId,
+        p_attachment_url: attachment_url,
+        p_attachment_name: attachment_name,
+      });
 
       if (error) throw error;
+      if (!messageId) throw new Error("Message was not sent — the write was rejected.");
 
-      if (data && data.length > 0) {
+      const { data: sentRow } = await db.from("chat_messages").select("*").eq("id", messageId).maybeSingle();
+
+      if (sentRow) {
         dispatchMessages({ type: "UPSERT", channelId: selectedChannel.id, messages: [{
-          ...(data[0] as ChatMessage), delivery_status: 'sent', upload_status: f ? 'success' : 'none'
+          ...(sentRow as ChatMessage), delivery_status: 'sent', upload_status: f ? 'success' : 'none'
         }] });
       }
     } catch (err: any) {
@@ -449,7 +449,7 @@ export default function Chat() {
 
   async function deleteMessage(id: string) {
     if (!tenantId) return;
-    await db.from("chat_messages").update({ is_deleted: true }).eq("tenant_id", tenantId).eq("id", id);
+    await db.rpc("p3_delete_chat_message", { p_message_id: id });
   }
 
   async function downloadAttachment(message: ChatMessage) {
@@ -525,38 +525,30 @@ export default function Chat() {
     }
     setCreating(true);
     try {
-      const { data, error } = await db.from("chat_channels").insert([{
-        tenant_id: tenantId,
-        name: newChannelName.trim().toLowerCase().replace(/\s+/g, "-"),
-        description: newChannelDesc.trim() || null,
-        type: newChannelType,
-        created_by: employee?.id,
-        // Slice B is APPLIED (20260820110000 / 20260820130000): every chat policy now gates on
-        // target_org_unit_ids. target_departments is kept for the legacy display fallback only.
-        target_departments: newChannelType === "department" ? newChannelDepts : [],
-        // Slice B target-side write path. Only sent when there's something to write, so
-        // global/custom channels — and department channels created before any org units are picked —
-        // never touch this column.
-        ...(newChannelType === "department" && newChannelOrgUnitIds.length > 0
-          ? { target_org_unit_ids: newChannelOrgUnitIds }
-          : {}),
-      }]).select();
+      // p3_create_chat_channel (channel.manage@company) — target_departments is retired: every
+      // chat policy now gates on target_org_unit_ids only.
+      const { data: channelId, error } = await db.rpc("p3_create_chat_channel", {
+        p_name: newChannelName.trim().toLowerCase().replace(/\s+/g, "-"),
+        p_type: newChannelType,
+        p_description: newChannelDesc.trim() || null,
+        p_target_org_unit_ids: newChannelType === "department" && newChannelOrgUnitIds.length > 0
+          ? newChannelOrgUnitIds
+          : null,
+        p_is_announcement: false,
+      });
 
-      // RLS refuses a write by matching zero rows, which comes back as a SUCCESSFUL empty response
-      // rather than an error (src/admin/TenantModulesPanel.tsx:77-79). An empty array is truthy in
-      // JS, so `if (data)` alone would treat a refused insert as success.
       if (error) throw error;
-      if (!data || data.length === 0) {
-        throw new Error("Channel was not created — the write was rejected.");
-      }
-      const created = data[0] as ChatChannel;
+      if (!channelId) throw new Error("Channel was not created — the write was rejected.");
+
+      const { data: createdRow, error: readError } = await db.from("chat_channels").select("*").eq("id", channelId).maybeSingle();
+      if (readError || !createdRow) throw readError ?? new Error("Channel created but could not be read back.");
+      const created = createdRow as ChatChannel;
 
       if (newChannelType === "custom" && newChannelMembers.length > 0) {
-        const memberRows = newChannelMembers.map(empId => ({ tenant_id: tenantId, channel_id: created.id, employee_id: empId }));
-        if (employee?.id && !newChannelMembers.includes(employee.id)) {
-          memberRows.push({ tenant_id: tenantId, channel_id: created.id, employee_id: employee.id });
-        }
-        await db.from("chat_channel_members").insert(memberRows);
+        const memberIds = employee?.id && !newChannelMembers.includes(employee.id)
+          ? [...newChannelMembers, employee.id]
+          : newChannelMembers;
+        await db.rpc("p3_set_channel_members", { p_channel_id: created.id, p_employee_ids: memberIds });
       }
 
       setChannels(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
