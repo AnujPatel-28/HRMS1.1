@@ -1,7 +1,7 @@
 # TalentMesh non-payroll Monday execution tasks
 
 Plan version: **v0.5**  
-Status: **P1 COMPLETE. P2-01, P2-02, P2-04, P3-01, P3-02 accepted. P2-03 blocked on hardware. Next: P3-03, then P3-02b.**  
+Status: **P1 COMPLETE. P2-01, P2-02, P2-04, P3-01, P3-02, P3-03 accepted. P2-03 blocked on hardware. Next: P3-04 (buckets), then P3-02b (advertise project + channel scope).**  
 Baseline revision: `7214f8e3abeaef797d45122c7bc1129f0663cc43`  
 Contract dependency: `contracts.md` v0.5
 
@@ -386,7 +386,8 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 
 - **Owner:** P3 Policy/Work/Communication lane.
 - **Model:** Sonnet 5 high; fallback GPT-5.6 Sol high.
-- **Status:** **BRIEFED 2026-09-21** — `prompts/p3-03_realtime_chat_isolation_2026-09-21.md`. Lead measured with live sockets: anonymous and cross-tenant clients subscribe to and receive every chat/notification topic, and can publish into any. Two tiers with a hold point after Tier 1 (cross-tenant/anon isolation). `employee-documents`/`expense-receipts`/`task-attachments` split out to P3-04.
+- **Status:** **ACCEPTED 2026-09-21** — Tier 1 `34581df` (Astra), Tier 2 `2f1a140`+`5c00065` (Sonnet), lead fixes `189300` (attachments follow message-read rule) and `189400` (no manager self-add to private channels). See `reviews/package-review-P3-03-tier1.md`, `-tier2.md`. Item 6 accepted as platform limit (contracts §16 A2).
+  - Briefed as `prompts/p3-03_realtime_chat_isolation_2026-09-21.md`. Lead measured with live sockets: anonymous and cross-tenant clients subscribe to and receive every chat/notification topic, and can publish into any. Two tiers with a hold point after Tier 1 (cross-tenant/anon isolation). `employee-documents`/`expense-receipts`/`task-attachments` split out to P3-04.
   - `migrations/20260912189100_...` pre-authorized for one Tier 1 forward fix.
 - **Exact allowed files:**
   - `migrations/20260912189000_m1m2-communication-realtime-storage.sql` (new, lead-created)

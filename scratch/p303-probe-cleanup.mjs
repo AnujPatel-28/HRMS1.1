@@ -1,0 +1,18 @@
+import { createClient } from "@insforge/sdk";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { TB_M1M2 } from "../tests/m1m2/_target.mjs";
+import { verifyTarget, runSql } from "../tests/m1m2/_harness.mjs";
+verifyTarget();
+const r = spawnSync(process.execPath, ["node_modules/@insforge/cli/dist/index.js", "secrets", "get", "ANON_KEY", "--json"], { encoding: "utf8" });
+const key = JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))).value;
+const pw = readFileSync("tests/m1m2/persona-password.local", "utf8").trim();
+const P = "a0000000-0000-4000-8000-000000000001/c3039000-0000-4000-8000-000000000001/";
+const login = async (email) => { const c = createClient({ baseUrl: TB_M1M2.baseUrl, functionsUrl: TB_M1M2.functionsUrl, anonKey: key }); await c.auth.signInWithPassword({ email, password: pw }); return c; };
+const ea = await login("employee.a@m1m2.test"), hr = await login("hr-employee.a@m1m2.test");
+console.log("remove lead-probe:", JSON.stringify((await ea.storage.from("chat-attachments").remove(P + "lead-probe.txt")).error ?? "ok"));
+console.log("remove hr-write:", JSON.stringify((await hr.storage.from("chat-attachments").remove(P + "hr-write.txt")).error ?? "ok"));
+runSql(`DELETE FROM public.chat_channel_members WHERE channel_id='c3039000-0000-4000-8000-000000000001'`);
+runSql(`DELETE FROM public.chat_channels WHERE id='c3039000-0000-4000-8000-000000000001'`);
+console.log("rows deleted");
+process.exit(0);

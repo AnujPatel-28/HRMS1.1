@@ -410,11 +410,12 @@ async function tier1() {
       if(phase==='AFTER')check(`7 ${name} download`,name==='employee.a'?!result.error:!!result.error,result.error?.message??result.data?.size);
     }
     if (phase==='AFTER') {
-      const forged=await clients['employee.b'].client.database.from('chat_messages').insert([{id:MC,tenant_id:B,sender_id:EB,channel:'p303-same-name',channel_id:CB,content:'p303 forged reference',attachment_url:`chat-attachments:${key}`}]);
+      // Tier 2 (189200) revoked direct chat_messages writes; forge through the only write path.
+      const forged=await clients['employee.b'].client.database.rpc('p3_send_chat_message',{p_channel_id:CB,p_content:'p303 forged reference',p_client_message_id:MC,p_attachment_url:`chat-attachments:${key}`,p_attachment_name:'forged.txt'});
       assert(!forged.error,forged.error?.message);
       const dl=await clients['employee.b'].client.storage.from('chat-attachments').download(key);
       check('7 forged cross-tenant attachment reference denied',!!dl.error,{ok:!dl.error,error:dl.error?.message});
-      runSql(`DELETE FROM public.chat_messages WHERE id='${MC}'`);
+      runSql(`DELETE FROM public.chat_messages WHERE tenant_id='${B}' AND content='p303 forged reference'`);
     }
     if(signedUrl){const replay=await fetch(signedUrl);log(`STORAGE ${phase} previous_signed_url`,{status:replay.status});}
   };
