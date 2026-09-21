@@ -241,3 +241,50 @@ Measured on TB-M1M2:
    calendar mark then commit together) and show a before/after `calendar_events` row as evidence.
    The `on-task-*` edge functions have **no caller in `src/`**; say so in the report rather than
    wiring them up.
+
+---
+
+## 9. Lead review of `e14be9e`, and the closing work (2026-09-21)
+
+**Independently verified and sound:** every new definer has a tenant fence, pinned `search_path`,
+no `anon` EXECUTE; `assert_distinct_approver` runs before the scope check in `p3_review_task`;
+direct writes revoked at GRANT level on `tasks`/`task_submissions`/`projects`/`project_memberships`;
+the `task_submissions` read policy inherits task scoping through an RLS-evaluated subquery.
+
+**What the fixture suite could not see — measured on existing TB-M1M2 data:**
+- `project_memberships` was created **empty and never backfilled**. The one existing project
+  (tenant `da7a0000`, the only hand-testable tenant) is now readable by **nobody**.
+- Its one open task is **hidden from its own assignee** (assignee read requires membership) and the
+  assignee can no longer submit it. Not gate-trapping today only because `attendance_lock_date` is
+  null.
+- **Zero** active `project_manager` template assignments exist, so `p3_create_project` is
+  unreachable on every tenant until an admin assigns that template. That is contract-correct
+  (§4) and is **not** to be worked around — but it must be stated in the report.
+- The same hidden-task state is reachable going forward: deactivating a member who still holds an
+  open task in that project.
+
+### D5 — Decisions for the closing migration `20260912188300_m1m2-project-lifecycle-closure.sql`
+
+1. **Backfill** `project_memberships` from existing data: `projects.manager_id` → `manager`;
+   assignees of non-archived tasks in the project → `member` (a manager stays manager). Same-tenant,
+   active employees only, `ON CONFLICT DO NOTHING`. **Grant no templates** — authority still comes
+   from the template; this only restores membership facts the old model held implicitly.
+2. **`p3_set_project_member` refuses deactivating a member with open tasks in that project**
+   (`status <> 'approved' AND archived_at IS NULL`): `PROJECT_MEMBER_HAS_OPEN_TASKS`, P1003.
+   Reassign or archive first. Derive the body from `pg_get_functiondef()`; exact signature.
+3. **Project dates are editable again**: `start_date`, `end_date` (end ≥ start) on update — and on
+   create only if the old create form saved them. A changed parameter list means
+   **`DROP FUNCTION` the old signature, then `CREATE`**, never `CREATE OR REPLACE` with appended
+   params (it makes a second overload). Assert one `pg_proc` row per name afterwards.
+4. **Department-mode task assignment is restored** through `p3_assign_task` (`org_unit_id`
+   validated same-tenant; `department_filter` derived server-side from the unit name, as the old
+   client did). Read what the removed client code did before writing it. Same DROP-then-CREATE rule.
+5. **`visibility_config` is retired from the UI, not re-implemented.** Contract §3 makes
+   `project:<id>` one explicit membership, and §2 item 6 forbids wildcard project scopes; "visible
+   to all / to departments" is exactly that. Leave the column in place (no drop), stop offering the
+   control. Project visibility = membership.
+6. **`manager_id` is not edited.** Show project managers from `project_memberships.role='manager'`;
+   changing a manager is a membership change via `p3_set_project_member`. One source of truth.
+   Remove the "cannot be changed through the current project API" error path.
+7. **AC7:** retry half PASS; the availability half is **N/A — no project-availability surface
+   exists**, recorded as a feature gap exactly as P2-04 AC6 was. Not a pass, not a fail.
