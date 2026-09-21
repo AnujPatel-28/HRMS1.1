@@ -9,8 +9,7 @@ import { Skeleton } from "../../shared/Skeleton";
 import { EmptyState } from "../../shared/EmptyState";
 import { useAuditLog } from "../../hooks/useAuditLog";
 import type { Project, Employee, Task, TaskSubmission } from "../../types";
-import { useDepartmentLabel, useJobTitleLabel } from "../../contexts/OrgUnitsContext";
-import { useTenantHrIds } from "../../hooks/useTenantHrIds";
+import { useDepartmentLabel } from "../../contexts/OrgUnitsContext";
 
 const PRIORITY_DOT: Record<Task["priority"], string> = {
   low: "bg-slate-400",
@@ -36,51 +35,8 @@ const STATUS_COLOR: Record<Project["status"], string> = {
   cancelled: "bg-rose-50 text-rose-700 border-rose-200",
 };
 
-const DEPT_OPTIONS = ["sales", "dev", "marketing", "operations", "design", "other"] as const;
-
-// Org unit picker for the "departments" visibility branch (Slice B org_unit_ids write path). Same
-// depth/hierarchical-sort shape as src/hr/OrgStructureManagement.tsx, trimmed to the columns needed.
-type OrgUnitOption = { id: string; name: string; parent_id: string | null };
-
-function getOrgUnitDepth(unit: OrgUnitOption, all: OrgUnitOption[]): number {
-  let depth = 0;
-  let parentId = unit.parent_id;
-  const visited = new Set<string>();
-  while (parentId) {
-    if (visited.has(parentId)) break;
-    visited.add(parentId);
-    const parent = all.find(u => u.id === parentId);
-    if (!parent) break;
-    depth++;
-    parentId = parent.parent_id;
-  }
-  return depth;
-}
-
-function sortOrgUnitsHierarchically(units: OrgUnitOption[]): OrgUnitOption[] {
-  const roots = units.filter(u => !u.parent_id || !units.some(p => p.id === u.parent_id));
-  const childrenMap = new Map<string, OrgUnitOption[]>();
-  units.forEach(u => {
-    if (u.parent_id) {
-      const list = childrenMap.get(u.parent_id) || [];
-      list.push(u);
-      childrenMap.set(u.parent_id, list);
-    }
-  });
-  const result: OrgUnitOption[] = [];
-  const traverse = (node: OrgUnitOption) => {
-    result.push(node);
-    const children = (childrenMap.get(node.id) || []).sort((a, b) => a.name.localeCompare(b.name));
-    children.forEach(traverse);
-  };
-  roots.sort((a, b) => a.name.localeCompare(b.name)).forEach(traverse);
-  return result;
-}
-
 export default function ProjectDetail() {
   const deptLabel = useDepartmentLabel();
-  const titleLabel = useJobTitleLabel();
-  const hrIds = useTenantHrIds();
   const { projectId } = useParams<{ projectId: string }>();
   const { tenantId } = useTenant();
   const { employee: currentHr } = useEmployee();
@@ -94,6 +50,9 @@ export default function ProjectDetail() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // Managers come from project_memberships (role='manager') — the one source of truth (D5.6),
+  // not the display-only projects.manager_id column.
+  const [managerEmployeeIds, setManagerEmployeeIds] = useState<string[]>([]);
 
   // UI Navigation
   const [activeTab, setActiveTab] = useState<"tasks" | "team" | "timeline" | "overview">("tasks");
@@ -110,17 +69,8 @@ export default function ProjectDetail() {
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [editStatus, setEditStatus] = useState<Project["status"]>("planning");
-  const [editManagerId, setEditManagerId] = useState("");
   const [editStartDate, setEditStartDate] = useState("");
   const [editEndDate, setEditEndDate] = useState("");
-  const [editVisibilityType, setEditVisibilityType] = useState<"all" | "departments" | "people">("all");
-  const [editSelectedDepts, setEditSelectedDepts] = useState<string[]>([]);
-  const [editSelectedOrgUnitIds, setEditSelectedOrgUnitIds] = useState<string[]>([]);
-  const [editSelectedPeople, setEditSelectedPeople] = useState<string[]>([]);
-  const [orgUnits, setOrgUnits] = useState<OrgUnitOption[]>([]);
-  const [managerSearch, setManagerSearch] = useState("");
-  const [isManagerDropdownOpen, setIsManagerDropdownOpen] = useState(false);
-  const [peopleSearch, setPeopleSearch] = useState("");
 
   // Task Drawer State
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -209,6 +159,15 @@ export default function ProjectDetail() {
         setSubmissions({});
         setAuditLogs([]);
       }
+
+      // 6. Managers come from project_memberships, not the display-only manager_id column.
+      const { data: memberData } = await db
+        .from("project_memberships")
+        .select("employee_id")
+        .eq("project_id", projectId)
+        .eq("role", "manager")
+        .eq("is_active", true);
+      setManagerEmployeeIds((memberData ?? []).map((m: { employee_id: string }) => m.employee_id));
     } catch (err: any) {
       console.error(err);
       toastError(err.message || "Failed to load project details.");
@@ -221,17 +180,6 @@ export default function ProjectDetail() {
     void fetchProjectData();
   }, [tenantId, projectId]);
 
-  // Org units for the "departments" visibility Org Unit picker (Slice B org_unit_ids write path).
-  useEffect(() => {
-    let active = true;
-    if (!tenantId) return;
-    db.from("org_units").select("id, name, parent_id").eq("tenant_id", tenantId).eq("is_active", true)
-      .order("name", { ascending: true }).then(({ data }) => {
-        if (active && data) setOrgUnits(data as OrgUnitOption[]);
-      });
-    return () => { active = false; };
-  }, [tenantId]);
-
   // Inline Title Save
   const handleSaveTitle = async () => {
     if (!titleInput.trim() || !project) return;
@@ -239,6 +187,7 @@ export default function ProjectDetail() {
       const { error } = await db.rpc("p3_update_project", {
         p_project_id: project.id, p_name: titleInput.trim(),
         p_description: project.description, p_status: project.status,
+        p_start_date: project.start_date, p_end_date: project.end_date,
       });
       if (error) throw error;
       setProject({ ...project, name: titleInput.trim() });
@@ -256,6 +205,7 @@ export default function ProjectDetail() {
       const { error } = await db.rpc("p3_update_project", {
         p_project_id: project.id, p_name: project.name,
         p_description: project.description, p_status: status,
+        p_start_date: project.start_date, p_end_date: project.end_date,
       });
       if (error) throw error;
       setProject({ ...project, status });
@@ -272,51 +222,24 @@ export default function ProjectDetail() {
     setEditName(project.name);
     setEditDesc(project.description || "");
     setEditStatus(project.status);
-    setEditManagerId(project.manager_id || "");
     setEditStartDate(project.start_date || "");
     setEditEndDate(project.end_date || "");
-    const vis = project.visibility_config || { type: "all" };
-    setEditVisibilityType(vis.type || "all");
-    setEditSelectedDepts(vis.departments || []);
-    setEditSelectedOrgUnitIds(vis.org_unit_ids || []);
-    setEditSelectedPeople(vis.employee_ids || []);
-    setManagerSearch("");
-    setPeopleSearch("");
     setIsEditModalOpen(true);
   };
 
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editName.trim() || !project) return;
-    if (editStartDate && editEndDate && new Date(editEndDate) <= new Date(editStartDate)) {
-      toastError("End date must be after start date.");
-      return;
-    }
-    if (editVisibilityType === "departments" && editSelectedOrgUnitIds.length === 0) {
-      // projects_employee_read now gates the departments branch on org_unit_ids only — an empty
-      // selection here would save a project no employee could ever read.
-      toastError("Select at least one org unit. The legacy department list is no longer read by RLS.");
+    if (editStartDate && editEndDate && new Date(editEndDate) < new Date(editStartDate)) {
+      toastError("End date must be on or after start date.");
       return;
     }
 
     try {
-      const visibility_config = {
-        type: editVisibilityType,
-        departments: editVisibilityType === "departments" ? editSelectedDepts : undefined,
-        // Slice B target-side key, written alongside `departments` — RLS still reads `departments`
-        // Slice B is APPLIED (20260820110000): projects_employee_read gates the departments branch
-        // on org_unit_ids ONLY. `departments` is kept for display and is no longer an RLS input.
-        org_unit_ids: editVisibilityType === "departments" ? editSelectedOrgUnitIds : undefined,
-        employee_ids: editVisibilityType === "people" ? editSelectedPeople : undefined,
-      };
-
-      if (editManagerId !== (project.manager_id || "") || editStartDate !== (project.start_date || "") ||
-          editEndDate !== (project.end_date || "") || JSON.stringify(visibility_config) !== JSON.stringify(project.visibility_config || { type: "all" })) {
-        throw new Error("Manager, dates, and visibility cannot be changed through the current project API.");
-      }
       const { data, error } = await db.rpc("p3_update_project", {
         p_project_id: project.id, p_name: editName.trim(),
         p_description: editDesc.trim() || null, p_status: editStatus,
+        p_start_date: editStartDate || null, p_end_date: editEndDate || null,
       });
       if (error) throw error;
       if (!data) {
@@ -468,29 +391,12 @@ export default function ProjectDetail() {
     return map;
   }, [employees]);
 
+  // D5.6: the manager shown is derived from project_memberships (role='manager'), not the
+  // display-only projects.manager_id column.
   const projectManager = useMemo(() => {
-    if (!project?.manager_id) return null;
-    return empMap.get(project.manager_id);
-  }, [project, empMap]);
-
-  // Filters for dropdown searchable lists
-  const eligibleManagers = useMemo(() => {
-    const managerIds = new Set(employees.map((e) => e.manager_id).filter(Boolean));
-    // HR comes from tenant_hr_employee_ids(), not employees.role, which no longer exists.
-    return employees.filter((e) => hrIds.has(e.id) || managerIds.has(e.id));
-  }, [employees, hrIds]);
-
-  const filteredModalManagers = useMemo(() => {
-    return eligibleManagers.filter((e) =>
-      e.full_name.toLowerCase().includes(managerSearch.toLowerCase())
-    );
-  }, [eligibleManagers, managerSearch]);
-
-  const filteredModalPeople = useMemo(() => {
-    return employees.filter((e) =>
-      e.full_name.toLowerCase().includes(peopleSearch.toLowerCase())
-    );
-  }, [employees, peopleSearch]);
+    if (managerEmployeeIds.length === 0) return null;
+    return empMap.get(managerEmployeeIds[0]);
+  }, [managerEmployeeIds, empMap]);
 
   const filteredTaskAssignees = useMemo(() => {
     return employees.filter((e) =>
@@ -1211,7 +1117,7 @@ export default function ProjectDetail() {
                 </span>
                 <div>
                   <h3 className="text-lg font-bold text-slate-900">Edit Project Details</h3>
-                  <p className="text-xs text-slate-500">Update project configurations and access list.</p>
+                  <p className="text-xs text-slate-500">Update project details and dates.</p>
                 </div>
               </div>
               <button
@@ -1271,71 +1177,15 @@ export default function ProjectDetail() {
                     <option value="cancelled">Cancelled</option>
                   </select>
                 </div>
-                {/* Searchable Manager Dropdown */}
-                <div className="relative">
+                {/* Manager is a membership fact (D5.6), not an editable field here. Change it via
+                    project membership management. */}
+                <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
                     Project Manager
                   </label>
-                  <div
-                    onClick={() => setIsManagerDropdownOpen(!isManagerDropdownOpen)}
-                    className="flex items-center justify-between w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none bg-slate-50 cursor-pointer hover:bg-white focus-within:bg-white focus-within:ring focus-within:ring-brand-500/20"
-                  >
-                    <span className="truncate">
-                      {editManagerId
-                        ? employees.find((e) => e.id === editManagerId)?.full_name
-                        : "Select manager..."}
-                    </span>
-                    <span className="text-slate-400 text-xs">▼</span>
+                  <div className="flex items-center w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-600">
+                    {projectManager?.full_name || "Unassigned"}
                   </div>
-
-                  {isManagerDropdownOpen && (
-                    <div className="absolute left-0 right-0 z-50 mt-1 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg divide-y divide-slate-100">
-                      <div className="relative pb-2">
-                        <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                        <input
-                          type="text"
-                          value={managerSearch}
-                          onChange={(e) => setManagerSearch(e.target.value)}
-                          placeholder="Search manager..."
-                          className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-1.5 text-xs outline-none focus:border-brand-500"
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      </div>
-                      <div className="pt-2 space-y-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditManagerId("");
-                            setIsManagerDropdownOpen(false);
-                          }}
-                          className="flex w-full items-center px-3 py-2 text-left text-xs font-medium text-slate-500 hover:bg-slate-50 rounded-lg"
-                        >
-                          None (Unassigned)
-                        </button>
-                        {filteredModalManagers.map((m) => (
-                          <button
-                            key={m.id}
-                            type="button"
-                            onClick={() => {
-                              setEditManagerId(m.id);
-                              setIsManagerDropdownOpen(false);
-                            }}
-                            className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs rounded-lg transition hover:bg-slate-50 ${
-                              editManagerId === m.id ? "bg-brand-50 font-bold text-brand-700" : "text-slate-700"
-                            }`}
-                          >
-                            <span className="grid h-6 w-6 place-items-center rounded-full bg-slate-100 text-[10px] font-bold">
-                              {m.full_name.slice(0, 2).toUpperCase()}
-                            </span>
-                            <div className="flex-1 truncate">
-                              <p className="font-semibold">{m.full_name}</p>
-                              <p className="text-[10px] text-slate-400 capitalize">{titleLabel(m, "Member")}</p>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -1365,158 +1215,6 @@ export default function ProjectDetail() {
                 </div>
               </div>
 
-              {/* Visibility Configurations */}
-              <div className="space-y-4 border-t border-slate-100 pt-6">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                    Visibility Mode
-                  </label>
-                  <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1 rounded-xl">
-                    {[
-                      { type: "all", label: "All Employees" },
-                      { type: "departments", label: "Departments" },
-                      { type: "people", label: "Specific People" },
-                    ].map((v) => (
-                      <button
-                        key={v.type}
-                        type="button"
-                        onClick={() => setEditVisibilityType(v.type as any)}
-                        className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
-                          editVisibilityType === v.type
-                            ? "bg-white text-slate-900 shadow"
-                            : "text-slate-500 hover:text-slate-700"
-                        }`}
-                      >
-                        {v.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Specific Departments Multi-select */}
-                {editVisibilityType === "departments" && (
-                  <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Departments (Legacy)</p>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                      {DEPT_OPTIONS.map((dept) => {
-                        const isChecked = editSelectedDepts.includes(dept);
-                        return (
-                          <label
-                            key={dept}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium cursor-pointer transition capitalize hover:bg-slate-50 ${
-                              isChecked
-                                ? "border-brand-300 bg-brand-50 text-brand-700"
-                                : "border-slate-200 text-slate-600"
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => {
-                                if (isChecked) {
-                                  setEditSelectedDepts(editSelectedDepts.filter((d) => d !== dept));
-                                } else {
-                                  setEditSelectedDepts([...editSelectedDepts, dept]);
-                                }
-                              }}
-                              className="hidden"
-                            />
-                            <span>{dept}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Org Unit Picker — Slice B org_unit_ids write path, alongside the legacy Departments
-                    picker above, which RLS no longer reads — org units are the authoritative target. */}
-                {editVisibilityType === "departments" && (
-                  <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Org Units <span className="text-rose-500">*</span></p>
-                    {orgUnits.length === 0 ? (
-                      <p className="text-xs text-slate-400">No org units configured for this tenant yet.</p>
-                    ) : (
-                      <div className="max-h-40 overflow-y-auto space-y-1">
-                        {sortOrgUnitsHierarchically(orgUnits).map((unit) => {
-                          const depth = getOrgUnitDepth(unit, orgUnits);
-                          const isChecked = editSelectedOrgUnitIds.includes(unit.id);
-                          return (
-                            <button
-                              key={unit.id}
-                              type="button"
-                              onClick={() => {
-                                if (isChecked) {
-                                  setEditSelectedOrgUnitIds(editSelectedOrgUnitIds.filter((id) => id !== unit.id));
-                                } else {
-                                  setEditSelectedOrgUnitIds([...editSelectedOrgUnitIds, unit.id]);
-                                }
-                              }}
-                              style={{ paddingLeft: `${0.625 + depth * 1.25}rem` }}
-                              className={`w-full flex items-center gap-1.5 rounded-lg py-1.5 pr-2.5 text-left text-xs font-medium transition ${
-                                isChecked
-                                  ? "bg-brand-50 border border-brand-200 text-brand-700"
-                                  : "hover:bg-slate-50 border border-transparent text-slate-600"
-                              }`}
-                            >
-                              {depth > 0 && <span className="text-slate-300">└─</span>}
-                              <span className="flex-1 truncate">{unit.name}</span>
-                              {isChecked && <span className="text-brand-600 text-xs font-bold">✓</span>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Specific People Multi-select */}
-                {editVisibilityType === "people" && (
-                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Select Employees</p>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                      <input
-                        type="text"
-                        value={peopleSearch}
-                        onChange={(e) => setPeopleSearch(e.target.value)}
-                        placeholder="Search employee by name..."
-                        className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-xs outline-none focus:border-brand-500"
-                      />
-                    </div>
-                    <div className="max-h-40 overflow-y-auto divide-y divide-slate-100">
-                      {filteredModalPeople.map((emp) => {
-                        const isChecked = editSelectedPeople.includes(emp.id);
-                        return (
-                          <label
-                            key={emp.id}
-                            className={`flex items-center gap-3 px-3 py-2.5 text-xs font-medium cursor-pointer hover:bg-slate-50 rounded-xl transition ${
-                              isChecked ? "bg-brand-50/50" : ""
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => {
-                                if (isChecked) {
-                                  setEditSelectedPeople(editSelectedPeople.filter((id) => id !== emp.id));
-                                } else {
-                                  setEditSelectedPeople([...editSelectedPeople, emp.id]);
-                                }
-                              }}
-                              className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                            />
-                            <div className="flex-1 truncate">
-                              <p className="font-semibold text-slate-800">{emp.full_name}</p>
-                              <p className="text-[10px] text-slate-400 capitalize">{deptLabel(emp, "No Department")}</p>
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
             </form>
 
             {/* Modal Footer */}

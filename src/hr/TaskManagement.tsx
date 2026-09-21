@@ -162,6 +162,7 @@ export default function TaskManagement() {
           p_assigned_to: emp.id, p_title: form.title,
           p_description: form.description || null, p_priority: form.priority,
           p_due_date: form.due_date || null, p_due_time: form.due_time || null,
+          p_org_unit_id: form.assign_mode === "department" ? form.department : null,
         });
         if (taskErr) throw taskErr;
       }

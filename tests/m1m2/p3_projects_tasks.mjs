@@ -40,6 +40,11 @@ const taskB = "a3020000-0000-4000-8000-000000004004";
 const taskHr = "a3020000-0000-4000-8000-000000004005";
 const taskGate = "a3020000-0000-4000-8000-000000004006";
 const allTaskIds = [taskA1, taskA2, taskNull, taskB, taskHr];
+const orgUnitA = "a3020000-0000-4000-8000-000000007001";
+const orgUnitB = "a3020000-0000-4000-8000-000000007002";
+const existingProject = "d0000000-0000-0000-0000-000000000051";
+const existingProjectManager = "e0000000-0000-0000-0000-000000000002";
+const existingProjectMember = "e0000000-0000-0000-0000-000000000005";
 
 function anonKey() {
   const cli = join(root, "node_modules", "@insforge", "cli", "dist", "index.js");
@@ -117,6 +122,9 @@ function setupFullFixture() {
     INSERT INTO public.employee_reporting_relationships(id,tenant_id,employee_id,manager_id,relationship_type,effective_from,is_active) VALUES
       ('a3020000-0000-4000-8000-000000006001'::uuid,'${companyA}'::uuid,'${employeeA.employeeId}'::uuid,'${manager.employeeId}'::uuid,'primary','2026-01-01',true),
       ('a3020000-0000-4000-8000-000000006002'::uuid,'${companyA}'::uuid,'${employeeA.employeeId}'::uuid,'${projectManager.employeeId}'::uuid,'mentor','2026-01-01',true);
+    INSERT INTO public.org_units(id,tenant_id,name) VALUES
+      ('${orgUnitA}'::uuid,'${companyA}'::uuid,'P3-02 Dept A'),
+      ('${orgUnitB}'::uuid,'${companyB}'::uuid,'P3-02 Dept B');
     INSERT INTO public.projects(id,tenant_id,name,status,manager_id,created_by) VALUES
       ('${projectA1}'::uuid,'${companyA}'::uuid,'P3-02 A1','active','${projectManager.employeeId}'::uuid,'${projectManager.employeeId}'::uuid),
       ('${projectA2}'::uuid,'${companyA}'::uuid,'P3-02 A2','active',NULL,'${hrA.employeeId}'::uuid);
@@ -162,6 +170,7 @@ function teardownFullFixture() {
     DELETE FROM public.task_submissions WHERE task_id IN
       (SELECT id FROM public.tasks WHERE title LIKE 'P3-02%');
     DELETE FROM public.tasks WHERE title LIKE 'P3-02%';
+    DELETE FROM public.org_units WHERE id IN ('${orgUnitA}'::uuid,'${orgUnitB}'::uuid);
     DELETE FROM public.project_memberships WHERE project_id IN
       (SELECT id FROM public.projects WHERE name LIKE 'P3-02%');
     DELETE FROM public.projects WHERE name LIKE 'P3-02%';
@@ -196,6 +205,17 @@ async function taskIds(client,ids) {
 
 async function fullSuite(clients,key) {
   try {
+    // D5.1 backfill evidence: the one pre-existing real project (tenant da7a0000) had zero
+    // membership rows before migration 188300. This is a permanent, non-disposable row check —
+    // not torn down.
+    const backfilled=rows(runSql(`SELECT employee_id,role,is_active FROM public.project_memberships
+      WHERE project_id='${existingProject}'::uuid ORDER BY employee_id`));
+    assert.deepEqual(backfilled,[
+      {employee_id:existingProjectManager,role:"manager",is_active:true},
+      {employee_id:existingProjectMember,role:"member",is_active:true},
+    ]);
+    console.log(`D5.1 backfill on existing project ${existingProject}: ${JSON.stringify(backfilled)}`);
+
     setupFullFixture();
     clients.manager=await signIn(manager,key);
     clients.projectManager=await signIn(projectManager,key);
@@ -252,6 +272,15 @@ async function fullSuite(clients,key) {
     denied(await clients.manager.database.rpc("p3_assign_task",{p_assigned_to:hrA.employeeId,p_title:"P3-02 denied manager"}),"Manager non-direct assignment");
     denied(await clients.projectManager.database.rpc("p3_assign_task",{p_assigned_to:employeeA.employeeId,p_title:"P3-02 denied PM",p_project_id:projectA2}),"Project Manager A2 assignment");
 
+    // D5.4: department-mode assignment derives department_filter server-side from the org
+    // unit's name, and a cross-tenant org_unit is rejected.
+    const deptAssigned=allowed(await clients.manager.database.rpc("p3_assign_task",{p_assigned_to:employeeA.employeeId,p_title:"P3-02 department assignment",p_org_unit_id:orgUnitA}),"Manager department-mode assignment");
+    const deptRow=rows(runSql(`SELECT org_unit_id,department_filter FROM public.tasks WHERE id='${deptAssigned}'::uuid`))[0];
+    assert.equal(deptRow.org_unit_id,orgUnitA,"department task missing org_unit_id");
+    assert.equal(deptRow.department_filter,"P3-02 Dept A","department_filter not derived from org unit name");
+    console.log(`Department-mode assignment: org_unit_id=${deptRow.org_unit_id} department_filter=${deptRow.department_filter}`);
+    denied(await clients.manager.database.rpc("p3_assign_task",{p_assigned_to:employeeA.employeeId,p_title:"P3-02 cross-tenant dept",p_org_unit_id:orgUnitB}),"Manager cross-tenant org_unit rejected",/TASK_ORG_UNIT_INVALID|P1003/i);
+
     const projectSubmit=allowed(await clients.employee.database.rpc("submit_task_request",{p_task_id:pmAssigned,p_notes:"project done",p_attachment_url:null,p_attachment_name:null}),"Employee project task submit");
     const projectRecipients=rows(runSql(`SELECT employee_id FROM public.notifications WHERE tenant_id='${companyA}'::uuid AND reference_id='${pmAssigned}'::uuid AND type='general' ORDER BY employee_id`)).map(r=>r.employee_id);
     assert.deepEqual(projectRecipients,[hrA.employeeId,manager.employeeId,projectManager.employeeId].sort());
@@ -274,9 +303,16 @@ async function fullSuite(clients,key) {
     allowed(await clients.hr.database.rpc("p3_archive_task",{p_task_id:hrAssigned}),"HR archive task");
     assert.equal((await taskIds(clients.employee,[hrAssigned])).length,0,"archived task still visible");
 
-    const created=allowed(await clients.projectManager.database.rpc("p3_create_project",{p_name:"P3-02 RPC created",p_description:"disposable"}),"Project Manager project create");
+    const created=allowed(await clients.projectManager.database.rpc("p3_create_project",{p_name:"P3-02 RPC created",p_description:"disposable",p_start_date:"2099-01-01",p_end_date:"2099-06-01"}),"Project Manager project create with dates");
+    const createdDates=rows(runSql(`SELECT start_date,end_date FROM public.projects WHERE id='${created}'::uuid`))[0];
+    assert.deepEqual([String(createdDates.start_date).slice(0,10),String(createdDates.end_date).slice(0,10)],["2099-01-01","2099-06-01"],"create did not persist dates");
+    console.log(`Project created with dates: ${JSON.stringify(createdDates)}`);
     allowed(await clients.projectManager.database.rpc("p3_set_project_member",{p_project_id:created,p_employee_id:employeeA.employeeId,p_role:"member"}),"Project Manager add member");
-    allowed(await clients.projectManager.database.rpc("p3_update_project",{p_project_id:created,p_name:"P3-02 RPC updated",p_description:"updated",p_status:"active"}),"Project Manager project update");
+    denied(await clients.projectManager.database.rpc("p3_update_project",{p_project_id:created,p_name:"P3-02 RPC updated",p_description:"updated",p_status:"active",p_start_date:"2099-02-01",p_end_date:"2099-01-01"}),"Project Manager end-before-start rejected",/PROJECT_DATE_RANGE_INVALID|P1003/i);
+    allowed(await clients.projectManager.database.rpc("p3_update_project",{p_project_id:created,p_name:"P3-02 RPC updated",p_description:"updated",p_status:"active",p_start_date:"2099-03-01",p_end_date:"2099-03-01"}),"Project Manager date update accepted (end=start)");
+    const updatedDates=rows(runSql(`SELECT start_date,end_date FROM public.projects WHERE id='${created}'::uuid`))[0];
+    assert.deepEqual([String(updatedDates.start_date).slice(0,10),String(updatedDates.end_date).slice(0,10)],["2099-03-01","2099-03-01"],"update did not persist dates");
+    console.log(`Project dates after update: ${JSON.stringify(updatedDates)}`);
     allowed(await clients.projectManager.database.rpc("p3_archive_project",{p_project_id:created}),"Project Manager project archive");
     const projectRead=await clients.employee.database.from("projects").select("id").eq("id",created);
     assert.equal(projectRead.error,null);
@@ -327,6 +363,10 @@ async function fullSuite(clients,key) {
 
     // Deep links must recheck membership on each request, without relying on the summary.
     denied(await clients.projectManager.database.rpc("p3_set_project_member",{p_project_id:projectA1,p_employee_id:projectManager.employeeId,p_role:"manager",p_active:false}),"Project Manager self removal");
+    // D5.2: employeeA still holds pmAssigned (submitted, not approved/archived) in projectA1 —
+    // deactivation must be refused until it is archived or approved.
+    denied(await clients.projectManager.database.rpc("p3_set_project_member",{p_project_id:projectA1,p_employee_id:employeeA.employeeId,p_role:"member",p_active:false}),"Project Manager remove employee.a with open task",/PROJECT_MEMBER_HAS_OPEN_TASKS|P1003/i);
+    allowed(await clients.projectManager.database.rpc("p3_archive_task",{p_task_id:pmAssigned}),"Project Manager archive open task before removal");
     allowed(await clients.projectManager.database.rpc("p3_set_project_member",{p_project_id:projectA1,p_employee_id:employeeA.employeeId,p_role:"member",p_active:false}),"Project Manager remove employee.a");
     assert.equal((await taskIds(clients.employee,[taskA1])).length,0,"revoked member retained task deep-link read");
     const afterRevocation=await clients.employee.database.from("projects").select("id").eq("id",projectA1);

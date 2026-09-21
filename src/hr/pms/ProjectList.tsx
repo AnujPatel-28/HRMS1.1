@@ -1,55 +1,12 @@
 import { useEffect, useState, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, Search, Calendar, Users, FolderKanban, CheckCircle2, ChevronRight, X, Shield, Building } from "lucide-react";
+import { Plus, Search, Calendar, Users, FolderKanban, CheckCircle2, ChevronRight, X } from "lucide-react";
 import { db } from "../../insforge/client";
 import { useTenant } from "../../contexts/TenantContext";
 import { useToast } from "../../shared/ToastContext";
 import { Skeleton } from "../../shared/Skeleton";
 import { EmptyState } from "../../shared/EmptyState";
 import type { Project, Employee, Task } from "../../types";
-import { useDepartmentLabel, useJobTitleLabel } from "../../contexts/OrgUnitsContext";
-import { useTenantHrIds } from "../../hooks/useTenantHrIds";
-
-const DEPT_OPTIONS = ["sales", "dev", "marketing", "operations", "design", "other"] as const;
-
-// Org unit picker for the "departments" visibility branch (Slice B org_unit_ids write path). Same
-// depth/hierarchical-sort shape as src/hr/OrgStructureManagement.tsx, trimmed to the columns needed.
-type OrgUnitOption = { id: string; name: string; parent_id: string | null };
-
-function getOrgUnitDepth(unit: OrgUnitOption, all: OrgUnitOption[]): number {
-  let depth = 0;
-  let parentId = unit.parent_id;
-  const visited = new Set<string>();
-  while (parentId) {
-    if (visited.has(parentId)) break;
-    visited.add(parentId);
-    const parent = all.find(u => u.id === parentId);
-    if (!parent) break;
-    depth++;
-    parentId = parent.parent_id;
-  }
-  return depth;
-}
-
-function sortOrgUnitsHierarchically(units: OrgUnitOption[]): OrgUnitOption[] {
-  const roots = units.filter(u => !u.parent_id || !units.some(p => p.id === u.parent_id));
-  const childrenMap = new Map<string, OrgUnitOption[]>();
-  units.forEach(u => {
-    if (u.parent_id) {
-      const list = childrenMap.get(u.parent_id) || [];
-      list.push(u);
-      childrenMap.set(u.parent_id, list);
-    }
-  });
-  const result: OrgUnitOption[] = [];
-  const traverse = (node: OrgUnitOption) => {
-    result.push(node);
-    const children = (childrenMap.get(node.id) || []).sort((a, b) => a.name.localeCompare(b.name));
-    children.forEach(traverse);
-  };
-  roots.sort((a, b) => a.name.localeCompare(b.name)).forEach(traverse);
-  return result;
-}
 
 const STATUS_COLOR: Record<Project["status"], string> = {
   planning: "bg-blue-50 text-blue-700 border-blue-200",
@@ -65,9 +22,6 @@ interface ProjectCardData extends Project {
 }
 
 export default function ProjectList() {
-  const deptLabel = useDepartmentLabel();
-  const titleLabel = useJobTitleLabel();
-  const hrIds = useTenantHrIds();
   const { tenantId } = useTenant();
   const navigate = useNavigate();
   const { success, error: toastError } = useToast();
@@ -83,21 +37,8 @@ export default function ProjectList() {
   const [formName, setFormName] = useState("");
   const [formDesc, setFormDesc] = useState("");
   const [formStatus, setFormStatus] = useState<Project["status"]>("planning");
-  const [formManagerId, setFormManagerId] = useState("");
   const [formStartDate, setFormStartDate] = useState("");
   const [formEndDate, setFormEndDate] = useState("");
-  const [formVisibilityType, setFormVisibilityType] = useState<"all" | "departments" | "people">("all");
-  const [formSelectedDepts, setFormSelectedDepts] = useState<string[]>([]);
-  const [formSelectedOrgUnitIds, setFormSelectedOrgUnitIds] = useState<string[]>([]);
-  const [formSelectedPeople, setFormSelectedPeople] = useState<string[]>([]);
-  const [orgUnits, setOrgUnits] = useState<OrgUnitOption[]>([]);
-  
-  // Searching/filtering managers in modal
-  const [managerSearch, setManagerSearch] = useState("");
-  const [isManagerDropdownOpen, setIsManagerDropdownOpen] = useState(false);
-
-  // Searching/filtering people in modal visibility
-  const [peopleSearch, setPeopleSearch] = useState("");
 
   const fetchProjectsAndEmployees = async () => {
     if (!tenantId) return;
@@ -145,10 +86,29 @@ export default function ProjectList() {
         tasksByProject.get(t.project_id)!.push(t);
       });
 
+      // 4. Manager comes from project_memberships (role='manager'), not the display-only
+      // projects.manager_id column — membership is the one source of truth (D5.6).
+      const projectIds = projList.map((p) => p.id);
+      const managerByProject = new Map<string, Employee>();
+      if (projectIds.length > 0) {
+        const { data: memberData } = await db
+          .from("project_memberships")
+          .select("project_id, employee_id")
+          .in("project_id", projectIds)
+          .eq("role", "manager")
+          .eq("is_active", true);
+        (memberData ?? []).forEach((m: { project_id: string; employee_id: string }) => {
+          if (!managerByProject.has(m.project_id)) {
+            const emp = empMap.get(m.employee_id);
+            if (emp) managerByProject.set(m.project_id, emp);
+          }
+        });
+      }
+
       // Construct card data
       const enriched: ProjectCardData[] = projList.map((p) => ({
         ...p,
-        manager: p.manager_id ? empMap.get(p.manager_id) : undefined,
+        manager: managerByProject.get(p.id),
         tasks: tasksByProject.get(p.id) || [],
       }));
 
@@ -163,17 +123,6 @@ export default function ProjectList() {
 
   useEffect(() => {
     void fetchProjectsAndEmployees();
-  }, [tenantId]);
-
-  // Org units for the "departments" visibility Org Unit picker (Slice B org_unit_ids write path).
-  useEffect(() => {
-    let active = true;
-    if (!tenantId) return;
-    db.from("org_units").select("id, name, parent_id").eq("tenant_id", tenantId).eq("is_active", true)
-      .order("name", { ascending: true }).then(({ data }) => {
-        if (active && data) setOrgUnits(data as OrgUnitOption[]);
-      });
-    return () => { active = false; };
   }, [tenantId]);
 
   // Statistics
@@ -203,49 +152,24 @@ export default function ProjectList() {
     });
   }, [projects, filterTab, searchQuery]);
 
-  // Manager List (HR + Managers)
-  const eligibleManagers = useMemo(() => {
-    const managerIds = new Set(employees.map((e) => e.manager_id).filter(Boolean));
-    // HR comes from tenant_hr_employee_ids(), not employees.role, which no longer exists.
-    return employees.filter((e) => hrIds.has(e.id) || managerIds.has(e.id));
-  }, [employees, hrIds]);
-
-  const filteredModalManagers = useMemo(() => {
-    return eligibleManagers.filter((e) =>
-      e.full_name.toLowerCase().includes(managerSearch.toLowerCase()) ||
-      e.email.toLowerCase().includes(managerSearch.toLowerCase())
-    );
-  }, [eligibleManagers, managerSearch]);
-
-  const filteredModalPeople = useMemo(() => {
-    return employees.filter((e) =>
-      e.full_name.toLowerCase().includes(peopleSearch.toLowerCase())
-    );
-  }, [employees, peopleSearch]);
-
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) {
       toastError("Project name is required.");
       return;
     }
-    if (formStartDate && formEndDate && new Date(formEndDate) <= new Date(formStartDate)) {
-      toastError("End date must be after start date.");
-      return;
-    }
-    if (formVisibilityType === "departments" && formSelectedOrgUnitIds.length === 0) {
-      // projects_employee_read now gates the departments branch on org_unit_ids only — an empty
-      // selection here would save a project no employee could ever read.
-      toastError("Select at least one org unit. The legacy department list is no longer read by RLS.");
+    if (formStartDate && formEndDate && new Date(formEndDate) < new Date(formStartDate)) {
+      toastError("End date must be on or after start date.");
       return;
     }
 
     try {
-      if (formStatus !== "planning" || formManagerId || formStartDate || formEndDate || formVisibilityType !== "all") {
-        throw new Error("The project API currently creates a planning project with you as manager and default visibility. Change the form options to match.");
+      if (formStatus !== "planning") {
+        throw new Error("The project API currently creates a planning project with you as manager. Change the form options to match.");
       }
       const { data, error } = await db.rpc("p3_create_project", {
         p_name: formName.trim(), p_description: formDesc.trim() || null,
+        p_start_date: formStartDate || null, p_end_date: formEndDate || null,
       });
 
       if (error) throw error;
@@ -267,15 +191,8 @@ export default function ProjectList() {
     setFormName("");
     setFormDesc("");
     setFormStatus("planning");
-    setFormManagerId("");
     setFormStartDate("");
     setFormEndDate("");
-    setFormVisibilityType("all");
-    setFormSelectedDepts([]);
-    setFormSelectedOrgUnitIds([]);
-    setFormSelectedPeople([]);
-    setManagerSearch("");
-    setPeopleSearch("");
   };
 
   function formatDateRange(startStr: string | null, endStr: string | null) {
@@ -500,7 +417,7 @@ export default function ProjectList() {
                 </span>
                 <div>
                   <h3 className="text-lg font-bold text-slate-900">Create New Project</h3>
-                  <p className="text-xs text-slate-500">Define your project details, manager, and access rules.</p>
+                  <p className="text-xs text-slate-500">Define your project details. You become the project manager.</p>
                 </div>
               </div>
               <button
@@ -542,93 +459,22 @@ export default function ProjectList() {
                 </div>
               </div>
 
-              {/* Status and Manager Row */}
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                    Status
-                  </label>
-                  <select
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value as Project["status"])}
-                    className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none ring-brand-600 focus:ring focus:border-brand-500 transition bg-slate-50 hover:bg-white focus:bg-white"
-                  >
-                    <option value="planning">Planning</option>
-                    <option value="active">Active</option>
-                    <option value="on_hold">On Hold</option>
-                    <option value="completed">Completed</option>
-                    <option value="cancelled">Cancelled</option>
-                  </select>
-                </div>
-                {/* Searchable Manager Dropdown */}
-                <div className="relative">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                    Project Manager
-                  </label>
-                  <div
-                    onClick={() => setIsManagerDropdownOpen(!isManagerDropdownOpen)}
-                    className="flex items-center justify-between w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none bg-slate-50 cursor-pointer hover:bg-white focus-within:bg-white focus-within:ring focus-within:ring-brand-500/20"
-                  >
-                    <span className="truncate">
-                      {formManagerId
-                        ? employees.find((e) => e.id === formManagerId)?.full_name
-                        : "Select manager..."}
-                    </span>
-                    <span className="text-slate-400 text-xs">▼</span>
-                  </div>
-
-                  {isManagerDropdownOpen && (
-                    <div className="absolute left-0 right-0 z-50 mt-1 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg divide-y divide-slate-100">
-                      <div className="relative pb-2">
-                        <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                        <input
-                          type="text"
-                          value={managerSearch}
-                          onChange={(e) => setManagerSearch(e.target.value)}
-                          placeholder="Search manager..."
-                          className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-1.5 text-xs outline-none focus:border-brand-500"
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      </div>
-                      <div className="pt-2 space-y-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFormManagerId("");
-                            setIsManagerDropdownOpen(false);
-                          }}
-                          className="flex w-full items-center px-3 py-2 text-left text-xs font-medium text-slate-500 hover:bg-slate-50 rounded-lg"
-                        >
-                          None (Unassigned)
-                        </button>
-                        {filteredModalManagers.map((m) => (
-                          <button
-                            key={m.id}
-                            type="button"
-                            onClick={() => {
-                              setFormManagerId(m.id);
-                              setIsManagerDropdownOpen(false);
-                            }}
-                            className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs rounded-lg transition hover:bg-slate-50 ${
-                              formManagerId === m.id ? "bg-brand-50 font-bold text-brand-700" : "text-slate-700"
-                            }`}
-                          >
-                            <span className="grid h-6 w-6 place-items-center rounded-full bg-slate-100 text-[10px] font-bold">
-                              {m.full_name.slice(0, 2).toUpperCase()}
-                            </span>
-                            <div className="flex-1 truncate">
-                              <p className="font-semibold">{m.full_name}</p>
-                              <p className="text-[10px] text-slate-400 capitalize">{titleLabel(m, "Member")}</p>
-                            </div>
-                          </button>
-                        ))}
-                        {filteredModalManagers.length === 0 && (
-                          <div className="p-3 text-center text-xs text-slate-400">No managers found.</div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
+              {/* Status */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                  Status
+                </label>
+                <select
+                  value={formStatus}
+                  onChange={(e) => setFormStatus(e.target.value as Project["status"])}
+                  className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none ring-brand-600 focus:ring focus:border-brand-500 transition bg-slate-50 hover:bg-white focus:bg-white"
+                >
+                  <option value="planning">Planning</option>
+                  <option value="active">Active</option>
+                  <option value="on_hold">On Hold</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
               </div>
 
               {/* Start & End Date Row */}
@@ -655,163 +501,6 @@ export default function ProjectList() {
                     className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none ring-brand-600 focus:ring focus:border-brand-500 transition bg-slate-50 hover:bg-white focus:bg-white"
                   />
                 </div>
-              </div>
-
-              {/* Visibility Configurations */}
-              <div className="space-y-4 border-t border-slate-100 pt-6">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                    Visibility Mode
-                  </label>
-                  <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1 rounded-xl">
-                    {[
-                      { type: "all", label: "All Employees", icon: Building },
-                      { type: "departments", label: "Departments", icon: Shield },
-                      { type: "people", label: "Specific People", icon: Users },
-                    ].map((v) => (
-                      <button
-                        key={v.type}
-                        type="button"
-                        onClick={() => setFormVisibilityType(v.type as any)}
-                        className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
-                          formVisibilityType === v.type
-                            ? "bg-white text-slate-900 shadow"
-                            : "text-slate-500 hover:text-slate-700"
-                        }`}
-                      >
-                        <v.icon className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">{v.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Specific Departments Multi-select */}
-                {formVisibilityType === "departments" && (
-                  <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Departments (Legacy)</p>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                      {DEPT_OPTIONS.map((dept) => {
-                        const isChecked = formSelectedDepts.includes(dept);
-                        return (
-                          <label
-                            key={dept}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium cursor-pointer transition capitalize hover:bg-slate-50 ${
-                              isChecked
-                                ? "border-brand-300 bg-brand-50 text-brand-700"
-                                : "border-slate-200 text-slate-600"
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => {
-                                if (isChecked) {
-                                  setFormSelectedDepts(formSelectedDepts.filter((d) => d !== dept));
-                                } else {
-                                  setFormSelectedDepts([...formSelectedDepts, dept]);
-                                }
-                              }}
-                              className="hidden"
-                            />
-                            <span>{dept}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Org Unit Picker — Slice B org_unit_ids write path, alongside the legacy Departments
-                    picker above, which RLS no longer reads — org units are the authoritative target. */}
-                {formVisibilityType === "departments" && (
-                  <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Org Units <span className="text-rose-500">*</span></p>
-                    {orgUnits.length === 0 ? (
-                      <p className="text-xs text-slate-400">No org units configured for this tenant yet.</p>
-                    ) : (
-                      <div className="max-h-40 overflow-y-auto space-y-1">
-                        {sortOrgUnitsHierarchically(orgUnits).map((unit) => {
-                          const depth = getOrgUnitDepth(unit, orgUnits);
-                          const isChecked = formSelectedOrgUnitIds.includes(unit.id);
-                          return (
-                            <button
-                              key={unit.id}
-                              type="button"
-                              onClick={() => {
-                                if (isChecked) {
-                                  setFormSelectedOrgUnitIds(formSelectedOrgUnitIds.filter((id) => id !== unit.id));
-                                } else {
-                                  setFormSelectedOrgUnitIds([...formSelectedOrgUnitIds, unit.id]);
-                                }
-                              }}
-                              style={{ paddingLeft: `${0.625 + depth * 1.25}rem` }}
-                              className={`w-full flex items-center gap-1.5 rounded-lg py-1.5 pr-2.5 text-left text-xs font-medium transition ${
-                                isChecked
-                                  ? "bg-brand-50 border border-brand-200 text-brand-700"
-                                  : "hover:bg-slate-50 border border-transparent text-slate-600"
-                              }`}
-                            >
-                              {depth > 0 && <span className="text-slate-300">└─</span>}
-                              <span className="flex-1 truncate">{unit.name}</span>
-                              {isChecked && <span className="text-brand-600 text-xs font-bold">✓</span>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Specific People Multi-select */}
-                {formVisibilityType === "people" && (
-                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Select Employees</p>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                      <input
-                        type="text"
-                        value={peopleSearch}
-                        onChange={(e) => setPeopleSearch(e.target.value)}
-                        placeholder="Search employee by name..."
-                        className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-xs outline-none focus:border-brand-500"
-                      />
-                    </div>
-                    <div className="max-h-40 overflow-y-auto divide-y divide-slate-100">
-                      {filteredModalPeople.map((emp) => {
-                        const isChecked = formSelectedPeople.includes(emp.id);
-                        return (
-                          <label
-                            key={emp.id}
-                            className={`flex items-center gap-3 px-3 py-2.5 text-xs font-medium cursor-pointer hover:bg-slate-50 rounded-xl transition ${
-                              isChecked ? "bg-brand-50/50" : ""
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => {
-                                if (isChecked) {
-                                  setFormSelectedPeople(formSelectedPeople.filter((id) => id !== emp.id));
-                                } else {
-                                  setFormSelectedPeople([...formSelectedPeople, emp.id]);
-                                }
-                              }}
-                              className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                            />
-                            <div className="flex-1 truncate">
-                              <p className="font-semibold text-slate-800">{emp.full_name}</p>
-                              <p className="text-[10px] text-slate-400 capitalize">{deptLabel(emp, "No Department")}</p>
-                            </div>
-                          </label>
-                        );
-                      })}
-                      {filteredModalPeople.length === 0 && (
-                        <div className="p-3 text-center text-xs text-slate-400">No employees found.</div>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
             </form>
 

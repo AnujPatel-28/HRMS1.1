@@ -37,6 +37,9 @@ export default function EmployeeProjectView() {
   const [submissions, setSubmissions] = useState<Record<string, TaskSubmission>>({});
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [teamMembers, setTeamMembers] = useState<Employee[]>([]);
+  // Manager comes from project_memberships (role='manager') — the one source of truth (D5.6),
+  // not the display-only projects.manager_id column.
+  const [managerEmployeeIds, setManagerEmployeeIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Expanded card state
@@ -122,6 +125,15 @@ export default function EmployeeProjectView() {
           .filter((e) => e && e.id !== employee.id) as Employee[]; // Filter out current employee
         setTeamMembers(members);
       }
+
+      // 6. Manager comes from project_memberships, not the display-only manager_id column.
+      const { data: memberData } = await db
+        .from("project_memberships")
+        .select("employee_id")
+        .eq("project_id", projectId)
+        .eq("role", "manager")
+        .eq("is_active", true);
+      setManagerEmployeeIds((memberData ?? []).map((m: { employee_id: string }) => m.employee_id));
     } catch (err: any) {
       console.error(err);
       error(err.message || "Failed to load project details.");
@@ -177,9 +189,9 @@ export default function EmployeeProjectView() {
   };
 
   const projectManager = useMemo(() => {
-    if (!project?.manager_id || allEmployees.length === 0) return null;
-    return allEmployees.find((e) => e.id === project.manager_id);
-  }, [project, allEmployees]);
+    if (managerEmployeeIds.length === 0 || allEmployees.length === 0) return null;
+    return allEmployees.find((e) => e.id === managerEmployeeIds[0]);
+  }, [managerEmployeeIds, allEmployees]);
 
   if (loading) {
     return (
