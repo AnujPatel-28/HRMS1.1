@@ -34,6 +34,15 @@ Client paths checked (grep `src/`, `functions/`): employee reads — `useEmploye
 TaxDeclarationHR; `create-employee-user` writes `employee_onboarding` with the **HR caller's token**
 (covered by `employee_onboarding_hr_all`); other functions use the admin key. No frontend change.
 
+**Who can still write (checked after acceptance):** writes now require `is_hr()` (JWT role `hr` or an
+active `hr_admin` employee role), the same predicate as 72 other policies. The HR portal opens on
+capability grants (`employee.write`/`org.manage`/`access.manage` company), so a future Company Admin or
+Owner *without* HR would see these pages but fail to save — the deferred "one resolver" seam
+(`doc/product_direction_review_2026-09-09.md`), not a C7 regression. Measured: every admin-template
+holder in TB today is `hr_admin` with `is_hr()` true, so nobody loses access.
+**Dependents:** no invoker function references the 9 tables (`position()` sweep); their only triggers
+set `updated_at`. Forward-fix slot for C7: `20260912194600`.
+
 ## 3. After — `tests/m1m2/c7_tenant_write_policies.mjs`: **32/32 PASS**
 
 Every employee insert → `42501`; every update/delete of a non-owned row → 0 rows, row intact; employee
@@ -73,8 +82,10 @@ or stack trace. Policy drift **42** of 333 (was 44: two untracked policies were 
   needs only status). Decide in the payroll decision lock.
 - `acknowledgements_employee_self` is ALL — an employee can delete their own acknowledgement.
 - Storage: profile-photo policies key on tenant only — any employee can overwrite/delete a colleague's
-  photo (low). `expenses_self_insert` checks ownership only — verify an employee cannot insert an
-  already-approved expense (C6 or a follow-up).
+  photo (low).
+- **`expenses` — MEASURED 2026-09-23:** `employee.a` inserted an expense with `status='approved'`
+  (row created, then deleted). `expenses_self_insert` checks ownership only. Money path → **first item
+  of C6**.
 
 ## 6. Production
 

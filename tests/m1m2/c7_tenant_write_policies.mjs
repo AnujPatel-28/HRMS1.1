@@ -28,6 +28,7 @@ const fx = {
   run: randomUUID(), window: randomUUID(), exceptionHr: randomUUID(), exceptionSelf: randomUUID(), onboarding: randomUUID(),
 };
 const MARK = "C7 fixture";
+let payrollWasEnabled = null; // Company A's payroll module flag before the run, restored in teardown
 const FY = "2099-00";
 
 const fp = (error) => [error?.code, error?.message].filter(Boolean).join(" | ");
@@ -59,6 +60,7 @@ async function rlsInvariant(clients, expected) {
 }
 
 function setupFixture() {
+  payrollWasEnabled = runSql(`SELECT enabled FROM public.tenant_modules WHERE tenant_id='${A}' AND module_key='payroll'`).rows[0]?.enabled ?? false;
   runSql(`
     UPDATE public.tenant_modules SET enabled = true WHERE tenant_id='${A}' AND module_key='payroll';
     INSERT INTO public.shifts(id,tenant_id,name,start_time,end_time) VALUES ('${fx.shift}','${A}','${MARK}','09:00','18:00');
@@ -77,7 +79,7 @@ function setupFixture() {
 
 function teardownFixture() {
   runSql(`
-    UPDATE public.tenant_modules SET enabled = false WHERE tenant_id='${A}' AND module_key='payroll';
+    UPDATE public.tenant_modules SET enabled = ${payrollWasEnabled === true || payrollWasEnabled === "true"} WHERE tenant_id='${A}' AND module_key='payroll';
     DELETE FROM public.employee_shifts WHERE tenant_id='${A}' AND (shift_id='${fx.shift}' OR effective_from >= '2099-01-01');
     DELETE FROM public.shifts WHERE tenant_id='${A}' AND (id='${fx.shift}' OR name LIKE 'C7 %');
     DELETE FROM public.office_locations WHERE tenant_id='${A}' AND name LIKE 'C7 %';

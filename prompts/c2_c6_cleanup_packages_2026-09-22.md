@@ -214,3 +214,16 @@ house form) + explicit HR write policy + narrow self policies where a client pat
 HR path still works, every legitimate employee read/write path listed and exercised; all suites.
 **Order:** before C4 (security before correctness). Payroll tables may be deferred to the payroll
 module but must be listed in its decision doc.
+
+### C6 additions (lead, 2026-09-23, from C3/C7 acceptance) — do these FIRST in C6
+
+1. **`expenses` self-approval (money path, measured):** `employee.a` inserted an expense with
+   `status='approved'` via REST (`scratch/c7-expense-probe.mjs`). Tighten `expenses_self_insert`
+   WITH CHECK to `status = 'pending'` plus null reviewer/approval columns; check `expenses_self_*`
+   UPDATE paths the same way. Grep the client insert first (it must not send another status).
+2. `create_draft_employee` (HR-only, no caller) inserts `manager_id` with no relationship row — drop
+   it or route it through `update_employee_reporting_relationship`.
+3. Profile-photo storage policies key on tenant only — any employee can overwrite/delete a
+   colleague's photo; scope to own folder (+ HR).
+4. `acknowledgements_employee_self` is FOR ALL — an employee can delete their own acknowledgement.
+C7's forward-fix slot is `20260912194600` (C7 was renumbered from `198000`).
