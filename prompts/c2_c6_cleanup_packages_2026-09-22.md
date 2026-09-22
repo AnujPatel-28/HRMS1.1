@@ -69,9 +69,27 @@ met: in the migration, **assert** zero employees with `manager_id` set and no ac
 (exact signature). Keep `manager_id` as a display column kept in sync by the RPC, or report if the
 RPC does not sync it. Update `tests/m1m2/p1_organization_transfer.mjs` only if its assertions name
 the fallback.
+**Added by the lead after C1 review (2026-09-22) — two legacy `manager_id` policies survive C1:**
+- `managers_can_view_own_draft_reports` — `SELECT USING manager_id = get_my_employee_id()`. Not
+  limited to drafts: it exposes the **full `employees` row of every report** (bank, PAN, Aadhaar,
+  DOB) to their manager via the legacy column, bypassing the "manager = basic read only" rule.
+- `managers_can_delete_own_draft_reports` — `DELETE USING status='inactive' AND user_id IS NULL AND
+  manager_id = me`. Lets an employee delete employee rows matching that shape — which can include
+  **exited former reports**.
+Both go. But `src/employee/MyTeam.tsx:~52` lists a manager's team **through** that SELECT policy
+(`.eq("manager_id", currentEmployee.id)`), and `handleCancelRequest` (~208) deletes an `employees`
+row. So: list reports from the **primary reporting relationship** with **basic columns only** (the
+`employee_directory_public` view, or a definer RPC returning the columns `MyTeam` renders — never
+bank/identity); and make "cancel" act on the manager's own **pending `new_hire_requests`** row
+(add a small definer `c1_cancel_new_hire_request` — requester only, pending only) instead of
+deleting an employee. Show pending requests in MyTeam from `new_hire_requests`.
+Acceptance additions: a manager sees their primary reports' basic fields and **not** their
+`account_number`/`pan_number` (query the table directly as the manager → no row / no sensitive
+column); an employee cannot delete any `employees` row; cancel works on a pending request only.
+
 **Migration:** `20260912194000_m1m2-manager-id-convergence.sql`.
-**Allowed files:** migration(s); `src/hr/EmployeeCreate.tsx`; `tests/m1m2/p1_organization_transfer.mjs`
-(only if needed); new `tests/m1m2/c3_manager_convergence.mjs`.
+**Allowed files:** migration(s); `src/hr/EmployeeCreate.tsx`; `src/employee/MyTeam.tsx`;
+`tests/m1m2/p1_organization_transfer.mjs` (only if needed); new `tests/m1m2/c3_manager_convergence.mjs`.
 **Acceptance:** HR edits an employee's manager in the UI path → primary relationship row changes;
 `is_manager_of` true for the new manager, false for the old; an employee with `manager_id` pointing
 at someone but no primary row gets **no** manager scope (fallback gone); all suites green.

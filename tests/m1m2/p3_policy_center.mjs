@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { createClient } from "@insforge/sdk";
 
-import { verifyTarget } from "./_harness.mjs";
+import { runSql, verifyTarget } from "./_harness.mjs";
 import { TB_M1M2 } from "./_target.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -83,6 +83,18 @@ async function main() {
   const beforeRls = await rlsInvariant({ employee: employeeClient, hr: hrClient, crossTenant: crossTenantClient });
   console.log(`RLS invariant before: ${beforeRls.employee}/${beforeRls.hr}/${beforeRls.crossTenant} (expect 1/2/0).`);
 
+  // The fixture was created by hand for the original P3-01 run and deleted afterwards, so this suite
+  // could not run on its own. Seed it here (row first: hr_policy_object_tenant_ok/readable resolve
+  // the object through hr_policies.storage_path), upload as HR, and remove both in finally. Storage
+  // objects cannot be deleted by SQL, so the object is removed through the SDK as its uploader.
+  runSql(`DELETE FROM public.employee_policy_acknowledgements WHERE policy_id='${FIXTURE_POLICY_ID}'::uuid;
+    DELETE FROM public.hr_policies WHERE id='${FIXTURE_POLICY_ID}'::uuid;`);
+  runSql(`INSERT INTO public.hr_policies(id,tenant_id,title,file_url,storage_path,visible_to)
+    VALUES('${FIXTURE_POLICY_ID}'::uuid,'${COMPANY_A}'::uuid,'P3-01 test fixture','hr-policies:${FIXTURE_KEY}','${FIXTURE_KEY}','all')`);
+  const seeded = await hrClient.storage.from("hr-policies").upload(FIXTURE_KEY, new Blob(["P3-01 fixture"], { type: "text/plain" }));
+  assert.equal(seeded.error, null, `seed fixture upload: ${messageOf(seeded.error)}`);
+  try {
+
   // AC3: anonymous GET fails.
   const anonRes = await fetchObject(null);
   assert.ok([401, 403].includes(anonRes.status), `anonymous GET expected 401/403, got ${anonRes.status}`);
@@ -144,6 +156,11 @@ async function main() {
     headers: strategy.method === "direct" ? { Authorization: `Bearer ${employeeToken}` } : {},
   });
   console.log(`AC3 replaying the minted URL immediately (no revocation applied in this run): ${replay.status}.`);
+  } finally {
+    await hrClient.storage.from("hr-policies").remove(FIXTURE_KEY);
+    runSql(`DELETE FROM public.employee_policy_acknowledgements WHERE policy_id='${FIXTURE_POLICY_ID}'::uuid`);
+    runSql(`DELETE FROM public.hr_policies WHERE id='${FIXTURE_POLICY_ID}'::uuid`);
+  }
 
   const afterRls = await rlsInvariant({ employee: employeeClient, hr: hrClient, crossTenant: crossTenantClient });
   console.log(`RLS invariant after: ${afterRls.employee}/${afterRls.hr}/${afterRls.crossTenant} (expect 1/2/0).`);
