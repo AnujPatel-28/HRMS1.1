@@ -1,7 +1,7 @@
 # Package review — C3 manager authority converges on the primary reporting relationship
 
 Lead: Opus 5.5, 2026-09-23. Implemented **in-session** (user budget preference; no subagent).
-**Verdict: ACCEPTED** (suite results in §5).
+**Verdict: ACCEPTED** (suite results in §6).
 
 ## 1. What changed
 
@@ -43,6 +43,18 @@ has no `security_invoker` (runs as owner), so the view path survives the drop.
 - C1's onboarding window reads `employee_onboarding_self`, **not** `employee_onboarding` — the
   permissive `employee_onboarding` policy is not a C1 regression (moved to C7).
 - `update_employee_reporting_relationship` syncs `manager_id`/`secondary_manager_id` — confirmed live (§5).
+- **DB dependents of the dropped `employees` SELECT policy** (swept with `position()`; the `\m…\M` regex
+  silently matched nothing through the CLI — a positive control caught it): 23 policies on other tables
+  read `employees` inline, **all self-lookups** (`e.user_id = auth.uid()`), none reference `manager_id`;
+  invoker functions `p3_realtime_topic_readable` (self-lookup) and `sync_employee_current_unit` (org-unit
+  trigger) are unaffected; no security-invoker view reads `employees` for a manager (`employees_public`
+  is used only by Chat, colleague names — unaffected by a manager-only policy).
+- Definer functions still mentioning `manager_id`: `p3_create_project` (`projects.manager_id`, other table),
+  `submit_task_request` (reads relationship rows). **Residual:** `create_draft_employee` (HR-only, no caller
+  in `src/`/`functions/`) inserts `manager_id` with no relationship row — now grants nothing, but creates
+  display drift if ever called. Drop or route it in C6.
+- HR's new-hire panel lists `pending` only, so cancelled requests leave HR's queue; the HR notification
+  for a cancelled request still exists (cosmetic).
 
 ## 4. Found, not fixed here → **C7** (briefed)
 
@@ -95,4 +107,5 @@ p3_scope_advertising rc=0
 `my_direct_report_ids` / `c1_cancel_new_hire_request`, which must exist. With the old frontend on the
 new schema: MyTeam lists via the view (still works), `useManagerView`/`MyTasks` team lists go empty
 until the frontend deploys, and the old draft-cancel deletes 0 rows with a false success toast. Deploy
-both in the same window.
+both in the same window. This conflicts with P3-02b (frontend BEFORE `191000`); the four-step
+sequence is recorded in `doc/session_context_2026-09-21-p3-complete.md` §2.

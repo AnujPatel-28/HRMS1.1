@@ -26,6 +26,10 @@ All work is on TB-M1M2 only. When promoting to the parent `0431f0f6…`:
 1. **`backups create` first.** No backup exists; the schema is not reconstructible from `migrations/`.
 2. **Deploy the frontend before migration `20260912191000`** (P3-02b) — new summary + old
    AuthContext drops every user's capabilities.
+   **Conflict with C3 (added 2026-09-23):** C3 needs migration `20260912194000` applied BEFORE its
+   frontend (`b9b232a`+), the reverse of P3-02b. Prod frontend = Vercel from `main`, so one deploy
+   cannot satisfy both. Sequence: (a) frontend at the last pre-C3 commit that includes P3-02b
+   (`b77afc8`); (b) migrations up to `20260912193000`; (c) `20260912194000`; (d) frontend at C3 or later.
 3. **Bucket privacy is not in SQL.** PATCH `isPublic:false` for `chat-attachments`,
    `employee-documents`, `expense-receipts`, `task-attachments` (and confirm `hr-policies`).
 4. Run every `tests/m1m2` suite against a branch of the promoted state before cutover.
