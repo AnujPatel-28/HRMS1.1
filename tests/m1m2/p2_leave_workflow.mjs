@@ -495,6 +495,7 @@ await guardedMutation("P2-04 leave workflow", async () => {
     // assertion (a bare second pass1 call left status at 'on_leave').
     const noopRun = "a2400000-0000-4000-8000-000000000023";
     runSql(`
+      DELETE FROM public.attendance_derivation_runs WHERE id='${noopRun}'::uuid; -- a failed earlier run may have left it
       INSERT INTO public.attendance_derivation_runs (id, tenant_id, shift_id, from_date, to_date, trigger)
         VALUES ('${noopRun}'::uuid, '${COMPANY_A}'::uuid, '${SHIFT_PLAIN}'::uuid, '${D_PUNCH}'::date, '${D_PUNCH}'::date, 'replay');
       SELECT * FROM public.attendance_derive_pass1('${COMPANY_A}'::uuid, '${SHIFT_PLAIN}'::uuid, '${D_PUNCH}'::date, '${D_PUNCH}'::date, '${noopRun}'::uuid);

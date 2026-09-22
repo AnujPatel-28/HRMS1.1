@@ -26,7 +26,9 @@ const E = randomUUID();       // disposable employee (HR acts on them)
 const EU = randomUUID();      // its auth user: leave approval requires the subject to have a login
 const S = randomUUID();       // disposable shift
 const L = randomUUID();       // the leave
-const D1 = "2026-08-03", D2 = "2026-08-04", D3 = "2026-08-05";
+const L2 = randomUUID();      // leave for the leave-only-tenant scenario
+const D1 = "2026-08-03", D2 = "2026-08-04", D3 = "2026-08-05", D4 = "2026-08-06";
+let attendanceWasEnabled = null; // Company A's attendance module flag, restored in finally
 
 const fp = (error) => [error?.code, error?.message].filter(Boolean).join(" | ");
 const results = [];
@@ -88,10 +90,10 @@ function setupFixture() {
 function teardownFixture() {
   runSql(`
     DELETE FROM public.notifications WHERE tenant_id='${A}' AND employee_id='${E}';
-    DELETE FROM public.audit_logs WHERE tenant_id='${A}' AND (target_id='${E}' OR target_id='${L}');
+    DELETE FROM public.audit_logs WHERE tenant_id='${A}' AND (target_id='${E}' OR target_id='${L}' OR target_id='${L2}');
     DELETE FROM public.attendance_events WHERE tenant_id='${A}' AND employee_id='${E}';
     DELETE FROM public.attendance WHERE tenant_id='${A}' AND employee_id='${E}';
-    DELETE FROM public.leaves WHERE id='${L}';
+    DELETE FROM public.leaves WHERE id IN ('${L}','${L2}');
     DELETE FROM public.attendance_derivation_runs WHERE tenant_id='${A}' AND (shift_id='${S}' OR (shift_id IS NULL AND from_date='${D1}' AND to_date='${D3}'));
     DELETE FROM public.employee_shifts WHERE employee_id='${E}';
     DELETE FROM public.shifts WHERE id='${S}';
@@ -162,7 +164,25 @@ await guardedMutation("C4 disposable fixture", async () => {
     check(!!e2.error, `employee calls internal attendance_rederive_day -> ${e2.error ? "DENIED " + fp(e2.error) : "ALLOWED"}`);
     const x1 = await clients.crossTenant.database.rpc("hr_rederive_attendance_day", { p_tenant_id: A, p_employee_id: E, p_date: D1 });
     check(!!x1.error, `cross-tenant employee calls hr_rederive_attendance_day -> ${x1.error ? "DENIED" : "ALLOWED"}`);
+
+    // Module independence: a Leave-only tenant (attendance OFF) must still cancel an approved leave.
+    attendanceWasEnabled = runSql(`SELECT enabled FROM public.tenant_modules WHERE tenant_id='${A}' AND module_key='attendance'`).rows[0]?.enabled;
+    runSql(`UPDATE public.tenant_modules SET enabled=false WHERE tenant_id='${A}' AND module_key='attendance'`);
+    runSql(`INSERT INTO public.leaves(id,tenant_id,employee_id,leave_type,start_date,end_date,reason,status)
+      VALUES ('${L2}','${A}','${E}','casual','${D4}','${D4}','C4 leave-only probe','pending')`);
+    await warm(hr);
+    const ap2 = await hr.database.rpc("approve_leave_request", { p_leave_id: L2 });
+    check(!ap2.error, `attendance OFF: approve -> ${ap2.error ? fp(ap2.error) : "ok"}`);
+    await warm(hr);
+    const cn2 = await hr.database.rpc("cancel_leave_request", { p_leave_id: L2, p_rejection_reason: "C4 probe", p_new_status: "cancelled" });
+    const leftD4 = runSql(`SELECT count(*)::int n FROM public.attendance WHERE tenant_id='${A}' AND employee_id='${E}' AND date='${D4}'`).rows[0].n;
+    const statusL2 = runSql(`SELECT status FROM public.leaves WHERE id='${L2}'`).rows[0].status;
+    check(!cn2.error && statusL2 === "cancelled" && leftD4 === 0,
+      `attendance OFF: cancel succeeds (${cn2.error ? fp(cn2.error) : "ok"}), leave=${statusL2}, placeholder rows left=${leftD4}`);
   } finally {
+    if (attendanceWasEnabled !== null) {
+      runSql(`UPDATE public.tenant_modules SET enabled=${attendanceWasEnabled === true || attendanceWasEnabled === "true"} WHERE tenant_id='${A}' AND module_key='attendance'`);
+    }
     teardownFixture();
     await rlsInvariant(clients, { employee: 1, hr: 2, crossTenant: 0 });
   }

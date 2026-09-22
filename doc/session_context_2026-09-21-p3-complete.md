@@ -30,6 +30,8 @@ All work is on TB-M1M2 only. When promoting to the parent `0431f0f6…`:
    frontend (`b9b232a`+), the reverse of P3-02b. Prod frontend = Vercel from `main`, so one deploy
    cannot satisfy both. Sequence: (a) frontend at the last pre-C3 commit that includes P3-02b
    (`b77afc8`); (b) migrations up to `20260912193000`; (c) `20260912194000`; (d) frontend at C3 or later.
+   **C7/C4 (2026-09-23):** apply `194500` (C7, no frontend dependency) and `195000`/`195100`/`195200`
+   (C4) in step (c) too — C4's frontend (`529fb1f`, HR Recalculate) needs them before step (d).
 3. **Bucket privacy is not in SQL.** PATCH `isPublic:false` for `chat-attachments`,
    `employee-documents`, `expense-receipts`, `task-attachments` (and confirm `hr-policies`).
 4. Run every `tests/m1m2` suite against a branch of the promoted state before cutover.

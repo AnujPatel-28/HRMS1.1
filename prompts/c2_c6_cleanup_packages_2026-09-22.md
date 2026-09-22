@@ -227,3 +227,22 @@ module but must be listed in its decision doc.
    colleague's photo; scope to own folder (+ HR).
 4. `acknowledgements_employee_self` is FOR ALL — an employee can delete their own acknowledgement.
 C7's forward-fix slot is `20260912194600` (C7 was renumbered from `198000`).
+
+---
+
+## C8 — Absent-marking never runs: nothing sets the watermark (found in C4, 2026-09-23)
+
+**Measured:** `attendance_derive_pass2` writes `absent` only for dates `<= tenant_business_date(
+shifts.last_sync_of_events) - 1` (the §2.7 "don't infer absence before events have synced"
+interlock). **No function or client writes `last_sync_of_events`** (`position()` sweep: pass 2 is
+the only reference). All 10 shifts on TB have it NULL → no tenant ever gets an automatic `absent`
+day; no-punch working days stay "no record" forever, including after a leave cancel (C4 Recalculate
+returns `no_row`).
+**Decide first (product):** what "events have synced" means per source — app punches are live
+(watermark ≈ now), devices/ADMS lag (watermark = device's last successful push, B8 ingest knows it),
+kiosk ≈ live. Likely: set per shift from the latest ingest time of its sources, advanced by the
+ingest paths / scheduler; or a tenant setting "mark absent after N hours". Must stay honest for
+device tenants (never mark absent while a device backlog is unsynced).
+**Acceptance:** app-only tenant: yesterday's no-punch working day → `absent` after a derivation run;
+device tenant with a stale device → no absent beyond its last push; leave/holiday/weekly-off
+unaffected; all suites.

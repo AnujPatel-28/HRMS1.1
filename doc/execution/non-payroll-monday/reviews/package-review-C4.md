@@ -1,6 +1,6 @@
 # Package review — C4 re-derive an already-derived attendance day
 
-Lead: Opus 5.5, 2026-09-23, in-session. **Verdict: ACCEPTED** (suite results in §5).
+Lead: Opus 5.5, 2026-09-23, in-session. **Verdict: ACCEPTED** (suite results in §6).
 
 ## 1. Before (live, TB-M1M2) — `tests/m1m2/c4_rederive_day.mjs` pre-migration: 9/15
 
@@ -54,14 +54,29 @@ never retried, so no function error can be masked).
 
 ## 4. Not done / notes
 
-- Leave-only tenant (attendance module off): core returns `module_off`, cancel still succeeds —
-  by code reading, not exercised (UNTESTED).
+- **Module independence — TESTED:** with Company A's attendance module switched off (restored after),
+  approve + cancel a leave → cancel succeeds, leave `cancelled`, placeholder row removed (17/17).
+- **Other ways a leave leaves `approved` — swept:** only `approve_leave_request`, `cancel_leave_request`
+  and `employee_cancel_pending_leave` (pending-only, never touched attendance) write `leaves`
+  (`position()` sweep, both known functions present as a positive control); no client code updates
+  or deletes `leaves` directly.
+- **FINDING → C8: absent-marking never happens.** Pass 2 marks `absent` only up to
+  `shifts.last_sync_of_events - 1`, and **nothing writes that column** (only pass 2 reads it; no
+  client/function writer). All 10 real shifts on TB have it NULL. So for every tenant a no-punch
+  working day stays blank ("no record"), and after a leave cancel it stays blank; Recalculate returns
+  `no_row`. The C4 test sets the watermark on its fixture shift to prove the path works.
 - Re-deriving one day runs pass 1/2 for that shift+date, which also derives other employees'
   still-unstamped events / fills their derivable gaps on that date — same work the hourly job
   would do; pass functions cannot be scoped per employee without changing them (out of scope).
 - `hr_run_attendance_derivation` over a range still only fills gaps; bulk recompute is B9 tooling.
 
-## 5. Every suite
+## 5. Production
+
+Migrations `195000` → `195100` → `195200` **before** the frontend at `529fb1f`+ (the Recalculate button
+calls `hr_rederive_attendance_day`). Folded into the promotion sequence in
+`doc/session_context_2026-09-21-p3-complete.md` §2.
+
+## 6. Every suite
 
 All 18 `tests/m1m2` suites after the three C4 migrations, exit code captured per suite:
 

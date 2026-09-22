@@ -440,6 +440,7 @@ Briefs: `prompts/c1_employee_self_edit_and_new_hire_requests_2026-09-22.md`, `pr
 | C5 | `196000` | half-day leave (user decision: build now) — depends on C4 | briefed |
 | C6 | `197000` | P3 residuals: post edit RPC, owner delete of HR files, dead subscribes | briefed |
 | **C7** | `194500` | **Security (found in C3):** PERMISSIVE tenant-only write policies on ~9 tables (`office_locations`, `attendance_location_exceptions`, `employee_shifts`, `shifts`, …) — do **before C4** | **ACCEPTED** 2026-09-23 — 16/32 → 32/32; see `reviews/package-review-C7.md` |
+| C8 | tbd | absent-marking never runs — nothing writes `shifts.last_sync_of_events` (found in C4); product decision on the watermark first | briefed 2026-09-23 |
 
 ## Integrated ordering and hold points
 
