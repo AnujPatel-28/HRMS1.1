@@ -475,14 +475,17 @@ await guardedMutation("P2-04 leave workflow", async () => {
     const afterCancel = attendanceRow(EMPLOYEE_A.employeeId, D_PUNCH);
     assert.ok(afterCancel, "AC5: the row must still exist after cancel -- it carries real punch evidence and must not be deleted");
     assert.equal(afterCancel.leave_id, null, "AC5: leave tag must be released on cancel");
-    assert.equal(afterCancel.derivation_source, null, "AC5: derivation_source must be released for the deriver to reclaim");
+    // C4 (20260912195000/195200): cancel now re-derives the day immediately (Company A has attendance
+    // on), so the released row is reclaimed by the deriver and returns to its punch-derived status.
+    assert.equal(afterCancel.derivation_source, "derived", "AC5/C4: cancel must hand the day back to the deriver, which reclaims it");
+    assert.equal(afterCancel.status, baseline.status, "AC5/C4: cancel must restore the punch-derived status");
     assert.equal(afterCancel.punch_in, baseline.punch_in);
     assert.equal(afterCancel.punch_out, baseline.punch_out);
     assert.equal(afterCancel.in_time, baseline.in_time);
     assert.equal(afterCancel.out_time, baseline.out_time);
     const eventsAfterCancel = rowsOf(runSql(`SELECT id, event_time, evidence FROM public.attendance_events WHERE source_ref LIKE '${TEST_TAG}:punch:%' ORDER BY source_ref`));
     assert.deepEqual(eventsAfterCancel, baselineEvents.map(({ id, event_time, evidence }) => ({ id, event_time, evidence })), "AC5: raw events must still be byte-identical after cancel");
-    console.log(`AC5 after cancel: the row survives with evidence intact (status stays '${afterCancel.status}' -- restoring the displayed status is attendance_derive_pass1/pass2's job, not cancel_leave_request's, deliberately: pass1/pass2 require the attendance module enabled, which a Leave-only tenant need not have).`);
+    console.log(`AC5 after cancel: the row survives with evidence intact and is re-derived to '${afterCancel.status}' (C4); raw events byte-identical.`);
 
     // Prove the day CAN restore, and find out exactly what it takes. A naive second pass1 call
     // is a documented no-op here: pass1's event query filters `attendance_id IS NULL`, and the
@@ -497,7 +500,9 @@ await guardedMutation("P2-04 leave workflow", async () => {
       SELECT * FROM public.attendance_derive_pass1('${COMPANY_A}'::uuid, '${SHIFT_PLAIN}'::uuid, '${D_PUNCH}'::date, '${D_PUNCH}'::date, '${noopRun}'::uuid);
     `);
     const afterNoopPass = attendanceRow(EMPLOYEE_A.employeeId, D_PUNCH);
-    assert.equal(afterNoopPass.status, "on_leave", "documenting pass1's incremental design: a plain re-run does not revisit an already-stamped day");
+    // Since C4, cancel already re-derived the day (status restored above), so the plain re-run is
+    // asserted as a no-op against the RESTORED status: pass1 alone still never revisits a stamped day.
+    assert.equal(afterNoopPass.status, afterCancel.status, "documenting pass1's incremental design: a plain re-run does not revisit an already-stamped day");
     runSql(`DELETE FROM public.attendance_derivation_runs WHERE id='${noopRun}'::uuid;`);
     console.log("AC5 finding: attendance_derive_pass1 alone does NOT restore the day -- it only processes events with attendance_id IS NULL, and this package's baseline pass already stamped these two. Status restoration on an already-derived day has no product-side trigger today; that is a real gap, reported here, not silently patched by leave code (which would reintroduce day-status duplication).");
 
