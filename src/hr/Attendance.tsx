@@ -192,7 +192,7 @@ function pickCurrentStructures(structures: SalaryStructure[], effectiveCutoff: s
 export default function HRAttendance() {
   const [view, setView] = useState<ViewMode>("daily");
   const { success, error: toastError } = useToast();
-  const { tenantId, tenant } = useTenant();
+  const { tenantId, tenant, hasModule } = useTenant();
   const { employee: hrEmployee } = useEmployee();
   const { logAction } = useAuditLog();
   const deptLabel = useDepartmentLabel();
@@ -629,12 +629,15 @@ export default function HRAttendance() {
           .gte("date", overtimeMonthStart)
           .lte("date", overtimeMonthEnd)
           .order("date", { ascending: false }),
-        db
-          .from("salary_structures")
-          .select("*")
-          .eq("tenant_id", tenantId)
-          .order("effective_from", { ascending: false })
-          .order("created_at", { ascending: false }),
+        // Estimated overtime pay needs salary data; with payroll hidden, show hours only.
+        hasModule("payroll")
+          ? db
+              .from("salary_structures")
+              .select("*")
+              .eq("tenant_id", tenantId)
+              .order("effective_from", { ascending: false })
+              .order("created_at", { ascending: false })
+          : Promise.resolve({ data: [] as SalaryStructure[], error: null }),
         db
           .from("holidays")
           .select("date")
@@ -671,7 +674,7 @@ export default function HRAttendance() {
     } finally {
       setOvertimeLoading(false);
     }
-  }, [allEmployees, overtimeMonth, overtimeMonthEnd, overtimeMonthStart, overtimeYear, tenantId, toastError]);
+  }, [allEmployees, hasModule, overtimeMonth, overtimeMonthEnd, overtimeMonthStart, overtimeYear, tenantId, toastError]);
 
   useEffect(() => {
     if (view === "overtime" && allEmployees.length > 0) void fetchOvertime();

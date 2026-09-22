@@ -43,6 +43,14 @@ export type ModuleKey = (typeof MODULE_KEYS)[number];
 export const CORE_MODULES: readonly ModuleKey[] = ["directory", "policy_center", "work_calendar"];
 
 /**
+ * Modules hidden from every tenant regardless of entitlement. Product decision 2026-09-23: the HRMS
+ * ships WITHOUT payroll; payroll is researched and rebuilt from scratch as the last module, and the
+ * current payroll screens are not to be used. Presentation only -- `tenant_modules` rows are left
+ * untouched, so removing a key here restores the module exactly as it was.
+ */
+export const HIDDEN_MODULES: readonly ModuleKey[] = ["payroll"];
+
+/**
  * Route prefix -> owning module. Longest prefix wins, so `/hr/policy-center` resolves to
  * policy_center rather than being shadowed by a shorter `/hr/policies` entry.
  *

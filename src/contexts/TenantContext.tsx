@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { db, setCurrentTenantId } from "../insforge/client";
 import { useAuth } from "../hooks/useAuth";
 import { BASE_DOMAIN } from "../utils/domain";
-import { CORE_MODULES, type ModuleKey } from "../modules";
+import { CORE_MODULES, HIDDEN_MODULES, type ModuleKey } from "../modules";
 
 export type Tenant = {
   id: string;
@@ -216,6 +216,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const hasModule = useCallback(
     (key: ModuleKey) => {
       if (unavailableReason || enabledModules === null) return false;
+      if (HIDDEN_MODULES.includes(key)) return false;
       if (CORE_MODULES.includes(key)) return true;
       return enabledModules.has(key);
     },
