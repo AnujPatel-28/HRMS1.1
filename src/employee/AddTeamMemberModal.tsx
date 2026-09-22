@@ -35,48 +35,22 @@ export default function AddTeamMemberModal({ onClose, onCreated }: Props) {
 
     setSubmitting(true);
     try {
-      // Check email uniqueness within tenant
-      const { data: existing } = await db
-        .from("employees")
-        .select("id")
-        .eq("tenant_id", tenantId)
-        .eq("email", form.email.trim().toLowerCase())
-        .limit(1);
+      // D3: this no longer inserts an employees row directly. It submits a request that HR
+      // reviews and, if approved, acts on through the normal onboarding flow.
+      const { error: rpcErr } = await db.rpc("c1_submit_new_hire_request", {
+        p_name: form.full_name.trim(),
+        p_email: form.email.trim().toLowerCase(),
+        p_job_title_id: form.job_title_id || null,
+        p_proposed_date_of_joining: form.date_of_joining || null,
+      });
 
-      if (existing && existing.length > 0) {
-        error("An employee with this email already exists.");
-        setSubmitting(false);
-        return;
-      }
+      if (rpcErr) throw rpcErr;
 
-      const { error: insertErr } = await db.from("employees").insert([{
-        tenant_id: tenantId,
-        full_name: form.full_name.trim(),
-        email: form.email.trim().toLowerCase(),
-        job_title_id: form.job_title_id,
-        date_of_joining: form.date_of_joining || null,
-        status: "inactive",
-        manager_id: currentEmployee.id,
-        user_id: null,
-      }]);
-
-      if (insertErr) throw insertErr;
-
-      // Insert notification
-      await db.from("notifications").insert([{
-        tenant_id: tenantId,
-        employee_id: currentEmployee.id, // self-reference as placeholder or HR notification
-        title: "New Team Member Draft Created",
-        body: `${currentEmployee.full_name} added ${form.full_name.trim()} as a draft. Please review and activate.`,
-        type: "general",
-        reference_id: null,
-      }]);
-
-      success(`${form.full_name.trim()} added as a draft. HR has been notified.`);
+      success(`Request to add ${form.full_name.trim()} submitted. HR has been notified.`);
       onCreated();
       onClose();
     } catch (err: any) {
-      error(err.message || "Failed to add team member.");
+      error(err.message || "Failed to submit new hire request.");
     } finally {
       setSubmitting(false);
     }
@@ -88,7 +62,7 @@ export default function AddTeamMemberModal({ onClose, onCreated }: Props) {
         <div className="flex items-center justify-between border-b border-slate-100 p-5">
           <div className="flex items-center gap-2">
             <UserPlus className="h-5 w-5 text-brand-600" />
-            <h2 className="text-base font-semibold text-slate-900">Add Team Member</h2>
+            <h2 className="text-base font-semibold text-slate-900">Request New Hire</h2>
           </div>
           <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
             <X className="h-4 w-4" />
@@ -97,7 +71,8 @@ export default function AddTeamMemberModal({ onClose, onCreated }: Props) {
 
         <form onSubmit={handleSubmit} className="space-y-4 p-5">
           <p className="text-sm text-slate-500">
-            Fill in the basics. HR will complete the rest (salary, KYC, documents) and activate the account.
+            Fill in the basics. This submits a request for HR to review — HR creates the employee
+            record and completes onboarding (salary, KYC, documents) after approving it.
           </p>
 
           <div>
@@ -176,7 +151,7 @@ export default function AddTeamMemberModal({ onClose, onCreated }: Props) {
               disabled={submitting}
               className="flex-1 rounded-xl bg-brand-600 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
             >
-              {submitting ? "Adding..." : "Add to Team"}
+              {submitting ? "Submitting..." : "Submit Request"}
             </button>
           </div>
         </form>

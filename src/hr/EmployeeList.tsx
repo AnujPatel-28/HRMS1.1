@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Users, Search, ChevronRight, UserPlus } from "lucide-react";
-import type { Employee } from "../types";
+import { Users, Search, ChevronRight, UserPlus, UserCheck } from "lucide-react";
+import type { Employee, NewHireRequest } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db } from "../insforge/client";
 import { useToast } from "../shared/ToastContext";
@@ -10,6 +10,155 @@ import { EmptyState } from "../shared/EmptyState";
 import { SelectDropdown } from "../shared/components/SelectDropdown";
 import { useOrgStructure } from "../hooks/useOrgStructure";
 import { useDepartmentLabel, useJobTitleLabel } from "../contexts/OrgUnitsContext";
+
+// D3: managers submit a request instead of inserting an employees row directly. This is the
+// smallest surface for HR to review them -- HR is already on this screen to create employees,
+// and approval leads straight into the existing "Add Employee" flow.
+function NewHireRequestsPanel() {
+  const { tenantId } = useTenant();
+  const { jobTitles } = useOrgStructure();
+  const { success, error: toastError } = useToast();
+  const [requests, setRequests] = useState<NewHireRequest[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [rejectId, setRejectId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const fetchRequests = async () => {
+    if (!tenantId) return;
+    setLoading(true);
+    try {
+      const { data, error: reqErr } = await db
+        .from("new_hire_requests")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
+      if (reqErr) throw reqErr;
+      setRequests((data ?? []) as NewHireRequest[]);
+    } catch (err) {
+      console.error("Failed to load new hire requests", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchRequests();
+  }, [tenantId]);
+
+  const jobTitleLabel = (id: string | null) => jobTitles.find((jt) => jt.id === id)?.title ?? "—";
+
+  async function approve(request: NewHireRequest) {
+    setSaving(true);
+    try {
+      const { error: rpcErr } = await db.rpc("c1_review_new_hire_request", {
+        p_request_id: request.id,
+        p_approved: true,
+      });
+      if (rpcErr) throw rpcErr;
+      success(`Approved. Create ${request.name}'s employee record via "Add Employee" to finish onboarding.`);
+      void fetchRequests();
+    } catch (err: any) {
+      toastError(err.message || "Failed to approve request.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function reject(request: NewHireRequest) {
+    setSaving(true);
+    try {
+      const { error: rpcErr } = await db.rpc("c1_review_new_hire_request", {
+        p_request_id: request.id,
+        p_approved: false,
+        p_reason: rejectReason || null,
+      });
+      if (rpcErr) throw rpcErr;
+      success(`Rejected ${request.name}'s request.`);
+      setRejectId(null);
+      setRejectReason("");
+      void fetchRequests();
+    } catch (err: any) {
+      toastError(err.message || "Failed to reject request.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!loading && requests.length === 0) return null;
+
+  return (
+    <div className="mb-4 rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4">
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-indigo-800">
+        <UserCheck className="h-4 w-4" /> New Hire Requests
+      </h3>
+      <div className="mt-3 space-y-2">
+        {requests.map((request) => (
+          <div key={request.id} className="rounded-xl border border-indigo-100 bg-white p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">{request.name}</p>
+                <p className="text-xs text-slate-500">
+                  {request.email} • {jobTitleLabel(request.job_title_id)}
+                  {request.proposed_date_of_joining ? ` • Joining ${request.proposed_date_of_joining}` : ""}
+                </p>
+              </div>
+              {rejectId !== request.id && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => void approve(request)}
+                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => setRejectId(request.id)}
+                    className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                  >
+                    Reject
+                  </button>
+                </div>
+              )}
+            </div>
+            {rejectId === request.id && (
+              <div className="mt-2 space-y-2">
+                <textarea
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder="Rejection reason (optional)…"
+                  rows={2}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs outline-none ring-rose-500 focus:ring"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => void reject(request)}
+                    className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+                  >
+                    Confirm Reject
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setRejectId(null); setRejectReason(""); }}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function EmployeeList() {
   const navigate = useNavigate();
@@ -156,6 +305,7 @@ export default function EmployeeList() {
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-3 md:p-5 shadow-sm">
+      <NewHireRequestsPanel />
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">Employees</h2>

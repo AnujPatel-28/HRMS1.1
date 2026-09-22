@@ -547,3 +547,20 @@ export interface Expense {
   reimbursed_at: string | null;
   created_at: string;
 }
+
+export interface NewHireRequest {
+  id: string;
+  tenant_id: string;
+  requested_by: string;
+  name: string;
+  email: string;
+  job_title_id: string | null;
+  proposed_date_of_joining: string | null;
+  status: "pending" | "approved" | "rejected";
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  reason: string | null;
+  created_employee_id: string | null;
+  created_at: string;
+  updated_at: string;
+}

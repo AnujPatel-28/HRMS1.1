@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Users, Calendar as CalendarIcon, Clock, CheckCircle2, AlertTriangle, FileText, ChevronLeft, ChevronRight, X, UserPlus, Trash2 } from "lucide-react";
-import type { Employee, Attendance, Leave, Holiday } from "../types";
+import type { Employee, Attendance, Leave, Holiday, NewHireRequest } from "../types";
 import { db } from "../insforge/client";
 import { useTenant } from "../contexts/TenantContext";
 import { useAuth } from "../hooks/useAuth";
@@ -32,6 +32,7 @@ export default function MyTeam() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; name: string } | null>(null);
   const [cancellingRequest, setCancellingRequest] = useState(false);
+  const [newHireRequests, setNewHireRequests] = useState<NewHireRequest[]>([]);
 
   // Modal calendar states
   const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
@@ -103,9 +104,27 @@ export default function MyTeam() {
     }
   };
 
+  // D3: "Add Team Member" now submits a new_hire_requests row instead of creating an
+  // employees row directly. The requester (own row only, per RLS) sees its status here.
+  const fetchNewHireRequests = async () => {
+    if (!currentEmployee?.id || !tenantId) return;
+    const { data, error: reqErr } = await db
+      .from("new_hire_requests")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("requested_by", currentEmployee.id)
+      .order("created_at", { ascending: false });
+    if (reqErr) {
+      console.error("Failed to load new hire requests", reqErr);
+      return;
+    }
+    setNewHireRequests((data ?? []) as NewHireRequest[]);
+  };
+
   useEffect(() => {
     if (isManager) {
       void fetchTeamData();
+      void fetchNewHireRequests();
     }
   }, [currentEmployee?.id, isManager, tenantId]);
 
@@ -293,7 +312,7 @@ export default function MyTeam() {
       {showAddModal && (
         <AddTeamMemberModal
           onClose={() => setShowAddModal(false)}
-          onCreated={() => void fetchTeamData()}
+          onCreated={() => void fetchNewHireRequests()}
         />
       )}
       <div className="flex items-center justify-between">
@@ -312,6 +331,39 @@ export default function MyTeam() {
           </button>
         )}
       </div>
+
+      {newHireRequests.length > 0 && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="font-semibold text-slate-800 mb-3">Your New Hire Requests</h3>
+          <div className="space-y-2">
+            {newHireRequests.map((req) => {
+              const badge =
+                req.status === "approved"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : req.status === "rejected"
+                    ? "bg-rose-100 text-rose-700"
+                    : "bg-amber-100 text-amber-700";
+              return (
+                <div
+                  key={req.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-2.5"
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{req.name}</p>
+                    <p className="text-xs text-slate-500">{req.email}</p>
+                    {req.status === "rejected" && req.reason && (
+                      <p className="mt-0.5 text-xs text-rose-600">Reason: {req.reason}</p>
+                    )}
+                  </div>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${badge}`}>
+                    {req.status}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
