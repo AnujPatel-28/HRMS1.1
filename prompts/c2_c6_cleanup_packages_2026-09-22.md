@@ -209,7 +209,7 @@ remove a legitimate path — e.g. employees reading `shifts`/`office_locations`,
 their own acknowledgement). Then: tenant-only PERMISSIVE → RESTRICTIVE fence (`tenant_active_restrictive`
 house form) + explicit HR write policy + narrow self policies where a client path needs one. Grep
 `src/` and `functions/` for every direct client write to each table before closing it.
-**Migration:** `20260912198000_m1m2-permissive-tenant-write-policies.sql`.
+**Migration:** `20260912194500_m1m2-permissive-tenant-write-policies.sql`.
 **Acceptance:** per table, employee INSERT/UPDATE/DELETE DENIED (live, before = ALLOWED shown),
 HR path still works, every legitimate employee read/write path listed and exercised; all suites.
 **Order:** before C4 (security before correctness). Payroll tables may be deferred to the payroll
