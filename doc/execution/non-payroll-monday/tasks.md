@@ -427,6 +427,19 @@ Only the lead creates/applies migrations or changes the linked target. Writes ar
 - **Why:** `employee-documents` (payslips, IDs), `expense-receipts`, `task-attachments` are public buckets. Lead proved it: an anonymous `curl` with no auth header downloaded a payslip PDF from `employee-documents` on TB-M1M2 (HTTP 200, 231 KB). Split from P3-03 because their screens are outside P3-03's file list.
 - **Shape:** buckets private; tenant/owner/HR-scoped `storage.objects` policies; UI moves to signed URLs; record previously-issued URL behavior; record how privacy is set (not reconstructible from SQL — P3-01 finding).
 
+## Cleanup packages C1–C6 (added 2026-09-22)
+
+Briefs: `prompts/c1_employee_self_edit_and_new_hire_requests_2026-09-22.md`, `prompts/c2_c6_cleanup_packages_2026-09-22.md`. Serialized on TB-M1M2 in this order; implementer Sonnet 5, lead verifies each.
+
+| Pkg | Migration | What | Status |
+|---|---|---|---|
+| **C1** | `192000` | **Security:** employee self-edit allowlist (lead proved an employee can set own `work_mode=remote`, bypassing geofence); manager new-hire requests replace direct employee inserts | IN PROGRESS |
+| C2 | `193000` | 9 functions on server-UTC `CURRENT_DATE` → `tenant_business_date` | briefed |
+| C3 | `194000` | `manager_id` writers → relationship RPC; remove dead `is_manager_of` fallback | briefed |
+| C4 | `195000` | re-derive an already-derived attendance day (leave cancel snaps back) | briefed |
+| C5 | `196000` | half-day leave (user decision: build now) — depends on C4 | briefed |
+| C6 | `197000` | P3 residuals: post edit RPC, owner delete of HR files, dead subscribes | briefed |
+
 ## Integrated ordering and hold points
 
 1. P6 re-reviews `contracts.md` and `tasks.md` v0.4. CHANGES REQUIRED keeps every task blocked.
