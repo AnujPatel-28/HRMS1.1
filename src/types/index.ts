@@ -556,7 +556,7 @@ export interface NewHireRequest {
   email: string;
   job_title_id: string | null;
   proposed_date_of_joining: string | null;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "cancelled";
   reviewed_by: string | null;
   reviewed_at: string | null;
   reason: string | null;

@@ -46,11 +46,20 @@ export default function MyTeam() {
     if (!currentEmployee?.id || !tenantId) return;
     setLoading(true);
     try {
-      // 1. Fetch direct reports (active + draft/pending statuses) from public view
+      // 1. Fetch direct reports: ids from the primary reporting relationship (C3 -- the same
+      // predicate as is_manager_of), basic columns from the public view.
+      const { data: reportIds, error: idsErr } = await db.rpc("my_direct_report_ids");
+      if (idsErr) throw idsErr;
+      const ids = (reportIds as string[] | null) ?? [];
+      if (ids.length === 0) {
+        setTeam([]);
+        setLoading(false);
+        return;
+      }
       const { data: employeesData, error: empErr } = await db
         .from("employee_directory_public")
         .select("id, user_id, manager_id, full_name, profile_photo_url, job_title_id, org_unit_id, status")
-        .eq("manager_id", currentEmployee.id)
+        .in("id", ids)
         .eq("tenant_id", tenantId)
         .in("status", ["active", "draft", "pending_onboarding", "pending_hr_review", "inactive"])
         .order("full_name");
@@ -205,20 +214,17 @@ export default function MyTeam() {
     };
   };
   
-  const handleCancelRequest = async (employeeId: string, name: string) => {
+  // C3: cancels the manager's own PENDING new_hire_requests row; never touches employees.
+  const handleCancelRequest = async (requestId: string, name: string) => {
     setCancellingRequest(true);
     try {
-      const { error: deleteErr } = await db
-        .from("employees")
-        .delete()
-        .eq("id", employeeId)
-        .eq("tenant_id", tenantId);
+      const { error: cancelErr } = await db.rpc("c1_cancel_new_hire_request", { p_request_id: requestId });
 
-      if (deleteErr) throw deleteErr;
+      if (cancelErr) throw cancelErr;
 
-      success(`Successfully cancelled draft onboarding request for ${name}.`);
+      success(`Cancelled the new hire request for ${name}.`);
       setCancelTarget(null);
-      void fetchTeamData();
+      void fetchNewHireRequests();
     } catch (err: any) {
       error(err.message || "Failed to cancel request.");
       console.error(err);
@@ -342,7 +348,9 @@ export default function MyTeam() {
                   ? "bg-emerald-100 text-emerald-700"
                   : req.status === "rejected"
                     ? "bg-rose-100 text-rose-700"
-                    : "bg-amber-100 text-amber-700";
+                    : req.status === "cancelled"
+                      ? "bg-slate-100 text-slate-500"
+                      : "bg-amber-100 text-amber-700";
               return (
                 <div
                   key={req.id}
@@ -355,9 +363,21 @@ export default function MyTeam() {
                       <p className="mt-0.5 text-xs text-rose-600">Reason: {req.reason}</p>
                     )}
                   </div>
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${badge}`}>
-                    {req.status}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    {req.status === "pending" && (
+                      <button
+                        type="button"
+                        onClick={() => setCancelTarget({ id: req.id, name: req.name })}
+                        className="flex items-center gap-1 text-xs font-semibold text-rose-600 hover:text-rose-700 transition"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        <span>Cancel Request</span>
+                      </button>
+                    )}
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${badge}`}>
+                      {req.status}
+                    </span>
+                  </div>
                 </div>
               );
             })}
@@ -415,40 +435,22 @@ export default function MyTeam() {
                 </div>
 
                 <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
-                  {member.status === 'inactive' && !member.user_id ? (
-                    <>
-                      <div className="flex items-center gap-1 border px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-50 border-orange-200 text-orange-700">
-                        <span>Draft Profile</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setCancelTarget({ id: member.id, name: member.full_name })}
-                        className="flex items-center gap-1 text-xs font-semibold text-rose-600 hover:text-rose-700 transition"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        <span>Cancel Request</span>
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <div className={`flex items-center gap-1 border px-2.5 py-1 rounded-full text-xs font-semibold ${badge.color}`}>
-                        {badge.icon}
-                        <span>{badge.label}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedMember(member);
-                          setCalendarYear(new Date().getFullYear());
-                          setCalendarMonth(new Date().getMonth());
-                        }}
-                        className="flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700 transition"
-                      >
-                        <CalendarIcon className="h-4 w-4" />
-                        <span>View Calendar</span>
-                      </button>
-                    </>
-                  )}
+                    <div className={`flex items-center gap-1 border px-2.5 py-1 rounded-full text-xs font-semibold ${badge.color}`}>
+                      {badge.icon}
+                      <span>{badge.label}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedMember(member);
+                        setCalendarYear(new Date().getFullYear());
+                        setCalendarMonth(new Date().getMonth());
+                      }}
+                      className="flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700 transition"
+                    >
+                      <CalendarIcon className="h-4 w-4" />
+                      <span>View Calendar</span>
+                    </button>
                 </div>
               </div>
             );
@@ -562,8 +564,8 @@ export default function MyTeam() {
             void handleCancelRequest(cancelTarget.id, cancelTarget.name);
           }
         }}
-        title="Cancel Onboarding Request"
-        message={`Are you sure you want to cancel the onboarding draft request for ${cancelTarget?.name}?`}
+        title="Cancel New Hire Request"
+        message={`Are you sure you want to cancel the new hire request for ${cancelTarget?.name}?`}
         confirmText="Cancel Request"
         confirmColor="red"
         isSubmitting={cancellingRequest}

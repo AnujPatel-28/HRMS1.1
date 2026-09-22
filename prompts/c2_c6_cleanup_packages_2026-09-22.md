@@ -177,3 +177,40 @@ new `tests/m1m2/c6_p3_residuals.mjs`.
 **Acceptance:** author edits content but cannot change type/pin (denied); moderator can; employee
 cannot delete an HR-uploaded file in their own folder, HR can, employee can still upload their own;
 no `posts` subscribe calls remain in `src/`; all suites green.
+
+---
+
+## C7 — PERMISSIVE tenant-only write policies (added by the lead 2026-09-23, during C3)
+
+**Why:** C3 proved live that `employee_reporting_relationships.tenant_isolation_policy` (PERMISSIVE
+`FOR ALL`, tenant membership only) let **any employee insert a primary row making themself manager
+of HR** → `is_manager_of` true. Fixed in C3 (`194000`). A sweep on 2026-09-23 found the same shape
+(PERMISSIVE write policy whose only condition is tenant membership, no role/owner check) on:
+
+| Table | Policy | Roles | Likely impact if writable |
+|---|---|---|---|
+| `office_locations` | `office_locations_tenant_isolation` | public | move the office geofence → punch from anywhere |
+| `attendance_location_exceptions` | `exceptions_tenant_isolation` | authenticated | grant self a geofence exception |
+| `employee_shifts` | `tenant_isolation` | authenticated | reassign own/others' shift |
+| `shifts` | `tenant_isolation` | authenticated | edit shift timings / grace |
+| `employee_policy_acknowledgements` | `tenant_isolation` | authenticated | forge/erase others' acknowledgements |
+| `employee_onboarding` | `HR can manage employee_onboarding in their tenant` (misnamed — no HR check) | authenticated | **measured:** employee.a UPDATE matched 2 rows (server-side onboarding state, `status`/`last_error`) |
+| `payroll_runs` | `tenant_isolation` | authenticated | payroll — record, fix with payroll |
+| `it_declarations`, `it_declaration_windows` | `*_tenant_isolation` | authenticated | payroll — record, fix with payroll |
+
+`authenticated` holds INSERT/UPDATE/DELETE on all of them. Company A has 0 rows in most, so a no-op
+UPDATE proves nothing — **measure with a REST INSERT as `employee.a` + immediate SQL cleanup** (the
+pattern in `scratch/c3-err-probe.mjs`). Treat this list as a lower bound: re-sweep with a regex that
+does NOT exclude quals mentioning `auth.uid`/`user_id` (the C3 policy had exactly that shape and
+the first sweep missed it).
+
+**Do:** per table, read every other policy first (converting or dropping a PERMISSIVE policy can
+remove a legitimate path — e.g. employees reading `shifts`/`office_locations`, employees inserting
+their own acknowledgement). Then: tenant-only PERMISSIVE → RESTRICTIVE fence (`tenant_active_restrictive`
+house form) + explicit HR write policy + narrow self policies where a client path needs one. Grep
+`src/` and `functions/` for every direct client write to each table before closing it.
+**Migration:** `20260912198000_m1m2-permissive-tenant-write-policies.sql`.
+**Acceptance:** per table, employee INSERT/UPDATE/DELETE DENIED (live, before = ALLOWED shown),
+HR path still works, every legitimate employee read/write path listed and exercised; all suites.
+**Order:** before C4 (security before correctness). Payroll tables may be deferred to the payroll
+module but must be listed in its decision doc.
