@@ -128,8 +128,9 @@ AGENTS.md in-repo, CONTRIBUTING, CI with lint/tsc/policy-drift/gitleaks), on bra
 2. **Repo visibility:** it is public now. To make it private again without blocking deploys, first
    connect GitHub `AnujPatel-28` to the Vercel account `talentmeshdb-8813`, or move to Vercel Pro.
 3. **Track B decisions** O1–O4 (§3.2).
-4. **Untracked files not created by this lead:** `doc/payroll/` (payroll architecture from another
-   session; memory says "awaiting owner lock"), plus root `AGENTS.md`, `doc/i-want-to-maintain-…md` and
-   `prompts/non_payroll_…md`, which are due in the restructure. Ask before committing `doc/payroll/`.
+4. **Untracked files:** root `AGENTS.md`, `doc/i-want-to-maintain-…md` and `prompts/non_payroll_…md`,
+   which are due in the restructure. (`doc/payroll/` was committed with the owner's approval in `84eabb3`.
+   It is the payroll research and architecture, and it is **awaiting the owner's decision lock**
+   (D1–D12). Payroll stays last.)
 5. **Backups:** decide whether to replace the single pre-v0.9.0 backup with a fresh one (e.g. before
    the first UI/UX release that carries a migration).
