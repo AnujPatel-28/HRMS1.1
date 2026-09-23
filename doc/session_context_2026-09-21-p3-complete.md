@@ -34,6 +34,7 @@ All work is on TB-M1M2 only. When promoting to the parent `0431f0f6…`:
    (C4) in step (c) too — C4's frontend (`529fb1f`, HR Recalculate) needs them before step (d).
    **C5 (2026-09-23):** `196000`/`196100` in step (c) as well (new apply parameter + leave-type toggle);
    the old frontend keeps working on them. Payroll is hidden in the frontend (`0eebac8`), data untouched.
+   **C6 (2026-09-23):** `197000`/`197100` in step (c) too; no frontend dependency.
 3. **Bucket privacy is not in SQL.** PATCH `isPublic:false` for `chat-attachments`,
    `employee-documents`, `expense-receipts`, `task-attachments` (and confirm `hr-policies`).
 4. Run every `tests/m1m2` suite against a branch of the promoted state before cutover.

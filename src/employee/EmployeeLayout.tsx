@@ -484,24 +484,9 @@ export default function EmployeeLayout() {
 
     void fetchUnreadCount();
 
-    const handleInsert = (payload: any) => {
-      if (payload.tenant_id === tenantId && location.pathname !== "/employee/connect") {
-        setUnreadConnectCount((prev) => prev + 1);
-      }
-    };
-
-    const setupRealtime = async () => {
-      await realtime.connect();
-      await realtime.subscribe("posts");
-    };
-
-    void setupRealtime();
-    realtime.on("INSERT", handleInsert);
-
-    return () => {
-      realtime.off("INSERT", handleInsert);
-      realtime.unsubscribe("posts");
-    };
+    // C6: P3-03 closed the tenant-wide `posts` realtime channel (subscribes are refused), so the
+    // live unread bump never fired; the count above is fetched on each navigation instead.
+    void realtime.connect();
   }, [tenantId, location.pathname]);
 
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);

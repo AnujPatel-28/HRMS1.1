@@ -438,9 +438,10 @@ Briefs: `prompts/c1_employee_self_edit_and_new_hire_requests_2026-09-22.md`, `pr
 | **C3** | `194000` | `manager_id` writers → relationship RPC; remove dead `is_manager_of` fallback; **drop legacy manager policies that expose reports' full rows and allow deletes** (added after C1); **+ close `employee_reporting_relationships` (any employee could make themself manager of anyone)** | **ACCEPTED** 2026-09-23 (lead, in-session) |
 | **C4** | `195000`+`195100`+`195200` | re-derive an already-derived attendance day (leave cancel snaps back); approve no longer overwrites HR-locked days; HR **Recalculate** button | **ACCEPTED** 2026-09-23 — 9/15 → 15/15; see `reviews/package-review-C4.md` |
 | **C5** | `196000`+`196100` | half-day leave: `allow_half_day` per type, first/second half, 0.5 deducted, attendance `half_day`, no false late/early mark | **ACCEPTED** 2026-09-23 — 17/17; see `reviews/package-review-C5.md` |
-| C6 | `197000` | P3 residuals: post edit RPC, owner delete of HR files, dead subscribes | briefed |
+| **C6** | `197000`+`197100` | P3 residuals + lead additions: expense self-approval closed, post pin/type moderator-only, HR-issued docs undeletable by owner, profile photos own-folder/HR, acks read-only, dead code | **ACCEPTED** 2026-09-23 — 9/20 → 20/20; see `reviews/package-review-C6.md` |
 | **C7** | `194500` | **Security (found in C3):** PERMISSIVE tenant-only write policies on ~9 tables (`office_locations`, `attendance_location_exceptions`, `employee_shifts`, `shifts`, …) — do **before C4** | **ACCEPTED** 2026-09-23 — 16/32 → 32/32; see `reviews/package-review-C7.md` |
-| C8 | tbd | absent-marking never runs — nothing writes `shifts.last_sync_of_events` (found in C4); product decision on the watermark first | briefed 2026-09-23 |
+| C8 | tbd | absent-marking never runs — nothing writes `shifts.last_sync_of_events` (found in C4); user decided 2026-09-23: app/kiosk next morning, devices after sync | briefed |
+| C9 | tbd | storage write fences — employees can upload into 9 buckets via the global owner-insert policy (found in C6) | briefed 2026-09-23 |
 
 ## Integrated ordering and hold points
 

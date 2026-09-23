@@ -246,3 +246,26 @@ device tenants (never mark absent while a device backlog is unsynced).
 **Acceptance:** app-only tenant: yesterday's no-punch working day → `absent` after a derivation run;
 device tenant with a stale device → no absent beyond its last push; leave/holiday/weekly-off
 unaffected; all suites.
+
+**C8 decision (user, 2026-09-23):** mark absent **the next morning for app/kiosk punches**; for
+**biometric devices only after the device has actually synced** (never past its last successful push).
+
+---
+
+## C9 — Storage write fences: employees can upload into 9 buckets (found in C6, 2026-09-23)
+
+**Measured** (`scratch/c6-bucket-probe.mjs`, employee.a, upload at `<tenant>/<random>.txt`, removed
+after): CREATED in `application-snapshots`, `attendance-selfies`, `avatars`*, `company-assets`*,
+`company-logos`*, `insurance-documents`, `payslips`, `recruiter_documents`, `resumes` (*public).
+Denied where a RESTRICTIVE fence exists (`employee-documents`, `expense-receipts`, `task-attachments`,
+`chat-attachments`, `hr-policies`, `employee-profile-photos` since C6 `197100`).
+**Cause:** global PERMISSIVE `storage_objects_owner_insert` (WITH CHECK `uploaded_by = me`) ORs with
+every bucket policy, so any bucket without a RESTRICTIVE write fence accepts an insert at any key.
+**Risks:** hosting arbitrary files on public company buckets; pre-planting a file at a predictable
+key before HR/the system writes it (e.g. a payslip or selfie path) — measure key predictability.
+**Do:** per bucket, find the real writer(s) (`src/`, `functions/` — edge functions use the admin key)
+and add a RESTRICTIVE INSERT/UPDATE/DELETE fence matching them (own folder / HR / nobody-but-admin).
+Consider replacing the global owner-insert with per-bucket insert policies. Payroll buckets
+(`payslips`) can simply be closed to clients (payroll hidden, rebuilt later).
+**Acceptance:** re-run the probe → denied everywhere except the buckets whose app flow needs it, each
+exercised; all suites.
