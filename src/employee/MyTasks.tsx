@@ -146,8 +146,8 @@ export default function MyTasks() {
       }
 
       const { data: empData } = await db
-        .from("employees")
-        .select("*")
+        .from("employee_directory_public")
+        .select("id, full_name")
         .eq("tenant_id", tenantId)
         .in("id", directReportIds);
       if (empData) {

@@ -54,7 +54,7 @@ const { data: businessDate } = await db.rpc("tenant_business_date", {
 });
 ```
 
-**Returns `NULL` if the caller is not allowed or the module is off.** Handle that explicitly and render an unavailable state.
+**Returns `NULL` if the caller cannot access the tenant.** Since P2-01 it is a shared calendar primitive and is deliberately not gated by the Attendance module; module-specific mutation functions enforce their own entitlement. Handle `NULL` explicitly and render an unavailable state.
 
 > **Never fall back to `new Date()`.** That is exactly the bug this call exists to remove. A device clock that is wrong — or deliberately changed — must never be able to decide which day a punch belongs to.
 

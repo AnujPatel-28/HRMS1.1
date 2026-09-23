@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Calendar, ChevronLeft, ChevronRight, Download, Users, BarChart3, Clock, Pencil, Check, X, ClipboardList, MapPin, FileEdit, Camera, ListTree } from "lucide-react";
+import { Calendar, ChevronLeft, ChevronRight, Download, Users, BarChart3, Clock, Pencil, Check, X, ClipboardList, MapPin, FileEdit, Camera, ListTree, RefreshCw } from "lucide-react";
 import type { Attendance, Employee, Shift, EmployeeShift, AttendanceSelfie } from "../types";
 import { useTenant } from "../contexts/TenantContext";
 import { db, storage } from "../insforge/client";
@@ -192,7 +192,7 @@ function pickCurrentStructures(structures: SalaryStructure[], effectiveCutoff: s
 export default function HRAttendance() {
   const [view, setView] = useState<ViewMode>("daily");
   const { success, error: toastError } = useToast();
-  const { tenantId, tenant } = useTenant();
+  const { tenantId, tenant, hasModule } = useTenant();
   const { employee: hrEmployee } = useEmployee();
   const { logAction } = useAuditLog();
   const deptLabel = useDepartmentLabel();
@@ -398,6 +398,7 @@ export default function HRAttendance() {
   const [editPunchOut, setEditPunchOut] = useState("");
   const [editStatus, setEditStatus] = useState<AttendanceStatus>("present");
   const [saving, setSaving] = useState(false);
+  const [recalculatingId, setRecalculatingId] = useState<string | null>(null);
   const [tenantSettings, setTenantSettings] = useState<Record<string, string>>({});
   const [selectedLocationRow, setSelectedLocationRow] = useState<AttendanceWithEmployee | null>(null);
   // B7d: which day's punch trail is open. Nothing in the product read attendance_events before this.
@@ -628,12 +629,15 @@ export default function HRAttendance() {
           .gte("date", overtimeMonthStart)
           .lte("date", overtimeMonthEnd)
           .order("date", { ascending: false }),
-        db
-          .from("salary_structures")
-          .select("*")
-          .eq("tenant_id", tenantId)
-          .order("effective_from", { ascending: false })
-          .order("created_at", { ascending: false }),
+        // Estimated overtime pay needs salary data; with payroll hidden, show hours only.
+        hasModule("payroll")
+          ? db
+              .from("salary_structures")
+              .select("*")
+              .eq("tenant_id", tenantId)
+              .order("effective_from", { ascending: false })
+              .order("created_at", { ascending: false })
+          : Promise.resolve({ data: [] as SalaryStructure[], error: null }),
         db
           .from("holidays")
           .select("date")
@@ -670,7 +674,7 @@ export default function HRAttendance() {
     } finally {
       setOvertimeLoading(false);
     }
-  }, [allEmployees, overtimeMonth, overtimeMonthEnd, overtimeMonthStart, overtimeYear, tenantId, toastError]);
+  }, [allEmployees, hasModule, overtimeMonth, overtimeMonthEnd, overtimeMonthStart, overtimeYear, tenantId, toastError]);
 
   useEffect(() => {
     if (view === "overtime" && allEmployees.length > 0) void fetchOvertime();
@@ -767,6 +771,32 @@ export default function HRAttendance() {
       toastError(err instanceof Error ? err.message : "Failed to update attendance.");
     } finally {
       setSaving(false);
+      void fetchDaily();
+    }
+  }
+
+  // C4: recompute one day from its punch events and the work calendar (e.g. after a leave change).
+  // Server-side: HR-only, never touches an HR-corrected (locked) day or any punch evidence.
+  async function recalculateDay(row: AttendanceWithEmployee) {
+    if (!tenantId) return;
+    setRecalculatingId(row.employee_id);
+    try {
+      const { data, error: rpcError } = await db.rpc("hr_rederive_attendance_day", {
+        p_tenant_id: tenantId,
+        p_employee_id: row.employee_id,
+        p_date: dailyDate,
+      });
+      if (rpcError) throw rpcError;
+      const result = data as string;
+      if (result === "locked") toastError("This day was corrected by HR and is locked. Unlock it before recalculating.");
+      else if (result === "no_shift") toastError("No shift is assigned for this day, so it cannot be calculated.");
+      else if (result === "module_off") toastError("Attendance is not enabled for this company.");
+      else if (result === "no_row") success("Recalculated: no punches, and absence cannot be marked yet.");
+      else success(`Recalculated: ${result.replace(/_/g, " ")}.`);
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : "Failed to recalculate the day.");
+    } finally {
+      setRecalculatingId(null);
       void fetchDaily();
     }
   }
@@ -1276,6 +1306,9 @@ export default function HRAttendance() {
                                   <button onClick={() => setTrailRow(row)} title="Show the punch events behind this day" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-50 transition-colors shadow-sm">
                                     <ListTree className="h-3 w-3" /> Trail
                                   </button>
+                                  <button onClick={() => void recalculateDay(row)} disabled={recalculatingId === row.employee_id} title="Recalculate this day from its punches and the work calendar" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors shadow-sm">
+                                    <RefreshCw className={`h-3 w-3 ${recalculatingId === row.employee_id ? "animate-spin" : ""}`} /> Recalculate
+                                  </button>
                                 </div>
                               )}
                             </div>
@@ -1375,6 +1408,9 @@ export default function HRAttendance() {
                               </button>
                               <button onClick={() => setTrailRow(row)} className="justify-center inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 transition-colors active:scale-95">
                                 <ListTree className="h-3.5 w-3.5" /> Trail
+                              </button>
+                              <button onClick={() => void recalculateDay(row)} disabled={recalculatingId === row.employee_id} className="justify-center inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors active:scale-95">
+                                <RefreshCw className={`h-3.5 w-3.5 ${recalculatingId === row.employee_id ? "animate-spin" : ""}`} /> Recalculate
                               </button>
                             </div>
                           )}

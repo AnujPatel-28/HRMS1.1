@@ -801,13 +801,21 @@ export default function EmployeeCreate() {
             grade: form.grade.trim() || null,
             work_location: form.work_location || null,
             location_id: form.location_id || null,
-            manager_id: form.manager_id || null,
-            secondary_manager_id: form.secondary_manager_id || null,
           })
           .eq("tenant_id", tenantId)
           .eq("id", currentEmployeeId);
         if (updateRes.error) {
           throw new Error("Failed to update existing employee profile: " + updateRes.error.message);
+        }
+        // C3: managers change only through the reporting RPC, which writes the primary/secondary
+        // relationship rows (the authority is_manager_of reads) and keeps manager_id in sync.
+        const { error: reportingErr } = await db.rpc("update_employee_reporting_relationship", {
+          p_employee_id: currentEmployeeId,
+          p_primary_manager_id: form.manager_id || null,
+          p_secondary_manager_id: form.secondary_manager_id || null,
+        });
+        if (reportingErr) {
+          throw new Error("Failed to update reporting manager: " + reportingErr.message);
         }
       }
 

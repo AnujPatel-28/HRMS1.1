@@ -341,6 +341,8 @@ export interface Leave {
   end_date: string;
   total_days: number | null;
   approved_business_days?: number | null;
+  day_fraction?: number | null;
+  half_day_session?: "first" | "second" | null;
   reason: string;
   status: "pending" | "approved" | "rejected";
   reviewed_by: string | null;
@@ -556,7 +558,7 @@ export interface NewHireRequest {
   email: string;
   job_title_id: string | null;
   proposed_date_of_joining: string | null;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "cancelled";
   reviewed_by: string | null;
   reviewed_at: string | null;
   reason: string | null;

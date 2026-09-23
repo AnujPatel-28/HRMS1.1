@@ -78,6 +78,7 @@ type LeaveTypeRow = {
   max_consecutive_days: number | null;
   is_active: boolean;
   is_paid: boolean;
+  allow_half_day?: boolean;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -114,6 +115,7 @@ export type LeaveTypeForm = {
   maximum_consecutive_days: string;
   is_active: boolean;
   is_paid: boolean;
+  allow_half_day: boolean;
   updated_at: string | null;
 };
 
@@ -210,6 +212,7 @@ const defaultLeaveTypeForm: LeaveTypeForm = {
   maximum_consecutive_days: "",
   is_active: true,
   is_paid: true,
+  allow_half_day: false,
   updated_at: null,
 };
 
@@ -1093,6 +1096,7 @@ export default function PolicyCenter() {
         maximum_consecutive_days: leaveType.max_consecutive_days != null ? String(leaveType.max_consecutive_days) : "",
         is_active: leaveType.is_active,
         is_paid: leaveType.is_paid,
+        allow_half_day: leaveType.allow_half_day ?? false,
         updated_at: leaveType.updated_at || null,
       });
     } else {
@@ -1127,6 +1131,7 @@ export default function PolicyCenter() {
         max_consecutive_days: leaveTypeForm.maximum_consecutive_days.trim() ? Number(leaveTypeForm.maximum_consecutive_days) : null,
         is_active: leaveTypeForm.is_active,
         is_paid: leaveTypeForm.is_paid,
+        allow_half_day: leaveTypeForm.allow_half_day,
       };
 
       const { error: rpcError } = await db.rpc("save_leave_type_transaction", {
@@ -1947,6 +1952,7 @@ export default function PolicyCenter() {
                 <Toggle checked={leaveTypeForm.is_paid} onChange={(checked) => setLeaveTypeForm((current) => ({ ...current, is_paid: checked }))} label="Paid leave" description="If unchecked, leave days will be deducted as Loss of Pay" />
                 <Toggle checked={leaveTypeForm.restrict_during_probation} onChange={(checked) => setLeaveTypeForm((current) => ({ ...current, restrict_during_probation: checked }))} label="Restrict during probation" />
                 <Toggle checked={leaveTypeForm.requires_document} onChange={(checked) => setLeaveTypeForm((current) => ({ ...current, requires_document: checked }))} label="Requires document" description="Employee must upload a document when applying (e.g. medical certificate)" />
+                <Toggle checked={leaveTypeForm.allow_half_day} onChange={(checked) => setLeaveTypeForm((current) => ({ ...current, allow_half_day: checked }))} label="Allow half day" description="Employees can take this leave for the first or second half of a single working day (counts as 0.5)" />
               </div>
               <FieldLabel label="Applicable after">
                 <input type="number" min={0} value={leaveTypeForm.applicable_after_days} onChange={(event) => setLeaveTypeForm((current) => ({ ...current, applicable_after_days: event.target.value }))} className={inputClass} />

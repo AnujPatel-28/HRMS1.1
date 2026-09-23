@@ -464,7 +464,7 @@ async function runMembershipInvitationRevocation() {
     console.log("Audit actor semantics passed: employee actor_id uses employee id; non-employee actor_id is null with user/membership ids in details.");
     console.log(`Forged access audit denied: ${forgedAuditDenial}`);
     console.log("Invitation tamper/replay/expiry/wrong-tenant checks passed; non-employee operational templates returned association-required.");
-    console.log("Revoked old token denied on database/RPC and edge function; private storage and realtime remain disabled/incomplete.");
+    console.log("Revoked old token denied on database/RPC and edge function; private storage (P3-04) and realtime (P3-03) revocation are covered by p3_private_buckets and p3_realtime_isolation.");
   });
 }
 

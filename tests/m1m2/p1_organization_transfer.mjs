@@ -166,9 +166,10 @@ await guardedMutation("P1-03 dated organization placement and reporting", async 
     // "employee/attendance/leave manager-scope reads" surface AC3 requires -- not assumed.
     const consumers = rowsOf(runSql(`SELECT proname FROM pg_proc WHERE prosrc ILIKE '%is_manager_of%' AND proname <> 'is_manager_of'`));
     // Later accepted packages added two direct_reports consumers, both gated on the same primary rule:
-    // P2-02 assert_attendance_correction_reviewer, P3-02 p3_task_scope. A new consumer still fails here.
+    // P2-02 assert_attendance_correction_reviewer, P3-02 p3_task_scope; C3 my_direct_report_ids (the
+    // client team list). A new consumer still fails here.
     assert.deepEqual(consumers.map((r) => r.proname).sort(),
-      ["assert_attendance_correction_reviewer", "can_view_employee", "p3_task_scope"], "is_manager_of consumer set changed");
+      ["assert_attendance_correction_reviewer", "can_view_employee", "my_direct_report_ids", "p3_task_scope"], "is_manager_of consumer set changed");
     const policies = rowsOf(runSql(
       `SELECT tablename, policyname FROM pg_policies WHERE qual ILIKE '%can_view_employee%' ORDER BY tablename`,
     ));
@@ -241,25 +242,25 @@ await guardedMutation("P1-03 dated organization placement and reporting", async 
     `.trim());
     const legacySecondary = await checkScope("AC3 legacy employees.secondary_manager_id (no relationship row)", false);
 
-    // Precedence check (recorded in migration S2): a 'mentor' row plus legacy manager_id set. The
-    // fallback must still fire here, because no PRIMARY-type row exists for this employee -- only
-    // 'primary' rows suppress the legacy fallback, not "any row of any type".
+    // Precedence check: a 'mentor' row plus legacy manager_id set. C3 removed the legacy fallback,
+    // so with no PRIMARY-type row this must NOT grant (before C3 it did).
     runSql(`
       DELETE FROM public.employee_reporting_relationships WHERE employee_id='${T_TYPES}'::uuid;
       UPDATE public.employees SET manager_id='${EMPLOYEE_A.employeeId}'::uuid, secondary_manager_id=NULL WHERE id='${T_TYPES}'::uuid;
       INSERT INTO public.employee_reporting_relationships (tenant_id, employee_id, manager_id, relationship_type, effective_from, effective_to, is_active)
         VALUES ('${COMPANY_A}'::uuid, '${T_TYPES}'::uuid, '${EMPLOYEE_A.employeeId}'::uuid, 'mentor', '2026-01-01', NULL, true);
     `.trim());
-    const mentorPlusLegacy = await checkScope("AC3 precedence: mentor row present + legacy manager_id set", true);
+    const mentorPlusLegacy = await checkScope("AC3 precedence: mentor row present + legacy manager_id set", false);
 
     console.log(
       `AC3 (the package): ${NON_PRIMARY_TYPES.map((t) => `${t}=denied`).join(", ")}; primary=granted (positive control); ` +
-      `legacy secondary_manager_id alone=denied; mentor-row+legacy-manager_id=granted (fallback correctly ignores a non-primary row). ` +
+      `legacy secondary_manager_id alone=denied; mentor-row+legacy-manager_id=denied (C3: no legacy fallback). ` +
       `Full is_manager_of/can_view_employee/attendance/leaves results: ${JSON.stringify({ ...results, primary: positiveControl, legacySecondary, mentorPlusLegacy })}`,
     );
 
     // ==========================================================================================
-    // Legacy fallback structural cases: not-yet-migrated (zero relationship rows) grants; blocked
+    // Legacy fallback structural cases (C3: fallback removed): not-yet-migrated (zero relationship
+    // rows) no longer grants; blocked
     // (a closed primary row with no replacement, plus legacy manager_id still set) does NOT grant.
     // ==========================================================================================
     runSql(`
@@ -270,7 +271,7 @@ await guardedMutation("P1-03 dated organization placement and reporting", async 
       await employeeAClient.database.rpc("is_manager_of", { p_employee_id: T_FALLBACK }),
       "not-yet-migrated fallback",
     );
-    assert.equal(fallbackIm, true, "not-yet-migrated employee (legacy manager_id, zero relationship rows) must fall back to legacy manager_id");
+    assert.equal(fallbackIm, false, "C3: legacy manager_id with zero relationship rows must NOT grant manager scope");
 
     runSql(`
       INSERT INTO public.employees (id, tenant_id, full_name, email, manager_id) VALUES
@@ -283,7 +284,7 @@ await guardedMutation("P1-03 dated organization placement and reporting", async 
       "blocked (closed primary, no replacement)",
     );
     assert.equal(blockedIm, false, "employee with a closed primary row and no replacement must read as blocked, not fall back to legacy manager_id");
-    console.log(`Precedence structural cases: not-yet-migrated (zero relationship rows) -> fallback grants (${fallbackIm}); closed-primary-no-replacement -> blocked, no fallback (${blockedIm}).`);
+    console.log(`Precedence structural cases: not-yet-migrated (zero relationship rows) -> no scope (${fallbackIm}); closed-primary-no-replacement -> blocked, no fallback (${blockedIm}).`);
 
     // ==========================================================================================
     // AC4 -- boundary date D using TODAY's real tenant business date (a genuine live boundary, not
@@ -426,14 +427,11 @@ await guardedMutation("P1-03 dated organization placement and reporting", async 
     assert.equal(formerLosesIt, false, "AC5/AC6: former primary must lose scope on the next check, dynamically, with no stored reassignment");
     assert.equal(newGainsIt, true, "AC5/AC6: new primary must gain scope, resolved dynamically at call time");
 
-    // "Client Team state matches server resolution" (AC5): the shape useManagerView.tsx actually
-    // queries (employees.manager_id = X, status='active') is reproduced directly and must agree
-    // with the server's is_manager_of resolution for the same pair, post-transfer.
-    const clientShapedQuery = rowsOf(runSql(
-      `SELECT id FROM public.employees WHERE manager_id='${HR_EMPLOYEE_A.employeeId}'::uuid AND tenant_id='${COMPANY_A}'::uuid AND status='active' AND id='${T_TRANSFER}'::uuid`,
-    ));
-    assert.equal(clientShapedQuery.length, 1, "AC5: useManagerView.tsx-shaped employees.manager_id query must include the transferred employee under the new manager");
-    console.log(`AC5/AC6 transfer: history preserved (old row id=${originalRow.id}, manager_id/relationship_type/effective_from unchanged, is_active flipped false, effective_to=${businessDate}); new row effective_from=${businessDate}; former primary (employee.a) loses scope=${!formerLosesIt}; new primary (hr-employee.a) gains scope=${newGainsIt}; client-shaped manager_id query agrees with server resolution.`);
+    // "Client Team state matches server resolution" (AC5): useManagerView.tsx lists the team via
+    // my_direct_report_ids() (C3), which must include the transferred employee for the new manager.
+    const clientTeam = noError(await hrClient.database.rpc("my_direct_report_ids"), "AC5 my_direct_report_ids");
+    assert.ok(clientTeam.includes(T_TRANSFER), "AC5: useManagerView.tsx team list (my_direct_report_ids) must include the transferred employee under the new manager");
+    console.log(`AC5/AC6 transfer: history preserved (old row id=${originalRow.id}, manager_id/relationship_type/effective_from unchanged, is_active flipped false, effective_to=${businessDate}); new row effective_from=${businessDate}; former primary (employee.a) loses scope=${!formerLosesIt}; new primary (hr-employee.a) gains scope=${newGainsIt}; client team list (my_direct_report_ids) agrees with server resolution.`);
 
     // ==========================================================================================
     // AC1 -- designation/unit/relationship/access independence: is_hr()/is_manager_of/

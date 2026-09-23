@@ -25,7 +25,7 @@
  */
 export const BASELINE_RO_PROJECT_ID = "0431f0f6-225f-4fb1-86b7-3fd32684c7f4";
 
-export const TB_M1M2 = Object.freeze({
+const TB_M1M2_RECORD = Object.freeze({
   name: "tb-m1m2",
   projectId: "fb9a8659-9950-4637-a58e-4a882ef24419",
   baseUrl: "https://rq3qmu8y-j9g.ap-southeast.insforge.app",
@@ -35,6 +35,28 @@ export const TB_M1M2 = Object.freeze({
   branchedFrom: BASELINE_RO_PROJECT_ID,
   status: "AUTHORIZED",
 });
+
+/**
+ * v0.9.0 release rehearsal: a full branch of production, created 2026-09-23 and deleted after the
+ * release (doc/release/v0.9.0-production-promotion-runbook.md, Gate 1). Selected only with
+ * `M1M2_TARGET=rehearsal`; every guard in `_harness.mjs` applies to it unchanged.
+ */
+const REHEARSAL_RECORD = Object.freeze({
+  name: "rehearsal-v090",
+  projectId: "e3d7dea3-5c76-450f-b9b1-f143553b0e3d",
+  baseUrl: "https://rq3qmu8y-hqb.ap-southeast.insforge.app",
+  functionsUrl: "https://rq3qmu8y-hqb.function2.insforge.app",
+  branchName: "rehearsal-v090",
+  branchedFrom: BASELINE_RO_PROJECT_ID,
+  status: "AUTHORIZED",
+});
+
+const TARGETS = { tb: TB_M1M2_RECORD, rehearsal: REHEARSAL_RECORD };
+const selected = process.env.M1M2_TARGET ?? "tb";
+if (!TARGETS[selected]) throw new Error(`Unknown M1M2_TARGET "${selected}"; use one of: ${Object.keys(TARGETS).join(", ")}`);
+
+/** The active test target (TB-M1M2 unless M1M2_TARGET selects another). Suites use this name. */
+export const TB_M1M2 = TARGETS[selected];
 
 /**
  * Second isolated backend, separately keyed. NOT a mutation target for the fixture scripts —

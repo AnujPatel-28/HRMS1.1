@@ -270,14 +270,17 @@ await guardedMutation("P2-04 leave workflow", async () => {
       WHERE n.nspname='public' AND proname IN ('employee_apply_leave_request','approve_leave_request')
         AND position('day_fraction' in pg_get_functiondef(p.oid)) > 0
     `));
-    assert.equal(dayFractionWriters.length, 0, "AC6: neither apply nor approve should reference day_fraction -- no write path exists");
+    // C5 (20260912196000) added the half-day write path: apply writes day_fraction (0.5 only with a
+    // named session on a half-day-enabled type) and approve scales the deduction by it.
+    assert.deepEqual(dayFractionWriters.map((r) => r.proname).sort(), ["approve_leave_request", "employee_apply_leave_request"],
+      "AC6/C5: day_fraction is referenced by exactly apply (writer) and approve (deduction)");
     const writeGrants = rowsOf(runSql(`
       SELECT table_name, grantee, privilege_type FROM information_schema.role_table_grants
       WHERE table_schema='public' AND table_name IN ('leaves','leave_balances')
         AND grantee IN ('authenticated','anon') AND privilege_type IN ('INSERT','UPDATE','DELETE')
     `));
     assert.equal(writeGrants.length, 0, "leaves/leave_balances must expose no direct client write grant");
-    console.log("Catalog: 5 named functions each have one copy and deny anon; apply/approve converged onto work_calendar_holiday; approve/cancel guarded by assert_leave_reviewer; apply/cancel-pending module-gated; day_fraction has no writer; leaves/leave_balances hold no client write grant.");
+    console.log("Catalog: 5 named functions each have one copy and deny anon; apply/approve converged onto work_calendar_holiday; approve/cancel guarded by assert_leave_reviewer; apply/cancel-pending module-gated; day_fraction written by apply, scaled by approve (C5); leaves/leave_balances hold no client write grant.");
 
     // ---------------------------------------------------------------------
     // AC1 + AC3: apply (RPC) -> approve -> retry-approve (no double debit) -> cancel-approved ->
@@ -475,14 +478,17 @@ await guardedMutation("P2-04 leave workflow", async () => {
     const afterCancel = attendanceRow(EMPLOYEE_A.employeeId, D_PUNCH);
     assert.ok(afterCancel, "AC5: the row must still exist after cancel -- it carries real punch evidence and must not be deleted");
     assert.equal(afterCancel.leave_id, null, "AC5: leave tag must be released on cancel");
-    assert.equal(afterCancel.derivation_source, null, "AC5: derivation_source must be released for the deriver to reclaim");
+    // C4 (20260912195000/195200): cancel now re-derives the day immediately (Company A has attendance
+    // on), so the released row is reclaimed by the deriver and returns to its punch-derived status.
+    assert.equal(afterCancel.derivation_source, "derived", "AC5/C4: cancel must hand the day back to the deriver, which reclaims it");
+    assert.equal(afterCancel.status, baseline.status, "AC5/C4: cancel must restore the punch-derived status");
     assert.equal(afterCancel.punch_in, baseline.punch_in);
     assert.equal(afterCancel.punch_out, baseline.punch_out);
     assert.equal(afterCancel.in_time, baseline.in_time);
     assert.equal(afterCancel.out_time, baseline.out_time);
     const eventsAfterCancel = rowsOf(runSql(`SELECT id, event_time, evidence FROM public.attendance_events WHERE source_ref LIKE '${TEST_TAG}:punch:%' ORDER BY source_ref`));
     assert.deepEqual(eventsAfterCancel, baselineEvents.map(({ id, event_time, evidence }) => ({ id, event_time, evidence })), "AC5: raw events must still be byte-identical after cancel");
-    console.log(`AC5 after cancel: the row survives with evidence intact (status stays '${afterCancel.status}' -- restoring the displayed status is attendance_derive_pass1/pass2's job, not cancel_leave_request's, deliberately: pass1/pass2 require the attendance module enabled, which a Leave-only tenant need not have).`);
+    console.log(`AC5 after cancel: the row survives with evidence intact and is re-derived to '${afterCancel.status}' (C4); raw events byte-identical.`);
 
     // Prove the day CAN restore, and find out exactly what it takes. A naive second pass1 call
     // is a documented no-op here: pass1's event query filters `attendance_id IS NULL`, and the
@@ -492,12 +498,15 @@ await guardedMutation("P2-04 leave workflow", async () => {
     // assertion (a bare second pass1 call left status at 'on_leave').
     const noopRun = "a2400000-0000-4000-8000-000000000023";
     runSql(`
+      DELETE FROM public.attendance_derivation_runs WHERE id='${noopRun}'::uuid; -- a failed earlier run may have left it
       INSERT INTO public.attendance_derivation_runs (id, tenant_id, shift_id, from_date, to_date, trigger)
         VALUES ('${noopRun}'::uuid, '${COMPANY_A}'::uuid, '${SHIFT_PLAIN}'::uuid, '${D_PUNCH}'::date, '${D_PUNCH}'::date, 'replay');
       SELECT * FROM public.attendance_derive_pass1('${COMPANY_A}'::uuid, '${SHIFT_PLAIN}'::uuid, '${D_PUNCH}'::date, '${D_PUNCH}'::date, '${noopRun}'::uuid);
     `);
     const afterNoopPass = attendanceRow(EMPLOYEE_A.employeeId, D_PUNCH);
-    assert.equal(afterNoopPass.status, "on_leave", "documenting pass1's incremental design: a plain re-run does not revisit an already-stamped day");
+    // Since C4, cancel already re-derived the day (status restored above), so the plain re-run is
+    // asserted as a no-op against the RESTORED status: pass1 alone still never revisits a stamped day.
+    assert.equal(afterNoopPass.status, afterCancel.status, "documenting pass1's incremental design: a plain re-run does not revisit an already-stamped day");
     runSql(`DELETE FROM public.attendance_derivation_runs WHERE id='${noopRun}'::uuid;`);
     console.log("AC5 finding: attendance_derive_pass1 alone does NOT restore the day -- it only processes events with attendance_id IS NULL, and this package's baseline pass already stamped these two. Status restoration on an already-derived day has no product-side trigger today; that is a real gap, reported here, not silently patched by leave code (which would reintroduce day-status duplication).");
 

@@ -98,6 +98,11 @@ It maps the database's raw codes to friendly messages, and **deliberately never 
 ### `adms-cdata`
 Three shapes on one URL — handshake (`GET`), punch upload (`POST … table=ATTLOG`), and a command poll. **Always replies in plain text**; a JSON body makes the device consider the exchange failed and resend forever. See `06-devices-and-ingestion.md` for the protocol details.
 
+Common hardware calls `/iclock/cdata`, not the InsForge slug `/adms-cdata`. A production deployment
+therefore needs a source-controlled path-rewriting gateway unless the exact firmware supports a full
+custom path. That gateway is not present in this repository yet; direct function tests are not proof
+of device compatibility.
+
 ### `run-attendance-derivation`
 ```http
 POST /run-attendance-derivation
@@ -105,6 +110,10 @@ x-trigger-token: <DERIVATION_TRIGGER_TOKEN>
 { "lookback_days": 2 }          // optional
 ```
 Fired hourly by the schedule `attendance-derivation-hourly`. The body is optional — pass a larger `lookback_days` for a manual catch-up over a wider window.
+
+On the `TB-M1M2` review backend inspected on 2026-09-19, the schedule targets the branch host but is
+inactive. Keep that distinction explicit: the function is deployed and active; automatic execution
+is not currently enabled on that backend.
 
 ### `check-punch-out-gate` and `calculate-late-marks`
 Both **read-only**, both run as the caller. `check-punch-out-gate` reports whether the employee has unapproved tasks and whether `punch_out_allowed` is set.

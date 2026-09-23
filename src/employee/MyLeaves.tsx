@@ -35,6 +35,7 @@ interface LeaveType {
   max_consecutive_days: number | null;
   applicable_from_day: number;
   requires_document: boolean;
+  allow_half_day: boolean;
 }
 
 interface LeaveBalance {
@@ -66,7 +67,7 @@ export default function MyLeaves() {
   
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ leave_type_id: "", start_date: "", end_date: "", reason: "" });
+  const [form, setForm] = useState({ leave_type_id: "", start_date: "", end_date: "", reason: "", half_day_session: "" });
 
   const { success, error } = useToast();
   const [cancelModal, setCancelModal] = useState<{ isOpen: boolean; leaveId: string | null; dates: string; type: string }>({ isOpen: false, leaveId: null, dates: "", type: "" });
@@ -97,7 +98,7 @@ export default function MyLeaves() {
       const [leavesRes, typesRes, balancesRes, holidaysRes, settingsRes] = await Promise.all([
         leavesQuery,
         // Gap #6a: fetch all policy-relevant leave_type columns.
-        db.from("leave_types").select("id, name, code, is_active, min_notice_days, max_consecutive_days, applicable_from_day, requires_document").eq("tenant_id", tenantId).eq("is_active", true).order("name"),
+        db.from("leave_types").select("id, name, code, is_active, min_notice_days, max_consecutive_days, applicable_from_day, requires_document, allow_half_day").eq("tenant_id", tenantId).eq("is_active", true).order("name"),
         db.from("leave_balances").select("id, leave_type_id, balance").eq("tenant_id", tenantId).eq("employee_id", employee.id).eq("year", currentYear),
         db.from("holidays").select("date").eq("tenant_id", tenantId).gte("date", `${currentYear}-01-01`),
         // Gap #6b: read global leave minimum notice days.
@@ -154,6 +155,12 @@ export default function MyLeaves() {
     if (!form.start_date || !form.end_date) return { total_days: 0, working_dates: [] };
     return calculateBusinessDays(form.start_date, form.end_date, shift?.working_days || [1,2,3,4,5,6], holidays);
   }, [form.start_date, form.end_date, shift?.working_days, holidays]);
+
+  // C5: a half-day request (one working day, on a type that allows it) counts as 0.5.
+  const halfDayEligible = !!leaveTypes.find(t => t.id === form.leave_type_id)?.allow_half_day
+    && !!form.start_date && form.start_date === form.end_date && totalDays === 1;
+  const isHalfDay = halfDayEligible && form.half_day_session !== "";
+  const requestedDays = isHalfDay ? 0.5 : totalDays;
 
   const selectedBalance = useMemo(() => {
     if (!form.leave_type_id) return 0;
@@ -260,7 +267,7 @@ export default function MyLeaves() {
     }
 
     // 4. Leave balance
-    if (totalDays > selectedBalance) {
+    if (requestedDays > selectedBalance) {
       error(`Insufficient balance. You only have ${selectedBalance} days available.`);
       return;
     }
@@ -301,11 +308,12 @@ export default function MyLeaves() {
         p_start_date: form.start_date,
         p_end_date: form.end_date,
         p_reason: form.reason,
+        p_half_day_session: isHalfDay ? form.half_day_session : null,
       });
       if (insErr) throw insErr;
       
       success("Leave application submitted!");
-      setForm({ leave_type_id: leaveTypes[0]?.id || "", start_date: "", end_date: "", reason: "" });
+      setForm({ leave_type_id: leaveTypes[0]?.id || "", start_date: "", end_date: "", reason: "", half_day_session: "" });
       setTab("history");
       void fetchData();
     } catch (err) {
@@ -429,7 +437,7 @@ export default function MyLeaves() {
                     <div className="flex flex-wrap gap-3 text-sm text-slate-600">
                       <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium capitalize">{typeName || leave.leave_type || "Leave"}</span>
                       <span>{leave.start_date} → {leave.end_date}</span>
-                      <span className="font-semibold text-slate-800">{leave.total_days ?? "?"} days</span>
+                      <span className="font-semibold text-slate-800">{leave.total_days ?? "?"} days{leave.half_day_session ? ` (${leave.half_day_session} half)` : ""}</span>
                     </div>
                   </div>
                   <p className="mt-3 text-sm text-slate-700"><span className="font-medium">Reason:</span> {leave.reason}</p>
@@ -519,10 +527,21 @@ export default function MyLeaves() {
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring" />
                 </div>
               </div>
+              {halfDayEligible && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Duration</label>
+                  <select value={form.half_day_session} onChange={e => setForm({...form, half_day_session: e.target.value})}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-brand-600 focus:ring">
+                    <option value="">Full day</option>
+                    <option value="first">First half</option>
+                    <option value="second">Second half</option>
+                  </select>
+                </div>
+              )}
               {totalDays > 0 && (
-                <div className={`rounded-lg border px-3 py-2 text-sm font-semibold ${totalDays > selectedBalance ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-brand-50 border-brand-200 text-brand-700"}`}>
-                  Calculated Working Days: {totalDays}
-                  {totalDays > selectedBalance && " (Exceeds Balance)"}
+                <div className={`rounded-lg border px-3 py-2 text-sm font-semibold ${requestedDays > selectedBalance ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-brand-50 border-brand-200 text-brand-700"}`}>
+                  Calculated Working Days: {requestedDays}
+                  {requestedDays > selectedBalance && " (Exceeds Balance)"}
                 </div>
               )}
               <div>

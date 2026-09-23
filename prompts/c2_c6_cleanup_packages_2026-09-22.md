@@ -177,3 +177,95 @@ new `tests/m1m2/c6_p3_residuals.mjs`.
 **Acceptance:** author edits content but cannot change type/pin (denied); moderator can; employee
 cannot delete an HR-uploaded file in their own folder, HR can, employee can still upload their own;
 no `posts` subscribe calls remain in `src/`; all suites green.
+
+---
+
+## C7 — PERMISSIVE tenant-only write policies (added by the lead 2026-09-23, during C3)
+
+**Why:** C3 proved live that `employee_reporting_relationships.tenant_isolation_policy` (PERMISSIVE
+`FOR ALL`, tenant membership only) let **any employee insert a primary row making themself manager
+of HR** → `is_manager_of` true. Fixed in C3 (`194000`). A sweep on 2026-09-23 found the same shape
+(PERMISSIVE write policy whose only condition is tenant membership, no role/owner check) on:
+
+| Table | Policy | Roles | Likely impact if writable |
+|---|---|---|---|
+| `office_locations` | `office_locations_tenant_isolation` | public | move the office geofence → punch from anywhere |
+| `attendance_location_exceptions` | `exceptions_tenant_isolation` | authenticated | grant self a geofence exception |
+| `employee_shifts` | `tenant_isolation` | authenticated | reassign own/others' shift |
+| `shifts` | `tenant_isolation` | authenticated | edit shift timings / grace |
+| `employee_policy_acknowledgements` | `tenant_isolation` | authenticated | forge/erase others' acknowledgements |
+| `employee_onboarding` | `HR can manage employee_onboarding in their tenant` (misnamed — no HR check) | authenticated | **measured:** employee.a UPDATE matched 2 rows (server-side onboarding state, `status`/`last_error`) |
+| `payroll_runs` | `tenant_isolation` | authenticated | payroll — record, fix with payroll |
+| `it_declarations`, `it_declaration_windows` | `*_tenant_isolation` | authenticated | payroll — record, fix with payroll |
+
+`authenticated` holds INSERT/UPDATE/DELETE on all of them. Company A has 0 rows in most, so a no-op
+UPDATE proves nothing — **measure with a REST INSERT as `employee.a` + immediate SQL cleanup** (the
+pattern in `scratch/c3-err-probe.mjs`). Treat this list as a lower bound: re-sweep with a regex that
+does NOT exclude quals mentioning `auth.uid`/`user_id` (the C3 policy had exactly that shape and
+the first sweep missed it).
+
+**Do:** per table, read every other policy first (converting or dropping a PERMISSIVE policy can
+remove a legitimate path — e.g. employees reading `shifts`/`office_locations`, employees inserting
+their own acknowledgement). Then: tenant-only PERMISSIVE → RESTRICTIVE fence (`tenant_active_restrictive`
+house form) + explicit HR write policy + narrow self policies where a client path needs one. Grep
+`src/` and `functions/` for every direct client write to each table before closing it.
+**Migration:** `20260912194500_m1m2-permissive-tenant-write-policies.sql`.
+**Acceptance:** per table, employee INSERT/UPDATE/DELETE DENIED (live, before = ALLOWED shown),
+HR path still works, every legitimate employee read/write path listed and exercised; all suites.
+**Order:** before C4 (security before correctness). Payroll tables may be deferred to the payroll
+module but must be listed in its decision doc.
+
+### C6 additions (lead, 2026-09-23, from C3/C7 acceptance) — do these FIRST in C6
+
+1. **`expenses` self-approval (money path, measured):** `employee.a` inserted an expense with
+   `status='approved'` via REST (`scratch/c7-expense-probe.mjs`). Tighten `expenses_self_insert`
+   WITH CHECK to `status = 'pending'` plus null reviewer/approval columns; check `expenses_self_*`
+   UPDATE paths the same way. Grep the client insert first (it must not send another status).
+2. `create_draft_employee` (HR-only, no caller) inserts `manager_id` with no relationship row — drop
+   it or route it through `update_employee_reporting_relationship`.
+3. Profile-photo storage policies key on tenant only — any employee can overwrite/delete a
+   colleague's photo; scope to own folder (+ HR).
+4. `acknowledgements_employee_self` is FOR ALL — an employee can delete their own acknowledgement.
+C7's forward-fix slot is `20260912194600` (C7 was renumbered from `198000`).
+
+---
+
+## C8 — Absent-marking never runs: nothing sets the watermark (found in C4, 2026-09-23)
+
+**Measured:** `attendance_derive_pass2` writes `absent` only for dates `<= tenant_business_date(
+shifts.last_sync_of_events) - 1` (the §2.7 "don't infer absence before events have synced"
+interlock). **No function or client writes `last_sync_of_events`** (`position()` sweep: pass 2 is
+the only reference). All 10 shifts on TB have it NULL → no tenant ever gets an automatic `absent`
+day; no-punch working days stay "no record" forever, including after a leave cancel (C4 Recalculate
+returns `no_row`).
+**Decide first (product):** what "events have synced" means per source — app punches are live
+(watermark ≈ now), devices/ADMS lag (watermark = device's last successful push, B8 ingest knows it),
+kiosk ≈ live. Likely: set per shift from the latest ingest time of its sources, advanced by the
+ingest paths / scheduler; or a tenant setting "mark absent after N hours". Must stay honest for
+device tenants (never mark absent while a device backlog is unsynced).
+**Acceptance:** app-only tenant: yesterday's no-punch working day → `absent` after a derivation run;
+device tenant with a stale device → no absent beyond its last push; leave/holiday/weekly-off
+unaffected; all suites.
+
+**C8 decision (user, 2026-09-23):** mark absent **the next morning for app/kiosk punches**; for
+**biometric devices only after the device has actually synced** (never past its last successful push).
+
+---
+
+## C9 — Storage write fences: employees can upload into 9 buckets (found in C6, 2026-09-23)
+
+**Measured** (`scratch/c6-bucket-probe.mjs`, employee.a, upload at `<tenant>/<random>.txt`, removed
+after): CREATED in `application-snapshots`, `attendance-selfies`, `avatars`*, `company-assets`*,
+`company-logos`*, `insurance-documents`, `payslips`, `recruiter_documents`, `resumes` (*public).
+Denied where a RESTRICTIVE fence exists (`employee-documents`, `expense-receipts`, `task-attachments`,
+`chat-attachments`, `hr-policies`, `employee-profile-photos` since C6 `197100`).
+**Cause:** global PERMISSIVE `storage_objects_owner_insert` (WITH CHECK `uploaded_by = me`) ORs with
+every bucket policy, so any bucket without a RESTRICTIVE write fence accepts an insert at any key.
+**Risks:** hosting arbitrary files on public company buckets; pre-planting a file at a predictable
+key before HR/the system writes it (e.g. a payslip or selfie path) — measure key predictability.
+**Do:** per bucket, find the real writer(s) (`src/`, `functions/` — edge functions use the admin key)
+and add a RESTRICTIVE INSERT/UPDATE/DELETE fence matching them (own folder / HR / nobody-but-admin).
+Consider replacing the global owner-insert with per-bucket insert policies. Payroll buckets
+(`payslips`) can simply be closed to clients (payroll hidden, rebuilt later).
+**Acceptance:** re-run the probe → denied everywhere except the buckets whose app flow needs it, each
+exercised; all suites.

@@ -26,6 +26,18 @@ All work is on TB-M1M2 only. When promoting to the parent `0431f0f6…`:
 1. **`backups create` first.** No backup exists; the schema is not reconstructible from `migrations/`.
 2. **Deploy the frontend before migration `20260912191000`** (P3-02b) — new summary + old
    AuthContext drops every user's capabilities.
+   **Conflict with C3 (added 2026-09-23):** C3 needs migration `20260912194000` applied BEFORE its
+   frontend (`b9b232a`+), the reverse of P3-02b. Prod frontend = Vercel from `main`, so one deploy
+   cannot satisfy both. Sequence: (a) frontend at the last pre-C3 commit that includes P3-02b
+   (`b77afc8`); (b) migrations up to `20260912193000`; (c) `20260912194000`; (d) frontend at C3 or later.
+   **C7/C4 (2026-09-23):** apply `194500` (C7, no frontend dependency) and `195000`/`195100`/`195200`
+   (C4) in step (c) too — C4's frontend (`529fb1f`, HR Recalculate) needs them before step (d).
+   **C5 (2026-09-23):** `196000`/`196100` in step (c) as well (new apply parameter + leave-type toggle);
+   the old frontend keeps working on them. Payroll is hidden in the frontend (`0eebac8`), data untouched.
+   **C6 (2026-09-23):** `197000`/`197100` in step (c) too; no frontend dependency.
+   **C9 (2026-09-23):** `198000` in step (c); no frontend dependency.
+   **C8 (2026-09-23):** `199000` in step (c). **Before enabling the production derivation schedule,**
+   confirm each attendance-enabled tenant actually punches — no-punch shifted employees are now marked absent.
 3. **Bucket privacy is not in SQL.** PATCH `isPublic:false` for `chat-attachments`,
    `employee-documents`, `expense-receipts`, `task-attachments` (and confirm `hr-policies`).
 4. Run every `tests/m1m2` suite against a branch of the promoted state before cutover.

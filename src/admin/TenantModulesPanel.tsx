@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Blocks, Lock, AlertCircle } from "lucide-react";
 import { db } from "../insforge/client";
+import { HIDDEN_MODULES, type ModuleKey } from "../modules";
 
 type ModuleRow = {
   key: string;
@@ -122,7 +123,7 @@ export function TenantModulesPanel({ tenantId }: { tenantId: string }) {
       )}
 
       <div className="space-y-1">
-        {modules.map((m) => {
+        {modules.filter((m) => !HIDDEN_MODULES.includes(m.key as ModuleKey)).map((m) => {
           const isOn = m.is_core || enabled.has(m.key);
           const isBusy = saving === m.key;
 

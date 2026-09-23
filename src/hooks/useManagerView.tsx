@@ -30,14 +30,23 @@ export function ManagerViewProvider({ children }: { children: React.ReactNode })
       return;
     }
 
-    db.from("employees")
-      .select("id")
-      .eq("manager_id", currentEmployee.id)
-      .eq("tenant_id", tenantId)
-      .eq("status", "active")
-      .then(({ data }) => {
-        setDirectReportIds(data?.map((e) => e.id) || []);
-      });
+    // C3: reports come from the primary reporting relationship (the same predicate as
+    // is_manager_of), not the manager_id display column; basic columns via the directory view.
+    void (async () => {
+      const { data: ids } = await db.rpc("my_direct_report_ids");
+      const reportIds = (ids as string[] | null) ?? [];
+      if (reportIds.length === 0) {
+        setDirectReportIds([]);
+        return;
+      }
+      const { data } = await db
+        .from("employee_directory_public")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("status", "active")
+        .in("id", reportIds);
+      setDirectReportIds(data?.map((e) => e.id) || []);
+    })();
   }, [currentEmployee?.id, isManager, tenantId]);
 
   const toggleManagerMode = () => {
