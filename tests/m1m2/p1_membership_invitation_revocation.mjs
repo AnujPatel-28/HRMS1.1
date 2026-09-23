@@ -406,7 +406,9 @@ async function runMembershipInvitationRevocation() {
         p_approved_business_days: null,
       }),
       // PENDING_LEAVE_ID is in tenant da7a0000, not Company A: P2-04 answers a cross-tenant leave with
-      // P1003 APPROVAL_SUBJECT_UNAVAILABLE rather than revealing it. Still a denial.
+      // P1003 APPROVAL_SUBJECT_UNAVAILABLE rather than revealing it. Still a denial. Since C10 the
+      // answer is the same whatever the leave's status, or whether it exists at all, so this check
+      // no longer depends on that QA leave staying pending.
       /Forbidden|HR|denied|P1001|APPROVAL_SUBJECT_UNAVAILABLE/i,
       "Company Admin leave approval",
     );
