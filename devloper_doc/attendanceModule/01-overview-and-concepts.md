@@ -95,7 +95,8 @@ Runs over *assigned employees*, not events. Pass 1 can only ever see people who 
 
 A tenant can switch attendance on and payroll off, or vice versa. This is a product promise, and the code honours it:
 
-- Every attendance table is gated by a `tenant_has_module_for(tenant, 'attendance')` check.
+- Attendance-owned tables and mutation paths are gated by `tenant_has_module_for(tenant, 'attendance')`.
+- Shared calendar primitives such as `tenant_business_date()` are tenant-fenced infrastructure and are deliberately not gated by the Attendance module; Leave and other modules use them too.
 - The punch functions check the payroll period lock **only if the payroll module is on**.
 - No attendance code reads a payroll table.
 

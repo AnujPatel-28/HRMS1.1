@@ -167,7 +167,7 @@ where locked_until > now();
 
 | Function | Use it for |
 |---|---|
-| `tenant_business_date(tenant, instant)` | The tenant's "today". Returns `NULL` if forbidden or module off. |
+| `tenant_business_date(tenant, instant)` | The tenant's "today". Shared tenant-fenced infrastructure; returns `NULL` when tenant access is forbidden, not merely because Attendance is off. |
 | `attendance_resolve_shift(...)` | Which shift a punch at time T belongs to. |
 | `attendance_calculate_working_hours(...)` | Hours, honouring break rules. |
 | `work_calendar_holiday(tenant, employee, date)` | Is this a holiday for *this* employee (with calendar precedence)? |

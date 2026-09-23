@@ -13,6 +13,7 @@ Start here. Read `01` first; the rest can be read in any order.
 | [07 - Decisions & Gotchas](07-decisions-and-gotchas.md) | **Read before changing anything.** Every entry is here because something broke. |
 | [08 - Common Queries Cheatsheet](08-common-queries-cheatsheet.md) | You need a working snippet right now. |
 | [09 - Edge Functions](09-edge-functions.md) | You are writing, deploying or debugging an edge function. **Read §2 before choosing an auth pattern.** |
+| [10 - End-to-End System & Readiness Review](10-end-to-end-system-and-readiness-review.md) | You need the complete punch-to-derivation flow, current implementation status, open device risks, or the production go-live checklist. |
 
 ---
 

@@ -69,6 +69,12 @@ device_ingest_punch()  →  attendance_events
 
 These machines speak a plain-text "push" protocol. `functions/adms-cdata` translates it.
 
+> **Production route warning:** common ADMS/iClock firmware calls the conventional path
+> `/iclock/cdata`, while InsForge exposes this function at `/adms-cdata`. The repository does not
+> currently contain the required path-rewriting gateway. Use a source-controlled Cloudflare Worker
+> or equivalent reverse proxy, or prove that the exact device firmware can configure the full
+> custom `/adms-cdata` path. Direct `curl` tests below prove the adapter, not hardware compatibility.
+
 ```text
 GET  /adms-cdata?SN=<serial>&options=all   → plain-text config block (handshake)
 POST /adms-cdata?SN=<serial>&table=ATTLOG  → tab-separated punches
@@ -145,3 +151,8 @@ Re-runnable test batteries live in `doc/verification/`:
 - `b8_lockout_battery.sql`
 
 Both create their own fixtures and roll everything back, so they are safe to run against a live database.
+
+Simulation is not the P2-03 hardware acceptance test. Before production, run the exact model and
+firmware through `/iclock/cdata` handshake, IN/OUT status capture, offline backlog, reboot/reconnect
+and replay. See `10-end-to-end-system-and-readiness-review.md` for the complete readiness gates and
+the currently open direction, timezone and rejected-row risks.
