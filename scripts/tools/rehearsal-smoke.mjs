@@ -5,19 +5,24 @@
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createClient } from "@insforge/sdk";
-import { TB_M1M2 } from "../../tests/m1m2/_target.mjs";
+import { TB_M1M2, BASELINE_RO_PROJECT_ID } from "../../tests/m1m2/_target.mjs";
 
-if (TB_M1M2.projectId === "0431f0f6-225f-4fb1-86b7-3fd32684c7f4") throw new Error("refusing the production parent");
+// `--production`: read-only smoke after a release step. Only honoured when the link really is the parent.
+const production = process.argv.includes("--production");
+if (!production && TB_M1M2.projectId === BASELINE_RO_PROJECT_ID) throw new Error("refusing the production parent");
 const creds = readFileSync("doc/qa/CREDENTIALS.local.md", "utf8");
 const password = creds.match(/Password \(all six\)[^`]*```\s*\n([^\n]+)\n/)?.[1]?.trim();
 if (!password) throw new Error("QA password not found in doc/qa/CREDENTIALS.local.md");
 const linked = JSON.parse(readFileSync(".insforge/project.json", "utf8"));
-if (linked.project_id !== TB_M1M2.projectId) throw new Error(`link is ${linked.project_name}, target is ${TB_M1M2.name}`);
+const target = production
+  ? { name: "HRMS (production)", projectId: BASELINE_RO_PROJECT_ID, baseUrl: linked.oss_host, functionsUrl: "https://rq3qmu8y.function2.insforge.app" }
+  : TB_M1M2;
+if (linked.project_id !== target.projectId) throw new Error(`link is ${linked.project_name}, target is ${target.name}`);
 const k = spawnSync(process.execPath, ["node_modules/@insforge/cli/dist/index.js", "secrets", "get", "ANON_KEY", "--json"], { encoding: "utf8" });
 if (k.status !== 0) throw new Error("could not read the target anon key");
 const anonKey = JSON.parse(k.stdout.slice(k.stdout.indexOf("{"))).value;
 
-const label = process.argv[2] ?? "";
+const label = process.argv.slice(2).find((a) => a !== "--production") ?? "";
 let failures = 0;
 const check = async (name, fn) => {
   try {
@@ -31,8 +36,8 @@ const check = async (name, fn) => {
 };
 
 for (const email of ["hr-qa@talentmeshsolutions.com", "employee-qa@talentmeshsolutions.com"]) {
-  console.log(`[${label}] ${email} @ ${TB_M1M2.name}`);
-  const c = createClient({ baseUrl: TB_M1M2.baseUrl, functionsUrl: TB_M1M2.functionsUrl, anonKey });
+  console.log(`[${label}] ${email} @ ${target.name}`);
+  const c = createClient({ baseUrl: target.baseUrl, functionsUrl: target.functionsUrl, anonKey });
   const s = await c.auth.signInWithPassword({ email, password });
   if (s.error || !s.data?.user) { failures++; console.log(`  FAIL sign-in: ${s.error?.message}`); continue; }
   console.log("  ok   sign-in");

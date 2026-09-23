@@ -6,15 +6,24 @@ import { readFileSync } from "node:fs";
 import { TB_M1M2, BASELINE_RO_PROJECT_ID } from "../../tests/m1m2/_target.mjs";
 
 const linked = JSON.parse(readFileSync(".insforge/project.json", "utf8"));
-if (linked.project_id === BASELINE_RO_PROJECT_ID || TB_M1M2.projectId === BASELINE_RO_PROJECT_ID) throw new Error("refusing the production parent");
-if (linked.project_id !== TB_M1M2.projectId) throw new Error(`link is ${linked.project_name}, target is ${TB_M1M2.name}`);
+const args = process.argv.slice(2);
+// `--production`: the release step, owner-approved. Only honoured when the link really is the parent.
+const production = args.includes("--production");
+let target = TB_M1M2;
+if (production) {
+  if (linked.project_id !== BASELINE_RO_PROJECT_ID) throw new Error(`--production but link is ${linked.project_name}`);
+  target = { name: "HRMS (production)", baseUrl: linked.oss_host };
+} else {
+  if (linked.project_id === BASELINE_RO_PROJECT_ID || TB_M1M2.projectId === BASELINE_RO_PROJECT_ID) throw new Error("refusing the production parent (pass --production for the release step)");
+  if (linked.project_id !== TB_M1M2.projectId) throw new Error(`link is ${linked.project_name}, target is ${TB_M1M2.name}`);
+}
 
-for (const bucket of process.argv.slice(2)) {
-  const res = await fetch(`${TB_M1M2.baseUrl}/api/storage/buckets/${bucket}`, {
+for (const bucket of args.filter((a) => a !== "--production")) {
+  const res = await fetch(`${target.baseUrl}/api/storage/buckets/${bucket}`, {
     method: "PATCH",
     headers: { Authorization: `Bearer ${linked.api_key}`, "Content-Type": "application/json" },
     body: JSON.stringify({ isPublic: false }),
   });
-  console.log(`${TB_M1M2.name} ${bucket} isPublic=false -> HTTP ${res.status}`);
+  console.log(`${target.name} ${bucket} isPublic=false -> HTTP ${res.status}`);
   if (!res.ok) process.exitCode = 1;
 }
