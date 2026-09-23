@@ -8,10 +8,11 @@ import { fileURLToPath } from "node:url";
 
 import { createClient } from "@insforge/sdk";
 import { verifyTarget } from "./_harness.mjs";
+import { TB_M1M2 } from "./_target.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const COMPANY_A_TENANT_ID = "a0000000-0000-4000-8000-000000000001";
-const TARGET_BASE_URL = "https://rq3qmu8y-j9g.ap-southeast.insforge.app";
+const TARGET_BASE_URL = TB_M1M2.baseUrl;
 
 const personas = [
   {
