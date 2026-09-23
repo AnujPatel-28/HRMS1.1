@@ -164,6 +164,8 @@ record the following in `devloper_doc/attendanceModule/13-pilot-results.md`:
     Build D1 and the D4 UI shell without a DB branch.
   - After that, create your own branch `tb-biometric` (`branch create tb-biometric --mode full` from
     the parent). Don't share TB-M1M2: its suites and `branch reset` wipe each other's state.
+  - A new branch's edge functions return **404** until you redeploy each one (production's code,
+    paced: InsForge rate-limits function writes to about 15 in a few minutes).
   - Add your branch as a target in `tests/m1m2/_target.mjs` the way TB is recorded, so the
     harness guard protects you.
   - **Never write to the parent** `0431f0f6-…`.
