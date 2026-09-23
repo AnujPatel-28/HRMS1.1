@@ -36,6 +36,8 @@ All work is on TB-M1M2 only. When promoting to the parent `0431f0f6…`:
    the old frontend keeps working on them. Payroll is hidden in the frontend (`0eebac8`), data untouched.
    **C6 (2026-09-23):** `197000`/`197100` in step (c) too; no frontend dependency.
    **C9 (2026-09-23):** `198000` in step (c); no frontend dependency.
+   **C8 (2026-09-23):** `199000` in step (c). **Before enabling the production derivation schedule,**
+   confirm each attendance-enabled tenant actually punches — no-punch shifted employees are now marked absent.
 3. **Bucket privacy is not in SQL.** PATCH `isPublic:false` for `chat-attachments`,
    `employee-documents`, `expense-receipts`, `task-attachments` (and confirm `hr-policies`).
 4. Run every `tests/m1m2` suite against a branch of the promoted state before cutover.
