@@ -143,18 +143,21 @@ record the following in `devloper_doc/attendanceModule/13-pilot-results.md`:
 
 ## 2. Working agreement
 
-- **Git:** branch off `main` *after* v0.9.0 is merged. One branch per package
+- **Git:** start from the pushed `p1-00-harness-reconciliation` (D1 is a new folder and has no
+  conflicts), and rebase onto `main` once v0.9.0 is merged. One branch per package
   (`feat/biometric-d1-gateway`, `feat/biometric-d2-ingest`, …), one PR each, reviewed by the lead.
   Conventional commits (`feat:`, `fix:`, `db:`, `docs:`, `test:`). Never push to `main` directly: it
   deploys production.
-- **Migrations:** Track B **owns the version range `20260914000000`–`20260914999999`**. The lead and
-  Track A keep `20260912200000`+. Forward-only: a mistake gets a new `…100` fix, never an edit. The first
-  time you apply a Track B migration *after* a lower-numbered lead migration exists on the same backend,
-  check that `db migrations up <version>` accepts out-of-order versions, and tell the lead the result.
-  Track B migrations ship in **their own release** (a `1.x` minor), never mixed into the Track A promotion.
+- **Migrations:** create them with `db migrations new <name>`, which stamps the real UTC time. The CLI
+  **refuses a migration older than the target's remote head** ("older than the current remote head…
+  Rename it with a newer timestamp"; verified in CLI 0.2.8). So the rule is: **before a PR merges, and
+  before any apply to a shared backend, rename your unapplied migrations to a timestamp above that
+  backend's head.** Forward-only: a mistake gets a new migration, never an edit to an applied one.
+  Track B migrations ship in **their own minor release**, never mixed into the Track A promotion. If the
+  first customer needs devices, that release can come before 1.0.0.
 - **Derive, don't rewrite:** to change a live function, generate the new body from live
   `pg_get_functiondef()` with anchored, once-only replacements that abort on a missing anchor, then diff
-  against live (pattern: `scratch/c5-gen.mjs`). A hand-rewritten function body once dropped six statements.
+  against live (pattern: `scripts/tools/derive-function-body-example.mjs`). A hand-rewritten function body once dropped six statements.
   The repo migration files are **not** the schema source.
 - **Backend:**
   - Until the Track A rehearsal branch is deleted, the parent has **no free branch slot** (quota 2).
@@ -205,5 +208,5 @@ a 5,000-line backlog, CRLF vs LF bodies, `.aspx` paths, and plain HTTP.
 - Every rejected punch is visible to HR and recoverable. A silent device alerts.
 - An HR person with no engineering help can set a new device up in under 15 minutes by following the
   in-app steps.
-- Every Track B suite and every existing suite passes, and the docs are updated. Released as its own `1.x`
-  minor with a CHANGELOG entry.
+- Every Track B suite and every existing suite passes, and the docs are updated. Released as its own minor
+  release with a CHANGELOG entry.
