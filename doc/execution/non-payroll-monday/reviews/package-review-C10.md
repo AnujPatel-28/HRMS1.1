@@ -69,6 +69,10 @@ The two low items are recorded for a later hygiene package. Neither reveals data
   back, so the lock lives only for that failing call. Accepted.
 - `p1_membership_invitation_revocation`'s comment is updated: its cross-tenant check no longer depends
   on QA leave `83f1421d…` staying pending. It is the check that exposed this in the rehearsal.
-- **Production:** apply `20260923162654`. It has no frontend dependency and no bucket or function steps.
-  Take a backup first, then run the C10 suite against a branch of production, or accept the TB run, as
-  the owner decides.
+- **Production: APPLIED 2026-09-23** (owner's go), released as **v0.9.1**. The backup quota is full (1/1)
+  and deleting the pre-v0.9.0 backup was not worth it for a two-function change. Instead, production's
+  exact pre-C10 bodies were saved to `doc/release/rollback/c10-production-before.sql`; they were
+  byte-identical to TB's, so the migration fit production exactly. After applying: head
+  `20260923162654` (146), both bodies contain the fix, a QA employee calling both RPCs with a random id
+  gets `P1003 | APPROVAL_SUBJECT_UNAVAILABLE` (`scratch/c10-prod-check.mjs`), and the sign-in smoke
+  passes.

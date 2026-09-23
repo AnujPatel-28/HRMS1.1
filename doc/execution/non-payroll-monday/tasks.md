@@ -442,7 +442,7 @@ Briefs: `prompts/c1_employee_self_edit_and_new_hire_requests_2026-09-22.md`, `pr
 | **C7** | `194500` | **Security (found in C3):** PERMISSIVE tenant-only write policies on ~9 tables (`office_locations`, `attendance_location_exceptions`, `employee_shifts`, `shifts`, …) — do **before C4** | **ACCEPTED** 2026-09-23 — 16/32 → 32/32; see `reviews/package-review-C7.md` |
 | **C8** | `199000` | absent-marking watermark: app/kiosk next morning, biometric after sync (`attendance_absence_watermark`) | **ACCEPTED** 2026-09-23 — 4/8 → 8/8; see `reviews/package-review-C8.md` |
 | **C9** | `198000` | storage write fences: employees could upload into 9 buckets (incl. a selfie into a colleague's folder) via the global owner-insert policy | **ACCEPTED** 2026-09-23 — 8/18 → 18/18; all-bucket probe 9 → 0; see `reviews/package-review-C9.md` |
-| **C10** | `20260923162654` | leave review authorizes before it reveals: another tenant's user learned a leave's status/existence from `approve_leave_request` / `cancel_leave_request` (found by the v0.9.0 rehearsal) | **ACCEPTED** 2026-09-23 — 6/11 → 11/11; 23/23 suites; see `reviews/package-review-C10.md`. TB only; production pending the owner's go |
+| **C10** | `20260923162654` | leave review authorizes before it reveals: another tenant's user learned a leave's status/existence from `approve_leave_request` / `cancel_leave_request` (found by the v0.9.0 rehearsal) | **ACCEPTED** 2026-09-23 — 6/11 → 11/11; 23/23 suites; see `reviews/package-review-C10.md`. **production applied 2026-09-23 as v0.9.1** |
 
 ### Biometric device packages (added 2026-09-23 — see `devloper_doc/attendanceModule/11-biometric-direction-review.md`)
 
