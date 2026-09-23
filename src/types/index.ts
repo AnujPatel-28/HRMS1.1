@@ -341,6 +341,8 @@ export interface Leave {
   end_date: string;
   total_days: number | null;
   approved_business_days?: number | null;
+  day_fraction?: number | null;
+  half_day_session?: "first" | "second" | null;
   reason: string;
   status: "pending" | "approved" | "rejected";
   reviewed_by: string | null;

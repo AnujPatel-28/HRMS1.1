@@ -387,7 +387,7 @@ export default function LeaveManagement() {  const { tenantId } = useTenant();
                   <div className="flex flex-wrap gap-3 text-sm text-slate-600">
                     <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium capitalize">{leave.typeName ?? leave.leave_type ?? "Leave"}</span>
                     <span>{fmt(leave.start_date)} → {fmt(leave.end_date)}</span>
-                    <span className="font-semibold text-slate-800">{leave.total_days ?? "?"} days</span>
+                    <span className="font-semibold text-slate-800">{leave.total_days ?? "?"} days{leave.half_day_session ? ` (${leave.half_day_session} half)` : ""}</span>
                   </div>
                 </div>
                 <p className="mt-3 text-sm text-slate-700"><span className="font-medium">Reason:</span> {leave.reason}</p>

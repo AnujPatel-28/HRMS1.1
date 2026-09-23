@@ -437,7 +437,7 @@ Briefs: `prompts/c1_employee_self_edit_and_new_hire_requests_2026-09-22.md`, `pr
 | C2 | `193000` | 9 functions on server-UTC `CURRENT_DATE` → `tenant_business_date` | **ACCEPTED** 2026-09-22 — 7 converted, 2 deliberately kept; verified vs parent pre-C2 bodies |
 | **C3** | `194000` | `manager_id` writers → relationship RPC; remove dead `is_manager_of` fallback; **drop legacy manager policies that expose reports' full rows and allow deletes** (added after C1); **+ close `employee_reporting_relationships` (any employee could make themself manager of anyone)** | **ACCEPTED** 2026-09-23 (lead, in-session) |
 | **C4** | `195000`+`195100`+`195200` | re-derive an already-derived attendance day (leave cancel snaps back); approve no longer overwrites HR-locked days; HR **Recalculate** button | **ACCEPTED** 2026-09-23 — 9/15 → 15/15; see `reviews/package-review-C4.md` |
-| C5 | `196000` | half-day leave (user decision: build now) — depends on C4 | briefed |
+| **C5** | `196000`+`196100` | half-day leave: `allow_half_day` per type, first/second half, 0.5 deducted, attendance `half_day`, no false late/early mark | **ACCEPTED** 2026-09-23 — 17/17; see `reviews/package-review-C5.md` |
 | C6 | `197000` | P3 residuals: post edit RPC, owner delete of HR files, dead subscribes | briefed |
 | **C7** | `194500` | **Security (found in C3):** PERMISSIVE tenant-only write policies on ~9 tables (`office_locations`, `attendance_location_exceptions`, `employee_shifts`, `shifts`, …) — do **before C4** | **ACCEPTED** 2026-09-23 — 16/32 → 32/32; see `reviews/package-review-C7.md` |
 | C8 | tbd | absent-marking never runs — nothing writes `shifts.last_sync_of_events` (found in C4); product decision on the watermark first | briefed 2026-09-23 |

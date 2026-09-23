@@ -270,14 +270,17 @@ await guardedMutation("P2-04 leave workflow", async () => {
       WHERE n.nspname='public' AND proname IN ('employee_apply_leave_request','approve_leave_request')
         AND position('day_fraction' in pg_get_functiondef(p.oid)) > 0
     `));
-    assert.equal(dayFractionWriters.length, 0, "AC6: neither apply nor approve should reference day_fraction -- no write path exists");
+    // C5 (20260912196000) added the half-day write path: apply writes day_fraction (0.5 only with a
+    // named session on a half-day-enabled type) and approve scales the deduction by it.
+    assert.deepEqual(dayFractionWriters.map((r) => r.proname).sort(), ["approve_leave_request", "employee_apply_leave_request"],
+      "AC6/C5: day_fraction is referenced by exactly apply (writer) and approve (deduction)");
     const writeGrants = rowsOf(runSql(`
       SELECT table_name, grantee, privilege_type FROM information_schema.role_table_grants
       WHERE table_schema='public' AND table_name IN ('leaves','leave_balances')
         AND grantee IN ('authenticated','anon') AND privilege_type IN ('INSERT','UPDATE','DELETE')
     `));
     assert.equal(writeGrants.length, 0, "leaves/leave_balances must expose no direct client write grant");
-    console.log("Catalog: 5 named functions each have one copy and deny anon; apply/approve converged onto work_calendar_holiday; approve/cancel guarded by assert_leave_reviewer; apply/cancel-pending module-gated; day_fraction has no writer; leaves/leave_balances hold no client write grant.");
+    console.log("Catalog: 5 named functions each have one copy and deny anon; apply/approve converged onto work_calendar_holiday; approve/cancel guarded by assert_leave_reviewer; apply/cancel-pending module-gated; day_fraction written by apply, scaled by approve (C5); leaves/leave_balances hold no client write grant.");
 
     // ---------------------------------------------------------------------
     // AC1 + AC3: apply (RPC) -> approve -> retry-approve (no double debit) -> cancel-approved ->
