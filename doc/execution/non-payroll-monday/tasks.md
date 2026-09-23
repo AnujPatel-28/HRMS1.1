@@ -441,7 +441,7 @@ Briefs: `prompts/c1_employee_self_edit_and_new_hire_requests_2026-09-22.md`, `pr
 | **C6** | `197000`+`197100` | P3 residuals + lead additions: expense self-approval closed, post pin/type moderator-only, HR-issued docs undeletable by owner, profile photos own-folder/HR, acks read-only, dead code | **ACCEPTED** 2026-09-23 — 9/20 → 20/20; see `reviews/package-review-C6.md` |
 | **C7** | `194500` | **Security (found in C3):** PERMISSIVE tenant-only write policies on ~9 tables (`office_locations`, `attendance_location_exceptions`, `employee_shifts`, `shifts`, …) — do **before C4** | **ACCEPTED** 2026-09-23 — 16/32 → 32/32; see `reviews/package-review-C7.md` |
 | C8 | tbd | absent-marking never runs — nothing writes `shifts.last_sync_of_events` (found in C4); user decided 2026-09-23: app/kiosk next morning, devices after sync | briefed |
-| C9 | tbd | storage write fences — employees can upload into 9 buckets via the global owner-insert policy (found in C6) | briefed 2026-09-23 |
+| **C9** | `198000` | storage write fences: employees could upload into 9 buckets (incl. a selfie into a colleague's folder) via the global owner-insert policy | **ACCEPTED** 2026-09-23 — 8/18 → 18/18; all-bucket probe 9 → 0; see `reviews/package-review-C9.md` |
 
 ## Integrated ordering and hold points
 

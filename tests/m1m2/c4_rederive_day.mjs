@@ -184,6 +184,7 @@ await guardedMutation("C4 disposable fixture", async () => {
       runSql(`UPDATE public.tenant_modules SET enabled=${attendanceWasEnabled === true || attendanceWasEnabled === "true"} WHERE tenant_id='${A}' AND module_key='attendance'`);
     }
     teardownFixture();
+    for (const c of Object.values(clients)) await warm(c);
     await rlsInvariant(clients, { employee: 1, hr: 2, crossTenant: 0 });
   }
   const failed = results.filter((l) => l.startsWith("FAIL"));
